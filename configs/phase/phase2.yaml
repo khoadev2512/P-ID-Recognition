@@ -1,0 +1,11 @@
+# @package _global_
+# Phase 2 (report §4.2.4): programmatic synthesis emitting coarse+fine labels,
+# with degradation augmentation to bridge the synthetic-to-real gap; targeted
+# synthesis of under-represented fine classes.
+phase_name: phase2
+data:
+  label_level: coarse
+detector:
+  label_level: coarse
+fgc:
+  balanced_sampler: true   # rare-class emphasis becomes central here

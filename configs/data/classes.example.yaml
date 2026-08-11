@@ -1,0 +1,44 @@
+# Example canonical/classes.yaml — the fine<->coarse map (report's most important file).
+# Copy to data/canonical/classes.yaml and extend with the full ISO 10628-2 vocabulary.
+# The valve family below is the report's canonical visually-similar group (Fig. 9).
+
+coarse:                    # Stage 1 (detector) label set — super-categories
+  - valve
+  - instrument_bubble
+  - fitting
+  - pump
+  - vessel
+
+fine:                      # fine class -> parent coarse class
+  # valve family (Fig. 9) — identical bow-tie silhouette, FGC required
+  gate_valve: valve
+  globe_valve: valve
+  ball_valve: valve
+  check_valve: valve
+  butterfly_valve: valve
+  needle_valve: valve
+  plug_valve: valve
+  pinch_valve: valve
+  diaphragm_valve: valve
+  # instrument-bubble family — identical circle, tag inside
+  pressure_transmitter: instrument_bubble
+  temperature_transmitter: instrument_bubble
+  flow_indicator: instrument_bubble
+  level_controller: instrument_bubble
+  # fitting family — short line-aligned silhouettes
+  reducer: fitting
+  flange: fitting
+  orifice_plate: fitting
+  # non-FGC coarse classes (fine == coarse)
+  centrifugal_pump: pump
+  vertical_vessel: vessel
+
+fgc_groups:                # coarse categories routed to the FGC stage
+  - valve
+  - instrument_bubble
+  - fitting
+
+rare_fine:                 # long-tail, safety-critical (bottom decile by frequency)
+  - needle_valve
+  - pinch_valve
+  - diaphragm_valve

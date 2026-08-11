@@ -1,0 +1,21 @@
+# Root Hydra config. Compose a run by overriding groups, e.g.
+#   pid-detect-train phase=phase1 detector=yolov8
+#   pid-eval eval=default eval.mode=det_plus_fgc
+defaults:
+  - data: default
+  - detector: yolov8
+  - fgc: resnet34
+  - eval: default
+  - phase: phase1
+  - _self_
+
+# data/ root, resolved by common.paths.DataPaths. Override if data lives elsewhere.
+data_root: ${oc.env:PID_DATA_ROOT,data}
+
+seed: 42
+device: cuda        # cuda | cpu
+run_dir: runs       # where checkpoints / metrics land
+
+hydra:
+  run:
+    dir: ${run_dir}/${now:%Y-%m-%d_%H-%M-%S}

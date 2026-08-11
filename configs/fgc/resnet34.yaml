@@ -1,0 +1,23 @@
+# Stage 2 fine-grained classifier (report §4.2.3, roadmap Phase 3).
+backbone: resnet34    # via timm
+pretrained: true
+imgsz: 128            # crop input size
+epochs: 60
+batch: 128
+
+# Which coarse groups get a fine head. Should match classes.yaml:fgc_groups.
+groups: [valve, instrument_bubble, fitting]
+
+# Long-tail handling (§2.2.3).
+loss: focal           # ce | focal (ref [1])
+balanced_sampler: true
+metric_learning: false  # true -> ArcFace head (ref [43]); an ablation option
+
+aug:
+  hflip: 0.0          # asymmetric symbols — flips can change class; off by default
+  rotate: 0
+  jitter: 0.2
+
+# Routing: only fine-classify confident detections in an fgc group (see fgc.infer).
+route:
+  min_score: 0.25

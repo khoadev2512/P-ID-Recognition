@@ -1,0 +1,9 @@
+# @package _global_
+# Phase 1 (report §4.2.4 / roadmap Weeks 1-3): public synthetic data only,
+# reproducible training baseline. Detector trained on coarse labels.
+phase_name: phase1
+data:
+  # canonical is built from Dataset-P&ID [4] (+ community [8]) synthetic sources.
+  label_level: coarse
+detector:
+  label_level: coarse

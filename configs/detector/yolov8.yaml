@@ -1,0 +1,23 @@
+# Stage 1 detector (Ultralytics YOLOv8, ref [27]).
+weights: yolov8m.pt   # COCO-pretrained init; fine-tuned on P&ID (roadmap Weeks 4-6)
+label_level: coarse   # coarse (default) | fine  — the §4.2.2 ablation axis
+imgsz: 1024
+epochs: 100
+batch: 16
+
+# Data augmentation (roadmap Weeks 4-6: mosaic, geometric, photometric).
+aug:
+  mosaic: 1.0
+  degrees: 0.0        # P&ID symbols are orientation-meaningful; keep rotation off
+  hsv_v: 0.4
+  scale: 0.5
+
+# SAHI sliced inference (ref [40]) — patch size/overlap tuned in Weeks 7-8.
+sahi:
+  slice_size: 1024
+  overlap_ratio: 0.2
+
+# Weighted Boxes Fusion merge across overlapping patches (ref [41]).
+wbf:
+  iou_thr: 0.55
+  skip_box_thr: 0.001

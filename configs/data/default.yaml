@@ -1,0 +1,18 @@
+# Data-prep config group. Consumed by src/pid/data/* and common.paths.
+coco_json: ${data_root}/canonical/annotations.coco.json
+classes_yaml: ${data_root}/canonical/classes.yaml
+manifest_csv: ${data_root}/canonical/manifest.csv
+
+# Label set to emit in coco_to_yolo: coarse (detector) or fine (ablation).
+label_level: coarse   # coarse | fine
+
+# Overlap-preserving tiling (SAHI strategy). Tune on val in Phase 2 (Weeks 7-8).
+tiling:
+  size: 1024
+  overlap: 0.2        # fraction; ensures boundary symbols fully visible in >=1 patch
+  min_visibility: 0.6 # keep a clipped box only if this fraction of area survives
+
+# Train/val/test partition written into manifest.csv.
+split:
+  ratios: { train: 0.8, val: 0.2 }   # real-world source is forced to test (held-out)
+  seed: ${seed}
