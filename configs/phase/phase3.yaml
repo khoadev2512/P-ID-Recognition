@@ -1,7 +1,0 @@
-# @package _global_
-# Phase 3 (report §4.2.4 / roadmap Week 13): real-world held-out set for measuring
-# the synthetic-to-real generalization gap. NOT used for training — eval only.
-phase_name: phase3
-eval:
-  split: test              # real-world source, held out
-  mode: det_plus_fgc

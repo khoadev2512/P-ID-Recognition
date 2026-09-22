@@ -15,6 +15,7 @@ dependencies = [
     "ultralytics>=8.3",      # YOLOv8 detector (ref [27])
     "sahi>=0.11.20",         # overlap-preserving sliced inference (ref [40])
     "ensemble-boxes>=1.0.9", # Weighted Boxes Fusion for patch merge (ref [41])
+    "albumentations>=1.4",   # tiling crop + bbox reprojection/visibility-filter
     "timm>=1.0",             # ResNet-34 backbone for the FGC stage (ref [15])
     "hydra-core>=1.3",       # config-driven experiments / ablations
     "omegaconf>=2.3",
@@ -36,24 +37,26 @@ dev = [
 ]
 
 [project.scripts]
-# Thin CLI wrappers over scripts/*. Each dispatches to a stage in src/pid/.
-pid-prep-classes = "pid.data.build_classes:main"
-pid-prep-yolo = "pid.data.coco_to_yolo:main"
-pid-prep-tiles = "pid.data.tiling:main"
-pid-prep-crops = "pid.data.extract_crops:main"
-pid-prep-manifest = "pid.data.build_manifest:main"
-pid-detect-train = "pid.detect.train:main"
-pid-detect-infer = "pid.detect.infer:main"
-pid-fgc-train = "pid.fgc.train:main"
-pid-fgc-infer = "pid.fgc.infer:main"
-pid-eval = "pid.eval.run:main"
+# Thin CLI wrappers over scripts/*. Each dispatches to one pipeline.* stage class
+# (src/pipeline/, src/utils/ -- flat layout mirroring PID_Symbol_Detection's
+# src/pipeline, src/utils, no top-level package wrapper).
+pid-prep-classes = "pipeline.build_classes:main"
+pid-prep-yolo = "pipeline.coco_to_yolo:main"
+pid-prep-tiles = "pipeline.tiling:main"
+pid-prep-crops = "pipeline.extract_crops:main"
+pid-prep-manifest = "pipeline.build_manifest:main"
+pid-detect-train = "pipeline.detect_train:main"
+pid-detect-infer = "pipeline.detect_infer:main"
+pid-fgc-train = "pipeline.fgc_train:main"
+pid-fgc-infer = "pipeline.fgc_infer:main"
+pid-eval = "pipeline.evaluation:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/pid"]
+packages = ["src/pipeline", "src/utils"]
 
 [tool.ruff]
 line-length = 100

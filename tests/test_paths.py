@@ -1,11 +1,8 @@
-"""Smoke tests — verify the package imports and the path layout resolves.
-
-Real logic is TODO; these just guard the scaffold structure.
-"""
+"""Smoke tests — verify the top-level packages import and the path layout resolves."""
 
 from pathlib import Path
 
-from pid.common.paths import DataPaths
+from utils.paths import DataPaths
 
 
 def test_datapaths_layout():
@@ -17,5 +14,8 @@ def test_datapaths_layout():
 
 
 def test_package_imports():
-    import pid  # noqa: F401
-    from pid.common import classmap, types  # noqa: F401
+    # Flat src/ layout, no top-level wrapper package (see README): just two sibling
+    # packages, pipeline/ (stages) and utils/ (shared helpers).
+    import pipeline  # noqa: F401
+    import utils  # noqa: F401
+    from utils import classmap, types  # noqa: F401

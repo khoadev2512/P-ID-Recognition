@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip3 install *)",
+      "Bash(echo \"---exit:$?\")",
+      "Bash(python3 -m uv --version)",
+      "Bash(/Users/khoa/Library/Python/3.9/bin/uv --version)",
+      "Bash(PYTHONPATH=src python3 -c ' *)",
+      "Read(//Users/khoa/HCMUT Master/thesis/**)",
+      "Bash(python3 -c \"import sahi\")",
+      "Bash(pip3 show *)",
+      "Bash(python3 -m venv --help)",
+      "Read(//usr/local/**)",
+      "Bash(pip3 --version)",
+      "Bash(find / -maxdepth 6 -iname \"python3.13\" -type f)",
+      "Bash(find / -maxdepth 6 -iname \"python3.1*\")",
+      "Bash(command -v pyenv)",
+      "Read(//Users/khoa/.pyenv/**)",
+      "Read(//Applications/**)",
+      "Bash(find / -maxdepth 3 -iname \"*conda*\")"
+    ]
+  }
+}

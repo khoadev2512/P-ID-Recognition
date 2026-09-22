@@ -1,20 +1,124 @@
-# Root Hydra config. Compose a run by overriding groups, e.g.
-#   pid-detect-train phase=phase1 detector=yolov8
-#   pid-eval eval=default eval.mode=det_plus_fgc
-defaults:
-  - data: default
-  - detector: yolov8
-  - fgc: resnet34
-  - eval: default
-  - phase: phase1
-  - _self_
+# P&ID Symbol Detection pipeline — single flat config (mirrors PID_Symbol_Detection's
+# configs/config.yaml: one file, no Hydra config-group composition). Still parsed by
+# Hydra/OmegaConf, so every field remains CLI-overridable, e.g.:
+#   pid-detect-train detector.imgsz=1280 fgc.loss=ce
+#   pid-eval eval.mode=det_plus_fgc eval.split=test   # real-world held-out eval
+#
+# The report's phase1/phase2/phase3 dataset strategy (§4.2.4) used to be three
+# separate config-group overlay files; they added little beyond what's already
+# default here (phase1/phase2 mostly restated the coarse-label-level / balanced-
+# sampler defaults below), so there's no separate `phase=` switch anymore — see
+# the README's "Phases" section for the couple of fields worth overriding by hand
+# per phase (mainly eval.split for phase 3's synthetic-vs-real comparison).
 
-# data/ root, resolved by common.paths.DataPaths. Override if data lives elsewhere.
-data_root: ${oc.env:PID_DATA_ROOT,data}
-
+data_root: ${oc.env:PID_DATA_ROOT,data}   # data/ root, resolved by utils.paths.DataPaths
 seed: 42
 device: cuda        # cuda | cpu
 run_dir: runs       # where checkpoints / metrics land
+
+# Data-prep config. Consumed by src/pipeline/{build_classes,build_manifest,coco_to_yolo,tiling,extract_crops}.py.
+data:
+  coco_json: ${data_root}/canonical/annotations.coco.json
+  classes_yaml: ${data_root}/canonical/classes.yaml
+  manifest_csv: ${data_root}/canonical/manifest.csv
+
+  # Label set to emit in coco_to_yolo: coarse (detector) or fine (ablation).
+  label_level: coarse   # coarse | fine
+
+  # Overlap-preserving tiling (SAHI strategy). Tune on val in Phase 2 (Weeks 7-8).
+  tiling:
+    size: 1024
+    overlap: 0.2        # fraction; ensures boundary symbols fully visible in >=1 patch
+    min_visibility: 0.6 # keep a clipped box only if this fraction of area survives
+
+  # Train/val/test partition written into manifest.csv.
+  split:
+    ratios: { train: 0.8, val: 0.2 }   # real-world source is forced to test (held-out)
+    seed: ${seed}
+
+# Stage 1 detector (Ultralytics YOLOv8, ref [27]).
+detector:
+  # COCO-pretrained init (ultralytics.YOLO downloads by name if the path doesn't
+  # exist locally); a nano checkpoint is vendored under models/ so this works
+  # offline out of the box. Override to a bigger COCO-pretrained name (e.g.
+  # yolov8m.pt) once you have network/GPU budget for a stronger init.
+  weights: models/base_yolo_models/yolov8n.pt
+  label_level: coarse   # coarse (default) | fine  — the §4.2.2 ablation axis
+  imgsz: 1024
+  epochs: 100
+  batch: 16
+
+  # Data augmentation (roadmap Weeks 4-6: mosaic, geometric, photometric).
+  aug:
+    mosaic: 1.0
+    degrees: 0.0        # P&ID symbols are orientation-meaningful; keep rotation off
+    hsv_v: 0.4
+    scale: 0.5
+
+  # SAHI sliced inference (ref [40]) — patch size/overlap tuned in Weeks 7-8.
+  sahi:
+    slice_size: 1024
+    overlap_ratio: 0.2
+
+  # Weighted Boxes Fusion merge across overlapping patches (ref [41]).
+  wbf:
+    iou_thr: 0.55
+    skip_box_thr: 0.001
+
+  # Trained checkpoint to load for inference/eval. train.py writes into its own Hydra
+  # run dir, so infer/eval need an explicit pointer, e.g.:
+  #   pid-detect-infer detector.ckpt=runs/2026-.../weights/best.pt
+  ckpt: null
+
+# Stage 2 fine-grained classifier (report §4.2.3, roadmap Phase 3).
+fgc:
+  backbone: resnet34    # via timm
+  pretrained: true
+  imgsz: 128            # crop input size
+  epochs: 60
+  batch: 128
+
+  # Which coarse groups get a fine head. Should match classes.yaml:fgc_groups.
+  groups: [valve, instrument_bubble, fitting]
+
+  # Long-tail handling (§2.2.3).
+  loss: focal           # ce | focal (ref [1])
+  balanced_sampler: true
+  metric_learning: false  # true -> ArcFace head (ref [43]); an ablation option
+
+  aug:
+    hflip: 0.0          # asymmetric symbols — flips can change class; off by default
+    rotate: 0
+    jitter: 0.2
+
+  # Routing: only fine-classify confident detections in an fgc group (see pipeline.fgc_infer).
+  route:
+    min_score: 0.25
+
+  # Directory of trained per-group checkpoints (one <group>.pt per fgc_group) to load
+  # for inference/eval. train.py writes into its own Hydra run dir, so infer/eval need
+  # an explicit pointer, e.g.:
+  #   pid-fgc-infer fgc.ckpt_dir=runs/2026-.../fgc_checkpoints
+  ckpt_dir: null
+
+# Evaluation protocol (report §2.2.3, Table 1).
+eval:
+  # mode selects the ablation configuration compared in §4.2.1.
+  mode: det_plus_fgc    # det_only | det_plus_fgc
+
+  # Detection metrics.
+  iou_thrs: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]  # mAP@50:95
+  score_thr: 0.25
+  per_class_ap: true
+
+  # FGC metrics.
+  topk: [1, 3]
+  # rare_fine set comes from classes.yaml:rare_fine (bottom-decile by train frequency).
+
+  # Which split to evaluate. Phase 3 (real-world held-out) overrides this to `test`
+  # explicitly to make that comparison unambiguous in a command/log, even though
+  # `test` is already the default split here.
+  split: test           # train | val | test
 
 hydra:
   run:
