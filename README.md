@@ -15,11 +15,30 @@ have only been exercised via unit tests and synthetic fixtures, not a live run.
 | Stage | Module | Role |
 |-------|--------|------|
 | 1. Detect | `pipeline.detect_train` / `pipeline.detect_infer` | YOLOv8 localization + **coarse** (super-category) classification, over SAHI tiles, merged with WBF |
-| 2. FGC | `pipeline.fgc_train` / `pipeline.fgc_infer` | ResNet-34 **within-group fine** classification on symbol crops (valve / instrument-bubble / fitting families) |
+| 2. FGC | `pipeline.fgc_train` / `pipeline.fgc_infer` | ResNet-34 **within-group fine** classification on symbol crops (valve / instrument-bubble / fitting families). Optional **ArcFace** head (`fgc.metric_learning=true`) adds an out-of-vocabulary **"Other"** reject gate |
 | Eval | `pipeline.evaluation` | detection metrics **+** FGC-specific metrics (within-group confusion, per-family accuracy, top-k, rare-class macro-F1) |
 
 The two stages are deliberately **separable** so the FGC contribution is measurable as
 an ablation (report §4.2.1).
+
+### FGC head: linear vs ArcFace (out-of-vocabulary "Other")
+
+`fgc.metric_learning=false` (default) trains a plain linear head with CE/focal loss.
+`fgc.metric_learning=true` swaps in an **ArcFace** angular-margin head (§4.2.3): the
+backbone learns an L2-normalized embedding with one class-center per fine class, giving
+(a) tighter within-group separation on the long-tail families, and (b) an
+**out-of-vocabulary reject gate** — at inference a crop whose cosine to its nearest
+class center is below `fgc.route.other_min_cosine` is labelled **"Other"**
+(`fine_id = -2`) instead of being forced into the nearest known class. The fine-label
+decision itself stays softmax-argmax (unchanged output format); the class centers are
+used only as the reject signal. `other_min_cosine` must be **calibrated on a val split**
+(the eval report's `fgc.groups[*].other_gate.false_reject_rate` is the signal for this);
+the default `0.35` is a placeholder, not a tuned value.
+
+```bash
+uv run pid-fgc-train  fgc.metric_learning=true
+uv run pid-fgc-infer  fgc.metric_learning=true fgc.ckpt_dir=runs/<train-run>/fgc_checkpoints
+```
 
 ## Data layout (three tiers)
 

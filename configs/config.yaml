@@ -48,6 +48,17 @@ detector:
   epochs: 100
   batch: 16
 
+  # Interrupted-training resume (e.g. Colab's ~6h sessions). When resume=true the
+  # detector continues an EARLIER run instead of starting fresh: it reloads that run's
+  # last.pt AND its optimizer state / LR schedule / epoch counter (true Ultralytics
+  # resume, not just re-initializing weights), and trains up to the original `epochs`.
+  # resume_dir must point at that earlier run's directory (the one holding train/weights/
+  # last.pt), e.g.:
+  #   pid-detect-train detector.resume=true detector.resume_dir=runs/2026-.../
+  # epochs/imgsz/aug are read back from the original run and ignored here on resume.
+  resume: false
+  resume_dir: null
+
   # Data augmentation (roadmap Weeks 4-6: mosaic, geometric, photometric).
   aug:
     mosaic: 1.0
@@ -84,7 +95,15 @@ fgc:
   # Long-tail handling (§2.2.3).
   loss: focal           # ce | focal (ref [1])
   balanced_sampler: true
-  metric_learning: false  # true -> ArcFace head (ref [43]); an ablation option
+
+  # true -> swap the linear head for an ArcFace angular-margin head (ref [43], §4.2.3):
+  # sharper within-group separation AND an out-of-vocabulary "Other" reject gate at
+  # inference (see fgc.route.other_min_cosine below). false -> plain CE/focal baseline.
+  metric_learning: false
+  arcface:
+    m: 0.5              # additive angular margin (radians); larger -> tighter class cones
+    s: 30.0             # logit scale (feature norm); standard ArcFace default
+    embed_dim: 512      # class-center space width; backbone features projected to this
 
   aug:
     hflip: 0.0          # asymmetric symbols — flips can change class; off by default
@@ -94,12 +113,25 @@ fgc:
   # Routing: only fine-classify confident detections in an fgc group (see pipeline.fgc_infer).
   route:
     min_score: 0.25
+    # "Other" reject gate — only active when metric_learning=true. A routed crop whose
+    # cosine similarity to its nearest class center is below this is labelled Other
+    # (out-of-vocabulary), fine_id=-2. Calibrate on a val split once real data exists;
+    # 0.35 is a placeholder, NOT a tuned value.
+    other_min_cosine: 0.35
 
   # Directory of trained per-group checkpoints (one <group>.pt per fgc_group) to load
   # for inference/eval. train.py writes into its own Hydra run dir, so infer/eval need
   # an explicit pointer, e.g.:
   #   pid-fgc-infer fgc.ckpt_dir=runs/2026-.../fgc_checkpoints
   ckpt_dir: null
+
+  # Interrupted-training resume (Colab-style split sessions). Directory of per-group
+  # checkpoints (<group>.pt) from an EARLIER pid-fgc-train run — the same layout as a
+  # fgc_checkpoints dir. For each group with a checkpoint present, training reloads its
+  # model + optimizer state + epoch counter and continues from the next epoch up to
+  # fgc.epochs; groups without a checkpoint start fresh. Example:
+  #   pid-fgc-train fgc.resume_from=runs/2026-.../fgc_checkpoints
+  resume_from: null
 
 # Evaluation protocol (report §2.2.3, Table 1).
 eval:

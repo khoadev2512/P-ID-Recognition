@@ -1,0 +1,52 @@
+coarse:
+- blind_disc
+- flange
+- flow_direction
+- heat_exchanger
+- instrument
+- reducer
+- safety_valve
+- valve
+fine:
+  Symbol_1: valve
+  Symbol_2: valve
+  Symbol_3: valve
+  Symbol_4: valve
+  Symbol_5: valve
+  Symbol_6: valve
+  Symbol_7: valve
+  Symbol_8: valve
+  Symbol_9: valve
+  Symbol_10: valve
+  Symbol_11: valve
+  Symbol_12: valve
+  Symbol_13: valve
+  Symbol_14: valve
+  Symbol_15: valve
+  Symbol_16: valve
+  Symbol_17: blind_disc
+  Symbol_18: blind_disc
+  Symbol_19: blind_disc
+  Symbol_20: reducer
+  Symbol_21: flange
+  Symbol_22: heat_exchanger
+  Symbol_23: heat_exchanger
+  Symbol_24: flow_direction
+  Symbol_25: safety_valve
+  Symbol_26: instrument
+  Symbol_27: instrument
+  Symbol_28: instrument
+  Symbol_29: instrument
+  Symbol_30: instrument
+  Symbol_31: instrument
+  Symbol_32: instrument
+fgc_groups:
+- blind_disc
+- heat_exchanger
+- instrument
+- valve
+rare_fine:
+- Symbol_1
+- Symbol_24
+- Symbol_26
+- Symbol_30

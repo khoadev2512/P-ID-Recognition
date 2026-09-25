@@ -32,6 +32,21 @@ from pathlib import Path
 
 import yaml
 
+# Sentinel fine-class ids written to derived/detections_fgc/*.txt for detections that
+# have no genuine fine label. Both are negative so they never collide with a real
+# fine_id (>= 0) and downstream eval/metrics can filter them out.
+#
+#   UNREFINED_FINE_ID  a detection in an fgc_group whose detector score fell below
+#                      fgc.route.min_score, so it was never routed to a classifier and
+#                      has no fine label to report (the label stayed the bare coarse
+#                      name, which isn't a valid fine class). See pipeline.fgc_infer.
+#   OTHER_FINE_ID      an ArcFace-routed crop whose embedding is farther (in cosine)
+#                      from every class center than fgc.route.other_min_cosine — an
+#                      out-of-vocabulary symbol ("Other"), not a known one. Only emitted
+#                      when cfg.fgc.metric_learning is on (needs class centers).
+UNREFINED_FINE_ID = -1
+OTHER_FINE_ID = -2
+
 
 @dataclass
 class ClassMap:

@@ -10,6 +10,11 @@ cfg.fgc.route.min_score; otherwise the detection is left un-refined:
       score) the label stays the coarse class name (which is not, in general, itself a
       valid fine class -- downstream consumers should treat this as "un-refined").
 
+When cfg.fgc.metric_learning is on (ArcFace), a routed crop additionally passes an
+"Other" reject gate: if its cosine similarity to the nearest class center is below
+cfg.fgc.route.other_min_cosine, it's an out-of-vocabulary symbol and is written with
+fine_id = OTHER_FINE_ID (-2) rather than forced into the nearest known class.
+
 This is where the two stages compose into the final list[Detection].
 """
 
@@ -27,12 +32,16 @@ from PIL import Image
 
 from pipeline.base import BasePipeline
 from utils import bbox_utils
+from utils.classmap import OTHER_FINE_ID, UNREFINED_FINE_ID
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_eval_transform
-from utils.model import build_model
+from utils.model import ArcFaceModel, build_model
 from utils.types import BBox
 
 logger = logging.getLogger(__name__)
+
+# Sentinel label for an out-of-vocabulary crop rejected by the ArcFace "Other" gate.
+OTHER_CLASS_NAME = "__other__"
 
 
 def _read_stage1_detections(path: Path) -> list[tuple[int, BBox, float]]:
@@ -71,6 +80,10 @@ class FGCInferPipeline(BasePipeline):
         self._fine_classes_per_group: dict[str, list[str]] = {
             group: self.classmap.fine_of_group(group) for group in self.classmap.fgc_groups
         }
+        # Only ArcFace checkpoints carry class centers -> only they support the "Other"
+        # reject gate. cfg.fgc.metric_learning selects that path in build_model.
+        self._reject_enabled = bool(cfg.fgc.get("metric_learning", False))
+        self._other_min_cosine = float(cfg.fgc.route.get("other_min_cosine", 0.0))
 
     @property
     def models(self) -> dict[str, torch.nn.Module]:
@@ -167,27 +180,31 @@ class FGCInferPipeline(BasePipeline):
         out_path.write_text("\n".join(out_lines) + "\n")
 
     def _safe_fine_id(self, fine_class: str, coarse_class: str) -> int:
-        """classmap.fine_id(), guarded.
+        """Map a resolved label name to the fine id written to the output file.
 
-        Every _resolve_fine_label branch is designed to return a genuine fine-class
-        name -- EXCEPT one theoretical edge case the routing design can't fully close:
-        a coarse class in fgc_groups (so it has >1 fine children, no 1:1 fallback)
-        whose detection score falls below fgc.route.min_score, so it's never routed to
-        a classifier and the label falls back to the (invalid-as-fine-class) coarse
-        name. Rather than let that crash the whole inference run on one low-confidence
-        box, emit a sentinel id (-1) and log it -- callers/eval can filter these out
-        (they'd typically also be below eval.score_thr and dropped anyway).
+        Most _resolve_fine_label branches return a genuine fine-class name. Two don't,
+        and each maps to a distinct negative sentinel so eval/metrics can tell them apart:
+
+          - OTHER_CLASS_NAME -> OTHER_FINE_ID (-2): the ArcFace reject gate flagged this
+            routed crop as out-of-vocabulary (embedding far from every class center).
+          - a bare coarse name -> UNREFINED_FINE_ID (-1): a coarse class in fgc_groups
+            (>1 fine children, no 1:1 fallback) whose detector score fell below
+            fgc.route.min_score, so it was never routed and has no valid fine label.
+            (These are typically also below eval.score_thr and dropped anyway.)
         """
+        if fine_class == OTHER_CLASS_NAME:
+            return OTHER_FINE_ID
         try:
             return self.classmap.fine_id(fine_class)
         except KeyError:
             logger.warning(
                 "coarse_class=%r has >1 fine children and was not routed to FGC "
                 "(score below fgc.route.min_score) -- no valid fine_class to report; "
-                "writing fine_class_id=-1.",
+                "writing fine_class_id=%d.",
                 coarse_class,
+                UNREFINED_FINE_ID,
             )
-            return -1
+            return UNREFINED_FINE_ID
 
     def _resolve_fine_label(
         self,
@@ -224,12 +241,29 @@ class FGCInferPipeline(BasePipeline):
         return coarse_class, score
 
     def _classify_crop(self, group: str, crop: np.ndarray) -> tuple[str, float]:
+        """Softmax-argmax fine label, plus (ArcFace only) an "Other" reject gate.
+
+        The label decision is always softmax-argmax over the head logits (unchanged
+        output contract). For an ArcFace model we additionally check the crop's cosine
+        similarity to its nearest class center: below fgc.route.other_min_cosine the
+        crop is out-of-vocabulary, so it's returned as OTHER_CLASS_NAME (which
+        _safe_fine_id maps to OTHER_FINE_ID). The reported fine_score stays the softmax
+        confidence so the output column keeps a consistent meaning.
+        """
         tensor = self.transform(Image.fromarray(crop)).unsqueeze(0).to(self.device)
         model = self.models[group]
         fine_classes = self._fine_classes_per_group[group]
         with torch.no_grad():
-            probs = torch.softmax(model(tensor), dim=1)
+            logits = model(tensor)
+            probs = torch.softmax(logits, dim=1)
             conf, idx = probs.max(dim=1)
+
+            if self._reject_enabled and isinstance(model, ArcFaceModel):
+                cosine = model.head.cosine(model.embed(tensor))
+                max_cosine = float(cosine.max(dim=1).values.item())
+                if max_cosine < self._other_min_cosine:
+                    return OTHER_CLASS_NAME, float(conf.item())
+
         return fine_classes[int(idx.item())], float(conf.item())
 
 

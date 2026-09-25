@@ -216,4 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-data/*
+
+# --- Project-specific: data + heavy/generated artifacts stay out of git ---
+# Data is versioned via Google Drive (see notebooks/train_stage1_colab.ipynb),
+# never git — 1.3GB of images would break the repo.
+data/
+# Training outputs (checkpoints/metrics land here per run).
+runs/
+# Reference PDFs (ISO/ISA standards, thesis report) and scratch screenshots — keep
+# local; standards may be license-restricted, and they aren't needed on Colab.
+*.pdf
+*.png
+# macOS cruft.
+.DS_Store
+# ...but DO commit the vendored COCO-pretrained YOLO init (6.5MB) so Colab/offline
+# training works out of the box without a download.
+!models/base_yolo_models/yolov8n.pt
