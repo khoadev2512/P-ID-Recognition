@@ -94,9 +94,19 @@ class DetectInferPipeline(BasePipeline):
             overlap_width_ratio=float(self.cfg.detector.sahi.overlap_ratio),
         )
 
-        boxes_list: list[list[list[float]]] = []
-        scores_list: list[list[float]] = []
-        labels_list: list[list[float]] = []
+        # Collect EVERY tile's detections into a SINGLE box list (one "model" for WBF).
+        #
+        # weighted_boxes_fusion divides each fused box's score by the number of model
+        # lists passed. All tiles come from the SAME detector, so they are one source —
+        # passing one list per tile (len ~= 54 for a 7168x4561 sheet) makes WBF divide
+        # every score by ~54, collapsing a genuine 0.9 detection to ~0.02 (a symbol
+        # appears in only 1-2 overlapping tiles, not all 54). That silently sinks every
+        # score below eval.score_thr / fgc.route.min_score downstream. Treating all tiles
+        # as one model keeps scores intact while WBF still merges the duplicate boxes that
+        # overlapping tiles produce at their seams.
+        all_boxes: list[list[float]] = []
+        all_scores: list[float] = []
+        all_labels: list[float] = []
 
         for sliced_image, starting_pixel in zip(
             slice_result.images, slice_result.starting_pixels, strict=True
@@ -105,9 +115,6 @@ class DetectInferPipeline(BasePipeline):
             # conf kept low here: WBF/skip_box_thr does the real filtering downstream.
             pred = model.predict(sliced_image, conf=0.001, verbose=False)[0]
 
-            boxes: list[list[float]] = []
-            scores: list[float] = []
-            labels: list[float] = []
             for xyxy, conf, cls in zip(
                 pred.boxes.xyxy.tolist(),
                 pred.boxes.conf.tolist(),
@@ -116,7 +123,7 @@ class DetectInferPipeline(BasePipeline):
             ):
                 x1, y1, x2, y2 = xyxy
                 # reproject slice-local pixel coords -> full-image normalized [0,1] xyxy
-                boxes.append(
+                all_boxes.append(
                     [
                         (x1 + sx) / image_w,
                         (y1 + sy) / image_h,
@@ -124,19 +131,15 @@ class DetectInferPipeline(BasePipeline):
                         (y2 + sy) / image_h,
                     ]
                 )
-                scores.append(float(conf))
-                labels.append(float(cls))
+                all_scores.append(float(conf))
+                all_labels.append(float(cls))
 
-            boxes_list.append(boxes)
-            scores_list.append(scores)
-            labels_list.append(labels)
-
-        # Gracefully handles the empty-detections case: weighted_boxes_fusion returns
-        # empty arrays (rather than raising) when every tile contributed zero boxes.
+        # One model list -> no score division. Empty-detections case: WBF returns empty
+        # arrays (rather than raising) when no tile contributed a box.
         merged_boxes, merged_scores, merged_labels = weighted_boxes_fusion(
-            boxes_list,
-            scores_list,
-            labels_list,
+            [all_boxes],
+            [all_scores],
+            [all_labels],
             iou_thr=float(self.cfg.detector.wbf.iou_thr),
             skip_box_thr=float(self.cfg.detector.wbf.skip_box_thr),
         )
