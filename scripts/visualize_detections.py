@@ -99,22 +99,78 @@ def _read_gt_coco(
     return rows
 
 
-def _draw_boxes(img, boxes, names, color=None, with_score=True) -> None:
-    """Draw boxes in-place. boxes: [(class_id, (x1,y1,x2,y2), [score])]."""
+def _draw_boxes(img, boxes, names, color=None, with_score=True, fill=False, with_text=True) -> None:
+    """Draw boxes in-place, colored per class (or a fixed `color` in compare mode).
+
+    boxes: [(class_id, (x1,y1,x2,y2), [score])].
+      fill=True       -> translucent highlight inside the box (alpha blend) + border.
+      with_text=False -> border only, rely on the legend for the color<->class mapping.
+    """
     # Line/font scale with image size so they're visible on a 7168px sheet.
     h = img.shape[0]
     thick = max(2, h // 1000)
     font_scale = max(0.5, h / 2500)
+
+    if fill:
+        # Build the translucent fill on a copy, then alpha-blend once (cheaper + avoids
+        # double-darkening where boxes overlap).
+        overlay = img.copy()
+        for item in boxes:
+            cid, (x1, y1, x2, y2) = item[0], item[1]
+            c = color if color is not None else _color_for(cid)
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), c, -1)  # -1 = filled
+        cv2.addWeighted(overlay, 0.3, img, 0.7, 0, dst=img)    # 30% highlight
+
     for item in boxes:
         cid, (x1, y1, x2, y2) = item[0], item[1]
         score = item[2] if len(item) > 2 and with_score else None
         c = color if color is not None else _color_for(cid)
-        cv2.rectangle(img, (x1, y1), (x2, y2), c, thick)
-        label = names[cid] if 0 <= cid < len(names) else str(cid)
-        if score is not None:
-            label = f"{label} {score:.2f}"
-        cv2.putText(img, label, (x1, max(0, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX,
-                    font_scale, c, thick)
+        cv2.rectangle(img, (x1, y1), (x2, y2), c, thick)       # border always
+        if with_text:
+            label = names[cid] if 0 <= cid < len(names) else str(cid)
+            if score is not None:
+                label = f"{label} {score:.2f}"
+            cv2.putText(img, label, (x1, max(0, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX,
+                        font_scale, c, thick)
+
+
+def _make_legend(names: list[str], height: int, compare: bool):
+    """A white panel listing each coarse class with its color swatch, to sit beside the
+    image. In compare mode the per-class colors aren't used (GT=green, pred=red), so the
+    legend explains that convention instead.
+    """
+    import numpy as np
+
+    width = 360
+    panel = np.full((height, width, 3), 255, dtype=np.uint8)
+    row_h = 46
+    pad = 18
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    cv2.putText(panel, "Legend", (pad, 36), font, 0.9, (0, 0, 0), 2)
+    y = 36 + row_h
+
+    if compare:
+        entries = [("Ground truth", _GT_COLOR), ("Prediction", _PRED_COLOR)]
+    else:
+        entries = [(name, _color_for(i)) for i, name in enumerate(names)]
+
+    for text, color in entries:
+        if y > height - pad:
+            break
+        cv2.rectangle(panel, (pad, y - 22), (pad + 34, y + 4), color, -1)
+        cv2.rectangle(panel, (pad, y - 22), (pad + 34, y + 4), (0, 0, 0), 1)
+        cv2.putText(panel, text, (pad + 48, y), font, 0.7, (0, 0, 0), 2)
+        y += row_h
+    return panel
+
+
+def _attach_legend(img, names: list[str], compare: bool):
+    """Concatenate a legend panel to the right of the (already annotated) image."""
+    import cv2 as _cv2
+
+    legend = _make_legend(names, img.shape[0], compare)
+    return _cv2.hconcat([img, legend])
 
 
 def _save_full(img, out_path: Path, max_width: int) -> None:
@@ -157,6 +213,14 @@ def main() -> None:
     p.add_argument("--n-crops", type=int, default=4, help="zoomed crops per image")
     p.add_argument("--crop-size", type=int, default=1024, help="crop window size (px)")
     p.add_argument("--no-crops", action="store_true", help="skip zoomed crops (full image only)")
+    p.add_argument("--score-thr", type=float, default=0.25,
+                   help="only draw predictions with score >= this (default 0.25, matches "
+                        "eval.score_thr — filters out the low-score noise boxes)")
+    p.add_argument("--fill", action="store_true",
+                   help="translucent color highlight inside boxes (default: border only)")
+    p.add_argument("--no-text", action="store_true",
+                   help="draw borders only, no class/score text (rely on the legend)")
+    p.add_argument("--no-legend", action="store_true", help="skip the color legend panel")
     p.add_argument("--out", default=None, help="output dir (default: derived/viz/<split>)")
     args = p.parse_args()
 
@@ -201,25 +265,38 @@ def main() -> None:
             continue
         h, w = img.shape[:2]
 
+        compare = args.mode == "compare"
+        with_text = not args.no_text
         # choose which boxes to draw
         all_boxes_for_crops = []
+        n_pred = 0
         if args.mode in ("gt", "compare"):
             gt = _read_gt_coco(coco, image_id, cat_id_to_coarse_id)
-            _draw_boxes(img, gt, names, color=_GT_COLOR if args.mode == "compare" else None,
-                        with_score=False)
+            _draw_boxes(img, gt, names, color=_GT_COLOR if compare else None,
+                        with_score=False, fill=args.fill, with_text=with_text)
             all_boxes_for_crops = gt
         if args.mode in ("pred", "compare"):
             preds = _read_pred_txt(det_dir / f"{image_id}.txt", w, h)
-            _draw_boxes(img, preds, names, color=_PRED_COLOR if args.mode == "compare" else None)
+            # Filter out the low-score noise boxes (w/h ~1px scribbles the detector is
+            # unsure about) so the figure shows only trustworthy detections.
+            preds = [b for b in preds if b[2] >= args.score_thr]
+            n_pred = len(preds)
+            _draw_boxes(img, preds, names, color=_PRED_COLOR if compare else None,
+                        fill=args.fill, with_text=with_text)
             all_boxes_for_crops = preds or all_boxes_for_crops
 
-        _save_full(img.copy(), out_dir / f"{image_id}_full.jpg", args.max_width)
+        full = img if args.no_legend else _attach_legend(img, names, compare)
+        _save_full(full.copy(), out_dir / f"{image_id}_full.jpg", args.max_width)
         n = 0
         if not args.no_crops:
             n = _save_crops(img, all_boxes_for_crops, out_dir / "crops", image_id,
                             args.n_crops, args.crop_size)
         rendered += 1
-        print(f"{image_id}: {len(all_boxes_for_crops)} boxes -> full + {n} crops")
+        if args.mode == "gt":
+            kept = f"{len(all_boxes_for_crops)} GT"
+        else:
+            kept = f"{n_pred} preds>={args.score_thr}"
+        print(f"{image_id}: {kept} -> full + {n} crops")
 
     legend = " (compare: GT=green, pred=red)" if args.mode == "compare" else ""
     print(f"\nRendered {rendered} images -> {out_dir}{legend}")

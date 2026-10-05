@@ -111,3 +111,53 @@ def test_save_crops_writes_windows(tmp_path):
     assert n == 2
     assert (tmp_path / "img0_crop0.jpg").exists()
     assert (tmp_path / "img0_crop1.jpg").exists()
+
+
+# ------------------------------------------------------------------ #
+# legend + fill + no-text
+# ------------------------------------------------------------------ #
+
+
+def test_make_legend_has_one_row_per_class():
+    names = ["valve", "instrument", "flange"]
+    panel = viz._make_legend(names, height=600, compare=False)
+    # panel is a fixed-width white sidebar of the requested height
+    assert panel.shape[0] == 600
+    assert panel.shape[1] == 360
+    # not blank: swatches + text drawn
+    assert (panel != 255).any()
+
+
+def test_make_legend_compare_mode_shows_gt_pred():
+    # compare mode doesn't use per-class colors, so it documents GT/pred instead —
+    # should contain the GT green and pred red swatches somewhere.
+    panel = viz._make_legend(["valve"], height=400, compare=True)
+    flat = panel.reshape(-1, 3)
+    colors = {tuple(int(v) for v in c) for c in flat}
+    assert viz._GT_COLOR in colors
+    assert viz._PRED_COLOR in colors
+
+
+def test_attach_legend_widens_the_image():
+    img = np.zeros((500, 800, 3), dtype=np.uint8)
+    out = viz._attach_legend(img, ["valve", "instrument"], compare=False)
+    assert out.shape[0] == 500          # same height
+    assert out.shape[1] == 800 + 360    # image + legend panel
+
+
+def test_draw_boxes_fill_blends_inside():
+    # fill=True should tint the box interior (not just the border), so more pixels change
+    img_border = np.full((100, 100, 3), 255, dtype=np.uint8)
+    img_fill = img_border.copy()
+    boxes = [(0, (20, 20, 80, 80), 0.9)]
+    viz._draw_boxes(img_border, boxes, ["valve"], fill=False)
+    viz._draw_boxes(img_fill, boxes, ["valve"], fill=True)
+    changed_border = (img_border != 255).any(axis=2).sum()
+    changed_fill = (img_fill != 255).any(axis=2).sum()
+    assert changed_fill > changed_border  # fill touches the interior too
+
+
+def test_draw_boxes_no_text_still_draws_border():
+    img = np.full((100, 100, 3), 255, dtype=np.uint8)
+    viz._draw_boxes(img, [(0, (20, 20, 80, 80), 0.9)], ["valve"], with_text=False)
+    assert (img != 255).any()  # border drawn even without text
