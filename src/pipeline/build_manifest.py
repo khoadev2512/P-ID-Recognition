@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import random
+from pathlib import Path
 
 import hydra
 import pandas as pd
@@ -25,6 +26,12 @@ from omegaconf import DictConfig
 
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
+
+# Optional split map next to the COCO file: {image_id: "train"|"val"|"test"}. When a
+# dataset already ships an authoritative train/val split (e.g. DigitizePID's 4:1), the
+# YOLO->COCO converter writes this so we preserve that partition verbatim instead of
+# re-shuffling synthetic images. Absent -> fall back to the ratio-based split below.
+SPLIT_MAP_FILENAME = "digitizepid_splits.json"
 
 
 class BuildManifestPipeline(BasePipeline):
@@ -119,20 +126,31 @@ class BuildManifestPipeline(BasePipeline):
         return prefix
 
     def _assign_splits(self, rows: list[dict]) -> dict[str, str]:
-        """real -> always test (held-out); synthetic -> train/val per cfg.data.split."""
+        """real -> always test (held-out); synthetic -> train/val.
+
+        If a split map (SPLIT_MAP_FILENAME) sits next to the COCO file, synthetic images
+        take their split verbatim from it (preserving a dataset's own train/val
+        partition); otherwise they're partitioned by cfg.data.split ratios. `real` is
+        always test regardless — the held-out guarantee (report §4.2.4) is never
+        overridden by a split map.
+        """
+        preset = self._load_split_map()
+
         splits: dict[str, str] = {}
-        synthetic_ids: list[str] = []
+        unmapped_synthetic: list[str] = []
         for row in rows:
             if row["source"] == "real":
                 splits[row["id"]] = "test"
+            elif preset is not None and row["id"] in preset:
+                splits[row["id"]] = preset[row["id"]]
             else:
-                synthetic_ids.append(row["id"])
+                unmapped_synthetic.append(row["id"])
 
         ratios = self.cfg.data.split.ratios
         train_ratio = float(ratios["train"])
         seed = int(self.cfg.data.split.seed)
 
-        ordered = sorted(synthetic_ids)
+        ordered = sorted(unmapped_synthetic)
         rng = random.Random(seed)
         rng.shuffle(ordered)
 
@@ -143,6 +161,15 @@ class BuildManifestPipeline(BasePipeline):
             splits[image_id] = "val"
 
         return splits
+
+    def _load_split_map(self) -> dict[str, str] | None:
+        """Read the optional {image_id: split} map beside the COCO file, if present."""
+        split_path = Path(self.paths.canonical) / SPLIT_MAP_FILENAME
+        if not split_path.exists():
+            return None
+        with split_path.open("r") as f:
+            raw = json.load(f)
+        return {str(k): str(v) for k, v in raw.items()}
 
 
 @hydra.main(version_base=None, config_path=CONFIG_DIR, config_name="config")

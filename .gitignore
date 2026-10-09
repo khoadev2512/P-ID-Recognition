@@ -195,9 +195,9 @@ cython_debug/
 .abstra/
 
 # Visual Studio Code
-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
+#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore
 #   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#   and can be added to the global gitignore or merged into this file. However, if you prefer, 
+#   and can be added to the global gitignore or merged into this file. However, if you prefer,
 #   you could uncomment the following to ignore the entire vscode folder
 # .vscode/
 # Temporary file for partial code execution
@@ -216,4 +216,33 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project-specific: data + heavy/generated artifacts stay out of git ---
+# Data is versioned via Google Drive (see notebooks/train_stage1_colab.ipynb),
+# never git — 1.3GB of images would break the repo. Ignore data CONTENTS (data/*),
+# not the dir itself, so the un-ignore rules below can re-include small subtrees (a
+# bare `data/` would ignore the whole tree and Git wouldn't descend to see them).
 data/*
+data/*/*
+# Training outputs (checkpoints/metrics land here per run).
+runs/
+# Reference PDFs (ISO/ISA standards, thesis report) and scratch screenshots — keep
+# local; standards may be license-restricted, and they aren't needed on Colab.
+*.pdf
+*.png
+# macOS cruft.
+.DS_Store
+# ...but DO commit the symbol-mapping thumbnails — they're the reference for naming the
+# fine classes and must travel with the repo (small, ~a few hundred KB total).
+# ...and the vendored COCO-pretrained YOLO init (6.5MB) so Colab/offline training works
+# out of the box without a download.
+!models/base_yolo_models/yolov8n.pt
+# ...and the cleaned ISO symbol LIBRARY (small ~300KB) — the render templates + vocab
+# must travel with the repo (renderer on Colab needs them). The HD page renders used
+# only for hand-cropping stay local (big). Un-ignore each parent dir before the files.
+!data/raw/
+!data/raw/iso_symbols/
+!data/raw/iso_symbols/vocab.csv
+!data/raw/iso_symbols_clean/
+!data/raw/iso_symbols_clean/*.png
+!data/raw/iso_symbols_clean/symbols.csv

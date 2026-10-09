@@ -264,13 +264,27 @@ class EvaluationPipeline(BasePipeline):
             model.load_state_dict(checkpoint["model"])
             model.eval()
 
+            # ArcFace model(batch_x) with no target returns scaled cosine — order-
+            # preserving, so argmax/top-k below are unaffected. For an ArcFace model we
+            # also collect the max cosine-to-center per crop to measure how often the
+            # "Other" gate would (wrongly) reject a KNOWN crop — the false-reject rate,
+            # the signal for calibrating fgc.route.other_min_cosine.
+            from utils.model import ArcFaceModel
+
+            is_arcface = isinstance(model, ArcFaceModel)
             all_logits: list[np.ndarray] = []
             all_labels: list[int] = []
+            all_max_cosine: list[float] = []
             with torch.no_grad():
                 for batch_x, batch_y in loader:
                     logits = model(batch_x)
                     all_logits.append(logits.cpu().numpy())
                     all_labels.extend(int(v) for v in batch_y.tolist())
+                    if is_arcface:
+                        cosine = model.head.cosine(model.embed(batch_x))
+                        all_max_cosine.extend(
+                            float(v) for v in cosine.max(dim=1).values.cpu().tolist()
+                        )
 
             if not all_labels:
                 logger.warning("No crops found for group=%s split=%s; skipping.", group, split)
@@ -292,6 +306,17 @@ class EvaluationPipeline(BasePipeline):
                 "n_samples": len(y_true_local),
                 **topk,
             }
+            if is_arcface:
+                # All these crops ARE in-vocabulary (GT), so any that fall below the
+                # threshold are false rejects. Report the rate so the threshold can be
+                # tuned to trade false-reject against unknown-symbol recall.
+                thr = float(self.cfg.fgc.route.get("other_min_cosine", 0.0))
+                cos_arr = np.asarray(all_max_cosine)
+                group_metrics[group]["other_gate"] = {
+                    "threshold": thr,
+                    "false_reject_rate": float((cos_arr < thr).mean()),
+                    "mean_max_cosine": float(cos_arr.mean()),
+                }
 
             self._plot_confusion(group, confusion, fine_names)
 

@@ -1,0 +1,305 @@
+reg_number,desc,page,file
+301,"Tank, vessel",1,301.png
+X8100,Column (general),1,X8100.png
+X8101,Tray column (general),1,X8101.png
+X8014,Column with fluidized bed,1,X8014.png
+X8015,Column with fixed bed,1,X8015.png
+X8013,Column staggered baffle trays,1,X8013.png
+X8012,Column with valve trays,1,X8012.png
+X8016,Column with two fixed bed sections and,1,X8016.png
+X8011,Column with bubble cap trays,1,X8011.png
+2061,"container, tank, cistern",1,2061.png
+X8201,Vessel with two different diameters,1,X8201.png
+2063,Spherical vessel,1,2063.png
+2064,Bunker with conical bottom,1,2064.png
+X8008,Vessel with dished roof and conical,1,X8008.png
+X2063,Tank with conical roof and flat bottom,1,X2063.png
+X8200,Tank with dished roof,1,X8200.png
+2062,"Tank, vessel with dished ends",1,2062.png
+X2062,Closed tank with conical bottom,1,X2062.png
+C0001,"Container for solids, liquids, gases",1,C0001.png
+2067,"Barrel, drum",1,2067.png
+C0002,Gas cylinder,1,C0002.png
+2068,Bag,1,2068.png
+X8002,Vessel with dished ends and support legs,1,X8002.png
+X8003,Vessel with dished ends and support,1,X8003.png
+X8004,Vessel with dished ends and support,1,X8004.png
+X8005,Vessel with dished ends and support,1,X8005.png
+X2069,Vessel with dished ends and,1,X2069.png
+X2070,Vessel with dished ends and electrical,1,X2070.png
+X8098,Vessel with dished ends and thermal,1,X8098.png
+X8007,Vessel with dished bottom and surface,1,X8007.png
+X8010,Spherical vessel on legs,1,X8010.png
+X8000,Vessel with full-tube heating/cooling coil,1,X8000.png
+301,"Tank, vessel",1,301.png
+X8001,Vessel with semi-tube heating/cooling coil,1,X8001.png
+X8006,Jacketed vessel with dished ends and,1,X8006.png
+X8202,Vessel with pit,1,X8202.png
+2065,Open bulk storage,1,2065.png
+X8009,Vessel with conical roof and bottom,1,X8009.png
+301,"Tank, vessel",2,301.png
+2521,Cooling tower (general),2,2521.png
+X8109,"Cooling tower, dry with natural draught",2,X8109.png
+X8110,"Cooling tower, dry with forced draught",2,X8110.png
+X8111,"Cooling tower, dry with induced draught",2,X8111.png
+X8112,"Cooling tower, wet with natural draught",2,X8112.png
+X8113,"Cooling tower, wet with forced draught",2,X8113.png
+X8114,"Cooling tower, wet with induced draught",2,X8114.png
+X8115,"Cooling tower, wet-dry with natural draught",2,X8115.png
+X2504,Spray cooler,2,X2504.png
+2532,Boiler with dome,2,2532.png
+X8103,Steam generator with hot liquid as generating,2,X8103.png
+2533,Furnace,2,2533.png
+X8107,"Firing system, burner (general)",2,X8107.png
+X8108,Vessel with dome,2,X8108.png
+X8106,Combustion chamber,2,X8106.png
+2041,"Stack, chimney",2,2041.png
+2591,Gas flare,2,2591.png
+X8079,"Heat exchanger (general), condenser",2,X8079.png
+X8017,Heat exchanger (M-shape),2,X8017.png
+2511,Heat exchanger with straight tubes,2,2511.png
+2512,Heat exchanger of floating head type,2,2512.png
+2513,Heat exchanger with U-shaped tubes,2,2513.png
+2516,Heat exchanger of plate type,2,2516.png
+2514,Heat exchanger with coil shaped tubes,2,2514.png
+2515,Heat exchanger of double-pipe type,2,2515.png
+X8018,Heat exchanger with finned tube,2,X8018.png
+X2505,Heat exchanger with finned tube and fan,2,X2505.png
+2517,Heat exchanger of spiral type,2,2517.png
+X8131,"Evaporator, re-boiler",2,X8131.png
+X8132,Electric heater,2,X8132.png
+X8133,Thin-film evaporator,2,X8133.png
+X8136,"Tube bundle, heat exchanger with U-shaped",2,X8136.png
+X8137,"Tube bundle, heat exchanger of floating head",2,X8137.png
+301,"Tank, vessel",3,301.png
+X2614,Centrifuge with perforated shell,3,X2614.png
+X2619,High speed centrifuge,3,X2619.png
+X8035,Centrifuge with solid shell,3,X8035.png
+X8037,"Centrifuge, screw-type, with perforated shell",3,X8037.png
+X8082,"Decanter, centrifuge, screw-type with solid",3,X8082.png
+X8038,"Centrifuge, pusher type",3,X8038.png
+X8039,"Centrifuge, skimmer type",3,X8039.png
+X8036,"Centrifuge, separator, disc type",3,X8036.png
+X8081,"Separator, sifter (general)",3,X8081.png
+X2616,Impact separator,3,X2616.png
+X8031,"Gravity separator, settling chamber",3,X8031.png
+X2621,Spray scrubber,3,X2621.png
+X8125,"Separator, precipitator electrostatic type",3,X8125.png
+X8033,"Precipitator wet, electrostatic type",3,X8033.png
+X8126,Electromagnetic separator,3,X8126.png
+X8127,Permanent magnet separator,3,X8127.png
+X2618,"Separator, cyclone type",3,X2618.png
+X8034,"Separator, scrubber venturi type",3,X8034.png
+X8128,Solidifier for waste water treatment plant,3,X8128.png
+X8129,Solidifier closed type,3,X8129.png
+X8124,"Separator, scrubber wet type",3,X8124.png
+X8123,"Screening device, sieve, strainer (general)",3,X8123.png
+X8027,"Screening device, fine rake type",3,X8027.png
+X8028,Screening device with coarse and fine,3,X8028.png
+X8026,"Screening device, coarse rake type",3,X8026.png
+X2605,"Screening device, sieve, strainer, vibrating",3,X2605.png
+X8029,"Screening device, rotating drum type",3,X8029.png
+X8030,"Screening device, basket reeltype",3,X8030.png
+8019,Suction filter,3,8019.png
+X8116,Liquid filter (general),3,X8116.png
+X8117,"Liquid filter, bag, candle or cartridge type",3,X8117.png
+X8118,Liquid bed filter fixed type,3,X8118.png
+8019,Suction filter,3,8019.png
+X8120,"Liquid rotary filter, drum or disc type with",3,X8120.png
+X8121,"Liquid filter, belt or roll type",3,X8121.png
+X2611,"Filter press, press filter",3,X2611.png
+X8020,"Liquid bed filter, ion exchanger type",3,X8020.png
+X8021,"Liquid bed filter, biological type",3,X8021.png
+X8122,Gas filter (general),3,X8122.png
+X8022,"Gas filter, bag, candle or cartridge type",3,X8022.png
+X8023,Gas bed filter fixed type,3,X8023.png
+X8024,"Gas filter, high efficiency particulate air filter",3,X8024.png
+X8025,"Gas filter, belt or roll type",3,X8025.png
+X8119,"Liquid rotary filter, drum or disc type",3,X8119.png
+301,"Tank, vessel",4,301.png
+X8164,"Blower, fan (general)",4,X8164.png
+2302,"Compressor, vacuum pump (general)",4,2302.png
+X8179,"Compressor, centrifugal type",4,X8179.png
+X8163,"Compressor, ejector type, vacuum pump jet",4,X8163.png
+X8097,"Compressor, vacuum pump, reciprocating",4,X8097.png
+X8099,"Compressor, vacuum pump diaphragm type",4,X8099.png
+X8102,"Compressor, vacuum pump, turbo type",4,X8102.png
+X8104,"Compressor, vacuum pump, roller vane type",4,X8104.png
+X8105,"Compressor rotary type, vacuum pump,",4,X8105.png
+X8161,"Compressor, screw type",4,X8161.png
+X8162,"Compressor, vacuum pump liquid ring type",4,X8162.png
+2301,"Pump, liquid type (general)",4,2301.png
+2322,"Pump, centrifugal type",4,2322.png
+8091,"Pump, gear type",4,8091.png
+8092,"Pump, screw type",4,8092.png
+8093,"Pump, progressive cavity type",4,8093.png
+X8094,"Pump, reciprocating piston type",4,X8094.png
+X8095,"Pump, diaphragm type",4,X8095.png
+X8096,"Jet pump, liquid type ejector pump",4,X8096.png
+XC0053,"Shaping machine, horizontal type (general)",4,XC0053.png
+X8058,"Extruder, screw type",4,X8058.png
+X8059,"Extruder, piston type",4,X8059.png
+C0052,"Shaping machine, vertical type (general)",4,C0052.png
+X8055,"Press, roller type",4,X8055.png
+X8056,"Press, piston type",4,X8056.png
+X8057,Pelletizing disc,4,X8057.png
+X2672,In-line rotary mixer,4,X2672.png
+X2673,In-line static mixer,4,X2673.png
+X8184,Mixing path,4,X8184.png
+X8134,Kneader,4,X8134.png
+X8046,"Crusher, impact type",4,X8046.png
+X8047,"Crusher, jaw type",4,X8047.png
+X8048,"Crusher, roller type",4,X8048.png
+X8049,"Crusher, cone type",4,X8049.png
+X8086,"Mill, pulverizer (general)",4,X8086.png
+X8053,"Mill, horizontal rotation roller type",4,X8053.png
+X8051,"Mill, impact type",4,X8051.png
+X8050,"Mill, pulverizer hammer type",4,X8050.png
+X8054,"Mill, vibration type",4,X8054.png
+X8084,Crushing/grinding machine (general),4,X8084.png
+X8085,Crusher (general),4,X8085.png
+X8045,"Crusher, hammer type",4,X8045.png
+C0046,Drier (general),4,C0046.png
+X8083,"Drying oven, drying chamber, shelf drier",4,X8083.png
+X8040,"Turbo drier, disc drier, moving shelf drier",4,X8040.png
+X8041,Fluidized bed drier,4,X8041.png
+X8042,Spray drier,4,X8042.png
+X8043,"Belt drier, roller-conveyer type driver",4,X8043.png
+X8044,"Rotary drum drier, rotary drier, tumbling",4,X8044.png
+C0016,Heat consumer,4,C0016.png
+301,"Tank, vessel",5,301.png
+X8167,Gear,5,X8167.png
+C0079,Generator (general),5,C0079.png
+X8154,"Generator, AC",5,X8154.png
+X8155,"Generator, DC",5,X8155.png
+C0082,Electric motor (general),5,C0082.png
+X8157,"Electric motor, AC",5,X8157.png
+X8158,"Electric motor, DC",5,X8158.png
+2571,Turbine (general),5,2571.png
+C2056,Proportional feeder (general),5,C2056.png
+X8067,"Proportional feeder, rotary valve type",5,X8067.png
+C0074,"Feeder, rotary table type",5,C0074.png
+C0035,"Proportional feeder, metering type",5,C0035.png
+2037,Spray nozzle,5,2037.png
+X8060,Conveyer (general),5,X8060.png
+3821,"Conveyer, belt type",5,3821.png
+X8061,"Conveyer, belt type in box",5,X8061.png
+X8062,"Conveyer, chain type, closed",5,X8062.png
+8063,"Conveyer, screw type, closed",5,8063.png
+X8064,"Conveyor, vibrating type, closed",5,X8064.png
+X8065,"Elevator, bucket type",5,X8065.png
+X8066,"Elevator, bucket type Z-form",5,X8066.png
+X8175,"Conveyer, belt type, reversible",5,X8175.png
+3841,Crane,5,3841.png
+3842,Lift,5,3842.png
+C0094,"Forklift, manually operated",5,C0094.png
+3862,Forklift truck,5,3862.png
+3871,Industrial truck (general),5,3871.png
+3874,"Tank car, tank wagon",5,3874.png
+3872,Box truck,5,3872.png
+3881,Ship,5,3881.png
+X8142,Roller Conveyer,5,X8142.png
+X8143,Loading arm,5,X8143.png
+X8145,Palletizer,5,X8145.png
+X8146,Bag filling machine,5,X8146.png
+X8144,Protective palette covering,5,X8144.png
+301,"Tank, vessel",6,301.png
+241,Flowmotion in direction of arrow,6,241.png
+3061,Slope,6,3061.png
+2038,Siphon,6,2038.png
+C0106,Tracer for heating or cooling,6,C0106.png
+X322,Pipeline with thermal insulation,6,X322.png
+405,Pipeline,6,405.png
+X8174,"Piping, heated or cooled and insulated",6,X8174.png
+X409,Jacked pipeline,6,X409.png
+X8156,Secondary pipeline,6,X8156.png
+C0096,Orifice plate,6,C0096.png
+2034,Viewing glass,6,2034.png
+X8089,Viewing glass with lighting,6,X8089.png
+2033,Silencer,6,2033.png
+C0093,"Mixing nozzle, injector",6,C0093.png
+533,Compensator,6,533.png
+X8090,Strainer,6,X8090.png
+X8150,Cone type strainer,6,X8150.png
+2045,Interchangeable disc (open disc in function),6,2045.png
+2044,Interchangeable disc (blind disc),6,2044.png
+C0097,Blind disc,6,C0097.png
+C0098,Open disc,6,C0098.png
+2039,Vent (outlet to atmosphere for steam/gas),6,2039.png
+2040,Funnel,6,2040.png
+2181,Self-operating   release   valve   (steam   trap),6,2181.png
+511,Flanged connection,6,511.png
+516,Reducer,6,516.png
+X411,Hose,6,X411.png
+C0100,Coupling,6,C0100.png
+513,Clamped flange coupling,6,513.png
+C0108,Breakthrough,6,C0108.png
+517,Flanged dummy cover,6,517.png
+X8152,Single flange,6,X8152.png
+X8153,Dummy cover,6,X8153.png
+X2124,"Safety valve, spring loaded, globe type",6,X2124.png
+X2125,"Safety valve, spring loaded, globe angle type",6,X2125.png
+X8080,Rupture disc,6,X8080.png
+2036,Flame arrestor,6,2036.png
+C0087,"Flame arrestor, explosion-proof",6,C0087.png
+C0088,Flame arrestor detonation-proof,6,C0088.png
+C0091,Flame arrestor fire-resistant,6,C0091.png
+C0089,Fire-resistant and detonation-proof flame,6,C0089.png
+X8088,Breather valve,6,X8088.png
+X2113,Check valve globe type,6,X2113.png
+X8078,Swing check valve (Form 1),6,X8078.png
+X8165,Swing check valve (Form 2),6,X8165.png
+X8077,Check valve (general),6,X8077.png
+2101,Valve (general),6,2101.png
+2102,"Valve, angle type (general)",6,2102.png
+2103,"Valve, three way type (general)",6,2103.png
+X8068,"Valve, globe type",6,X8068.png
+X8069,"Valve, angle globe type",6,X8069.png
+X8070,"Valve, three way globe type",6,X8070.png
+X8071,"Valve, ball type",6,X8071.png
+X8073,"Valve, three way ball type",6,X8073.png
+X8074,"Valve, gate type",6,X8074.png
+X8075,"Valve, butterfly type (Form 1)",6,X8075.png
+X8075,"Valve, butterfly type (Form 2)",6,X8075.png
+X8076,"Valve, needle type",6,X8076.png
+X8087,"Valve, control type, continuously operated",6,X8087.png
+X8072,"Valve, angle ball type",6,X8072.png
+301,"Tank, vessel",7,301.png
+C2030,Electrostatic type,7,C2030.png
+C2031,Electromagnetic type,7,C2031.png
+C2033,Disc type,7,C2033.png
+C0240,Crushing,7,C0240.png
+C024,"Gear type, gearwheels type",7,C024.png
+C2034,Hammer type,7,C2034.png
+C2035,Impact type,7,C2035.png
+C2036,Jaw type,7,C2036.png
+321,"Liquid type, wet type",7,321.png
+C2037,Roller type,7,C2037.png
+C2028,"Gravity type, settling type",7,C2028.png
+C2038,Cone   type,7,C2038.png
+X8176,Jet type,7,X8176.png
+3831,Vibration type,7,3831.png
+C2019,"Agitator, flat blade paddle type",7,C2019.png
+C2020,"Agitator, gat paddle type",7,C2020.png
+C2021,"Agitator, cross-beam type",7,C2021.png
+2672,"Agitator (general), stirrer (general)",7,2672.png
+C2022,"Agitator, anchor type",7,C2022.png
+C2023,"Agitator, helical type",7,C2023.png
+C2024,"Agitator, impeller type",7,C2024.png
+C2025,"Agitator, propeller type",7,C2025.png
+C2026,"Agitator, disc type",7,C2026.png
+C2027,"Agitator, turbine type",7,C2027.png
+C2044,Tray (general),7,C2044.png
+X8166,Tray with baffle,7,X8166.png
+C2010,"Tray, bubble-cap type",7,C2010.png
+C2011,"Tray, valve type",7,C2011.png
+2602,"Sieve tray, screen or sieve element",7,2602.png
+C2047,Filter insert (general),7,C2047.png
+2604,Fluidized bed,7,2604.png
+X8141,packing,7,X8141.png
+C2005,Support leg,7,C2005.png
+C2006,Support bracket,7,C2006.png
+C2007,Support skirt,7,C2007.png
+C2008,Support ring,7,C2008.png
+X8159,Manhole,7,X8159.png
+X8160,"Socket, connection nozzle",7,X8160.png
