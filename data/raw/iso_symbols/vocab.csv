@@ -1,0 +1,40 @@
+reg_number,coarse,fine_name,pid_group,fgc_group,desc
+2301,pump,pump_general,equipment,no,Pump liquid type (general)
+2322,pump,pump_centrifugal,equipment,no,Pump centrifugal type
+8091,pump,pump_gear,equipment,no,Pump gear type
+X8095,pump,pump_diaphragm,equipment,no,Pump diaphragm type
+2302,compressor,compressor_vacuum,equipment,no,Compressor vacuum pump (general)
+X8179,compressor,compressor_centrifugal,equipment,no,Compressor centrifugal type
+X8079,heat_exchanger,hx_general,equipment,yes,Heat exchanger (general) condenser
+2511,heat_exchanger,hx_straight_tube,equipment,yes,Heat exchanger with straight tubes
+2514,heat_exchanger,hx_coil,equipment,yes,Heat exchanger with coil shaped tubes
+301,vessel,tank,equipment,no,Tank vessel
+2063,vessel,vessel_spherical,equipment,no,Spherical vessel
+X8100,vessel,column,equipment,no,Column (general)
+C0082,motor,motor_electric,equipment,no,Electric motor (general)
+2101,valve,valve_general,valve,yes,Valve (general)
+X8074,valve,valve_gate,valve,yes,Valve gate type
+X8068,valve,valve_globe,valve,yes,Valve globe type
+X8071,valve,valve_ball,valve,yes,Valve ball type
+X8075,valve,valve_butterfly,valve,yes,Valve butterfly type
+X8076,valve,valve_needle,valve,yes,Valve needle type
+2102,valve,valve_angle,valve,yes,Valve angle type (general)
+2103,valve,valve_three_way,valve,yes,Valve three way type (general)
+X8077,check_valve,check_valve_general,valve,yes,Check valve (general)
+X2113,check_valve,check_valve_globe,valve,yes,Check valve globe type
+X8078,check_valve,check_valve_swing,valve,yes,Swing check valve
+X2124,safety_valve,safety_valve_spring,valve,no,Safety valve spring loaded globe type
+X8088,safety_valve,breather_valve,valve,no,Breather valve
+2672,agitator,agitator_general,equipment,yes,Agitator stirrer (general)
+C2024,agitator,agitator_impeller,equipment,yes,Agitator impeller type
+C2027,agitator,agitator_turbine,equipment,yes,Agitator turbine type
+405,piping,pipeline,piping,no,Pipeline
+241,piping,flow_direction,piping,no,Flowmotion in direction of arrow
+516,piping,reducer,piping,no,Reducer
+511,piping,flanged_connection,piping,no,Flanged connection
+X411,piping,hose,piping,no,Hose
+C0097,blind_disc,blind_disc,fitting,yes,Blind disc
+C0098,blind_disc,open_disc,fitting,yes,Open disc
+2044,blind_disc,interchangeable_disc,fitting,yes,Interchangeable disc (blind disc)
+2034,fitting,viewing_glass,fitting,no,Viewing glass
+2033,fitting,silencer,fitting,no,Silencer

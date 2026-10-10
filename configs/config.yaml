@@ -89,8 +89,11 @@ fgc:
   epochs: 60
   batch: 128
 
-  # Which coarse groups get a fine head. Should match classes.yaml:fgc_groups.
-  groups: [valve, instrument_bubble, fitting]
+  # Which coarse groups get a fine head. The authoritative list is classes.yaml:fgc_groups
+  # (coarse classes with >1 fine child) — every stage reads classmap.fgc_groups, NOT this
+  # field, which is just a human-readable expectation. For the DigitizePID 8-coarse map
+  # these are the four multi-fine groups.
+  groups: [valve, blind_disc, heat_exchanger, instrument]
 
   # Long-tail handling (§2.2.3).
   loss: focal           # ce | focal (ref [1])
@@ -99,7 +102,9 @@ fgc:
   # true -> swap the linear head for an ArcFace angular-margin head (ref [43], §4.2.3):
   # sharper within-group separation AND an out-of-vocabulary "Other" reject gate at
   # inference (see fgc.route.other_min_cosine below). false -> plain CE/focal baseline.
-  metric_learning: false
+  # Default on (the thesis's Stage-2 contribution); override fgc.metric_learning=false
+  # on the CLI for the CE/focal-vs-ArcFace ablation.
+  metric_learning: true
   arcface:
     m: 0.5              # additive angular margin (radians); larger -> tighter class cones
     s: 30.0             # logit scale (feature norm); standard ArcFace default

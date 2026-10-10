@@ -1,0 +1,41 @@
+reg_number,desc,page,file
+X8100,Column (general),1,X8100.png
+2063,Spherical vessel,1,2063.png
+301,"Tank, vessel",1,301.png
+X8079,"Heat exchanger (general), condenser",2,X8079.png
+2511,Heat exchanger with straight tubes,2,2511.png
+2514,Heat exchanger with coil shaped tubes,2,2514.png
+2302,"Compressor, vacuum pump (general)",4,2302.png
+X8179,"Compressor, centrifugal type",4,X8179.png
+2301,"Pump, liquid type (general)",4,2301.png
+2322,"Pump, centrifugal type",4,2322.png
+8091,"Pump, gear type",4,8091.png
+X8095,"Pump, diaphragm type",4,X8095.png
+C0082,Electric motor (general),5,C0082.png
+241,Flowmotion in direction of arrow,6,241.png
+405,Pipeline,6,405.png
+2034,Viewing glass,6,2034.png
+2033,Silencer,6,2033.png
+2044,Interchangeable disc (blind disc),6,2044.png
+C0097,Blind disc,6,C0097.png
+C0098,Open disc,6,C0098.png
+511,Flanged connection,6,511.png
+516,Reducer,6,516.png
+X411,Hose,6,X411.png
+X2124,"Safety valve, spring loaded, globe type",6,X2124.png
+X8088,Breather valve,6,X8088.png
+X2113,Check valve globe type,6,X2113.png
+X8078,Swing check valve (Form 1),6,X8078.png
+X8077,Check valve (general),6,X8077.png
+2101,Valve (general),6,2101.png
+2102,"Valve, angle type (general)",6,2102.png
+2103,"Valve, three way type (general)",6,2103.png
+X8068,"Valve, globe type",6,X8068.png
+X8071,"Valve, ball type",6,X8071.png
+X8074,"Valve, gate type",6,X8074.png
+X8075,"Valve, butterfly type (Form 1)",6,X8075.png
+X8075,"Valve, butterfly type (Form 2)",6,X8075.png
+X8076,"Valve, needle type",6,X8076.png
+2672,"Agitator (general), stirrer (general)",7,2672.png
+C2024,"Agitator, impeller type",7,C2024.png
+C2027,"Agitator, turbine type",7,C2027.png

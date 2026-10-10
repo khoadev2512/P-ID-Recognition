@@ -218,8 +218,9 @@ def main() -> None:
                         "eval.score_thr — filters out the low-score noise boxes)")
     p.add_argument("--fill", action="store_true",
                    help="translucent color highlight inside boxes (default: border only)")
-    p.add_argument("--no-text", action="store_true",
-                   help="draw borders only, no class/score text (rely on the legend)")
+    p.add_argument("--show-text", action="store_true",
+                   help="write class/score next to each box (default: off — the legend "
+                        "already maps color->class, so per-box text just clutters the figure)")
     p.add_argument("--no-legend", action="store_true", help="skip the color legend panel")
     p.add_argument("--out", default=None, help="output dir (default: derived/viz/<split>)")
     args = p.parse_args()
@@ -266,7 +267,7 @@ def main() -> None:
         h, w = img.shape[:2]
 
         compare = args.mode == "compare"
-        with_text = not args.no_text
+        with_text = args.show_text  # default off: legend carries the color->class mapping
         # choose which boxes to draw
         all_boxes_for_crops = []
         n_pred = 0

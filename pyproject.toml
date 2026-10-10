@@ -28,6 +28,7 @@ dependencies = [
     "scikit-learn>=1.4",     # confusion matrices, macro-F1
     "matplotlib>=3.8",       # metric plots (confusion matrix, PR curves)
     "tqdm>=4.66",
+    "pymupdf>=1.24",         # extract ISO 10628-2 symbols from the standard's PDF (scripts/)
 ]
 
 [project.optional-dependencies]
