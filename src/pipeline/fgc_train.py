@@ -23,7 +23,7 @@ from torch.utils.data import DataLoader
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_balanced_sampler, build_dataset
-from utils.model import build_loss, build_model
+from utils.model import ArcFaceModel, build_loss, build_model
 
 logger = logging.getLogger(__name__)
 
@@ -92,17 +92,40 @@ class FGCTrainPipeline(BasePipeline):
         ckpt_path = ckpt_root / f"{group}.pt"
         epochs = int(cfg.fgc.epochs)
 
+        # Interrupted-training resume (Colab split sessions): reload this group's model +
+        # optimizer + epoch from an earlier run so training continues mid-schedule rather
+        # than restarting. Returns the epoch to start from (0 when not resuming) and the
+        # best val_acc reached so far (so a resumed run doesn't overwrite a better ckpt).
+        start_epoch, best_val_acc = self._maybe_resume(
+            group, model, optimizer, device, best_val_acc
+        )
+
         logger.info(
-            "[fgc/%s] %d fine classes, %d train crops, %d val crops",
+            "[fgc/%s] %d fine classes, %d train crops, %d val crops (start_epoch=%d)",
             group,
             len(fine_classes),
             len(train_ds),
             len(val_ds),
+            start_epoch,
         )
 
-        for epoch in range(epochs):
+        # ArcFace applies its angular margin only when the target labels are handed to
+        # the head's forward pass; the plain linear head ignores a second argument. Flag
+        # it once so the train loop knows to thread labels through.
+        is_arcface = isinstance(model, ArcFaceModel)
+
+        if start_epoch >= epochs:
+            logger.info(
+                "[fgc/%s] resumed at epoch %d >= fgc.epochs=%d; nothing left to train.",
+                group,
+                start_epoch,
+                epochs,
+            )
+            return
+
+        for epoch in range(start_epoch, epochs):
             train_loss, train_acc = self._train_one_epoch(
-                model, train_loader, criterion, optimizer, device
+                model, train_loader, criterion, optimizer, device, is_arcface
             )
             val_loss, val_acc = self._eval_one_epoch(model, val_loader, criterion, device)
             logger.info(
@@ -118,24 +141,68 @@ class FGCTrainPipeline(BasePipeline):
 
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                torch.save(
-                    {
-                        "model": model.state_dict(),
-                        "optimizer": optimizer.state_dict(),
-                        "epoch": epoch,
-                        "val_acc": val_acc,
-                        "fine_classes": fine_classes,
-                    },
-                    ckpt_path,
-                )
+                checkpoint = {
+                    "model": model.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                    "epoch": epoch,
+                    "val_acc": val_acc,
+                    "fine_classes": fine_classes,
+                }
+                # ArcFace: persist the L2-normalized class centers so fgc_infer can run
+                # the "Other" reject gate without re-deriving them (and so a checkpoint
+                # is self-describing about whether it supports the gate at all).
+                if isinstance(model, ArcFaceModel):
+                    checkpoint["class_centers"] = model.class_centers().cpu()
+                torch.save(checkpoint, ckpt_path)
                 logger.info("[fgc/%s] new best val_acc=%.4f -> saved %s", group, val_acc, ckpt_path)
 
         logger.info(
             "[fgc/%s] training finished, best val_acc=%.4f (%s)", group, best_val_acc, ckpt_path
         )
 
+    def _maybe_resume(
+        self, group: str, model, optimizer, device, best_val_acc: float
+    ) -> tuple[int, float]:
+        """Load an earlier <group>.pt from cfg.fgc.resume_from, if set and present.
+
+        Restores model + optimizer state so the LR/momentum picks up where it left off,
+        and returns (start_epoch, best_val_acc) so the loop continues from the next epoch
+        without overwriting a checkpoint that already scored higher. Groups without a
+        checkpoint in resume_from (or when resume_from is unset) start fresh -> (0, -1.0).
+        """
+        resume_from = self.cfg.fgc.get("resume_from", None)
+        if resume_from is None:
+            return 0, best_val_acc
+
+        ckpt_path = Path(str(resume_from)) / f"{group}.pt"
+        if not ckpt_path.exists():
+            logger.info(
+                "[fgc/%s] fgc.resume_from set but no %s; training this group from scratch.",
+                group,
+                ckpt_path,
+            )
+            return 0, best_val_acc
+
+        state = torch.load(ckpt_path, map_location=device)
+        model.load_state_dict(state["model"])
+        if "optimizer" in state:
+            optimizer.load_state_dict(state["optimizer"])
+        # Checkpoints store the 0-based epoch they were saved at; resume on the next one.
+        start_epoch = int(state.get("epoch", -1)) + 1
+        prev_best = float(state.get("val_acc", best_val_acc))
+        logger.info(
+            "[fgc/%s] resuming from %s (epoch=%d, val_acc=%.4f).",
+            group,
+            ckpt_path,
+            start_epoch,
+            prev_best,
+        )
+        return start_epoch, prev_best
+
     @staticmethod
-    def _train_one_epoch(model, loader, criterion, optimizer, device) -> tuple[float, float]:
+    def _train_one_epoch(
+        model, loader, criterion, optimizer, device, is_arcface: bool = False
+    ) -> tuple[float, float]:
         model.train()
         running_loss = 0.0
         correct = 0
@@ -144,7 +211,9 @@ class FGCTrainPipeline(BasePipeline):
             images, labels = images.to(device), labels.to(device)
 
             optimizer.zero_grad()
-            logits = model(images)
+            # ArcFace needs the labels in its forward pass to place the angular margin
+            # on the target class; the linear head takes images only.
+            logits = model(images, labels) if is_arcface else model(images)
             loss = criterion(logits, labels)
             loss.backward()
             optimizer.step()
