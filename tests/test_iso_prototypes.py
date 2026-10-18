@@ -354,6 +354,8 @@ def test_build_the_real_iso_prototype_directory(tmp_path):
     assert directory.meta["backbone"] == "resnet18"
     assert directory.meta["imgsz"] == 32
     assert len(directory.meta["encoder_train_classes"]) == 6
+    # _write_arcface_ckpt predates leave-classes-out (no excluded_classes key).
+    assert directory.meta["encoder_excluded_classes"] == []
     assert directory.meta["template_views"] == {"scales": [1.0], "orientations": [0]}
 
 

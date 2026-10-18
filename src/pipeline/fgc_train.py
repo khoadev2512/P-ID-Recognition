@@ -21,9 +21,9 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from pipeline.base import BasePipeline
-from utils.classmap import GLOBAL_GROUP
+from utils.classmap import GLOBAL_GROUP, training_fine_classes
 from utils.cli import CONFIG_DIR
-from utils.dataset import build_balanced_sampler, build_dataset
+from utils.dataset import build_balanced_sampler, build_dataset, excluded_classes
 from utils.model import ArcFaceModel, build_loss, build_model
 
 logger = logging.getLogger(__name__)
@@ -71,9 +71,17 @@ class FGCTrainPipeline(BasePipeline):
 
     def _train_group(self, group: str, device: torch.device, ckpt_root: Path) -> None:
         cfg = self.cfg
-        # fine_of_group resolves GLOBAL_GROUP to the whole fine vocabulary, so the rest
-        # of this method is identical for both paths.
-        fine_classes = self.classmap.fine_of_group(group)
+        # fine_of_group (inside training_fine_classes) resolves GLOBAL_GROUP to the whole
+        # fine vocabulary, so the rest of this method is identical for both paths. The
+        # held-out classes are dropped by the same function build_dataset uses, so the
+        # head's columns and the dataset's labels come from one list.
+        exclude = excluded_classes(cfg)
+        fine_classes = training_fine_classes(self.classmap, group, exclude)
+        held_out = [name for name in self.classmap.fine_of_group(group) if name in exclude]
+        if held_out:
+            logger.info(
+                "[fgc/%s] holding out %d classes from training: %s", group, len(held_out), held_out
+            )
         if not fine_classes:
             logger.warning("fgc_group=%s has no fine classes in classes.yaml; skipping.", group)
             return
@@ -116,7 +124,7 @@ class FGCTrainPipeline(BasePipeline):
         # than restarting. Returns the epoch to start from (0 when not resuming) and the
         # best val_acc reached so far (so a resumed run doesn't overwrite a better ckpt).
         start_epoch, best_val_acc = self._maybe_resume(
-            group, model, optimizer, device, best_val_acc
+            group, model, optimizer, device, best_val_acc, fine_classes
         )
 
         logger.info(
@@ -166,6 +174,10 @@ class FGCTrainPipeline(BasePipeline):
                     "epoch": epoch,
                     "val_acc": val_acc,
                     "fine_classes": fine_classes,
+                    # Leave-classes-out provenance: which of this group's classes the
+                    # encoder never saw. The unseen-class eval (protocol P1) checks its
+                    # test classes against fine_classes; this records the intent.
+                    "excluded_classes": held_out,
                 }
                 # ArcFace: persist the L2-normalized class centers so fgc_infer can run
                 # the "Other" reject gate without re-deriving them (and so a checkpoint
@@ -180,7 +192,13 @@ class FGCTrainPipeline(BasePipeline):
         )
 
     def _maybe_resume(
-        self, group: str, model, optimizer, device, best_val_acc: float
+        self,
+        group: str,
+        model,
+        optimizer,
+        device,
+        best_val_acc: float,
+        fine_classes: list[str] | None = None,
     ) -> tuple[int, float]:
         """Load an earlier <group>.pt from cfg.fgc.resume_from, if set and present.
 
@@ -203,6 +221,16 @@ class FGCTrainPipeline(BasePipeline):
             return 0, best_val_acc
 
         state = torch.load(ckpt_path, map_location=device)
+        # A resumed session that re-types fgc.exclude_classes differently can hold out
+        # the same NUMBER of classes as the checkpoint but different ones: the head shape
+        # matches, load_state_dict succeeds, and every column means another class.
+        saved = state.get("fine_classes")
+        if fine_classes is not None and saved is not None and list(saved) != fine_classes:
+            raise ValueError(
+                f"[fgc/{group}] {ckpt_path} was trained on {list(saved)} but this run "
+                f"would train {fine_classes}. Resume with the same fgc.exclude_classes "
+                f"as the original run (it held out {state.get('excluded_classes', [])})."
+            )
         model.load_state_dict(state["model"])
         if "optimizer" in state:
             optimizer.load_state_dict(state["optimizer"])

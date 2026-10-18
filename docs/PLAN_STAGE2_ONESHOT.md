@@ -16,10 +16,10 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 | Stage 1 (YOLOv8, 8 coarse) | ✅ mAP50=0.995 — **không train lại**. `best.pt` nằm trên Drive, không có ở local |
 | GĐ2 one-shot core (`utils/oneshot.py`, `pid-iso-prototypes`) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
 | `fgc.global_encoder` (prep-crops / train / infer guard) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
-| Per-subpart augment (OSSR-PID #2) | ✅ code `SubpartWarp` + test xanh (B1, 2026-10-18), ⏳ chờ user duyệt ảnh |
+| Per-subpart augment (OSSR-PID #2) | ✅ `SubpartWarp` (B1, 2026-10-18), user đã duyệt ảnh |
 | GĐ4 one-shot inference | ❌ chưa code |
 | GĐ5 eval one-shot + "Other" | ❌ chưa code |
-| Leave-classes-out (`fgc.exclude_classes`) — protocol chính để chứng minh one-shot | ❌ chưa code |
+| Leave-classes-out (`fgc.exclude_classes`) — protocol chính để chứng minh one-shot | ✅ code + test (B1b, 2026-10-18); danh sách H vẫn chờ B5 |
 | `data/canonical/` local | ✅ DigitizePID gốc: 500 ảnh (400 train / 100 val), 59,498 ann, 32 class `Symbol_N` |
 | `data/derived/` local | chỉ có `yolo_coarse/` — chưa có `crops_fgc/`, `tiles/` |
 | Crop DigitizePID trên Drive (`crops_fgc.zip`) | ⚠️ **chỉ có 28/32 class** — phải cắt lại |
@@ -63,7 +63,7 @@ Quy tắc bắt buộc:
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► B1 augment ─► B1b leave-classes-out ─► B2 Colab plumbing ─► B6a GĐ4 ─► B6b GĐ5 ─► B7-code GĐ3 ─► B4a baseline
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► B2 Colab plumbing ─► B6a GĐ4 ─► B6b GĐ5 ─► B7-code GĐ3 ─► B4a baseline
 B5 🧑 map symbol_map.csv + CHỌN danh sách H ──── song song suốt Phase A, ⛔ PHẢI XONG trước R1 ────►
 ```
 
@@ -113,13 +113,13 @@ thừa sau block import `importorskip` trong `tests/test_global_encoder.py`), đ
 
 ---
 
-## B1 — Per-subpart augment (OSSR-PID kỹ thuật #2) 🤖 ⛔ trước B3
+## B1 — Per-subpart augment (OSSR-PID kỹ thuật #2) 🤖 ✅ XONG 2026-10-18
 
 **Vì sao**: các valve DigitizePID khác nhau ở chi tiết nhỏ (chấm giữa, X chéo, actuator).
 Augment cả crop không dạy được model rằng *từng bộ phận* có thể lệch nhẹ mà danh tính giữ
 nguyên — OSSR-PID affine riêng từng subpart vì lý do này.
 
-**Trạng thái (2026-10-18)**: ✅ code + test xanh (229 pass, ruff sạch) · ⏳ chờ 🧑 duyệt ảnh.
+**Trạng thái**: ✅ XONG 2026-10-18 — code + test xanh (229 pass, ruff sạch) · 🧑 user đã duyệt ảnh.
 
 **Thiết kế ban đầu bị bỏ** — affine riêng từng connected component (±20°), fallback affine
 cả crop. Đo trên ~1,600 crop thật (12 ảnh): chỉ **0–13% crop valve** (Symbol_1–16; riêng
@@ -172,7 +172,25 @@ symbol rất nhỏ + một vạch lạc phía trên → phải sửa trước R2
 
 ---
 
-## B1b — Leave-classes-out: `fgc.exclude_classes` 🤖 ⛔ trước R1
+## B1b — Leave-classes-out: `fgc.exclude_classes` 🤖 ✅ XONG 2026-10-18
+
+**Đã làm** (246 test pass, ruff sạch; override Hydra kiểm trên `classes.yaml` thật — giữ ra 2
+class → head global 30 class; tên sai → lỗi):
+- `utils/classmap.py::training_fine_classes(classmap, group, exclude)` — điểm quyết định DUY
+  NHẤT; dùng bởi `fgc_train`, `dataset.build_dataset`, `fgc_infer`, `evaluation` (cả 4 chỗ
+  dựng head/label). Tên lạ → `ValueError`; giữ ra hết class của một group → `ValueError`.
+- `utils/dataset.py::excluded_classes(cfg)`; `configs/config.yaml` `fgc.exclude_classes: []`.
+- Checkpoint lưu `excluded_classes`; `pid-iso-prototypes` ghi `encoder_excluded_classes` vào
+  `meta` (checkpoint cũ không có key → `[]`, `utils/model.py::checkpoint_excluded_classes`).
+- **Thêm ngoài plan**: resume từ checkpoint train trên danh sách class KHÁC → `ValueError`
+  (cùng số class giữ ra nhưng khác tên thì head cùng shape, `load_state_dict` không báo lỗi
+  → cột lệch ngầm; dễ xảy ra khi gõ lại override ở phiên Colab sau).
+- `tests/test_exclude_classes.py` (17 test): rỗng = hành vi cũ; dataset train/val không có
+  crop class H; label khớp `fine_classes` checkpoint; head 6−K hàng; typo dừng trước khi
+  train; infer dựng head per-group đúng chiều rộng; resume chặn danh sách khác.
+- `extract_crops` KHÔNG đổi — crop class H vẫn được cắt (cần cho test P1).
+
+**Kế hoạch gốc** (giữ để đối chiếu):
 
 **Vì sao**: xem mục "Protocol đánh giá" — không có bước này thì không chứng minh được one-shot.
 
@@ -414,8 +432,8 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 
 **Phase A — Code**
 - [x] B0 pytest + ruff xanh (207 pass, 2026-10-18)
-- [ ] B1 subpart augment (✅ code + test 2026-10-18) + user duyệt ảnh ⏳
-- [ ] B1b `fgc.exclude_classes` + tests chống rò rỉ
+- [x] B1 subpart augment `SubpartWarp` + user duyệt ảnh (2026-10-18)
+- [x] B1b `fgc.exclude_classes` + tests chống rò rỉ (2026-10-18)
 - [ ] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out
 - [ ] B6a GĐ4 one-shot infer + coarse_map
 - [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3 + guard rò rỉ

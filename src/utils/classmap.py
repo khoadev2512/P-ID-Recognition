@@ -107,6 +107,44 @@ class ClassMap:
         return [fine for fine, coarse in self.fine_to_coarse.items() if coarse == coarse_class]
 
 
+def training_fine_classes(
+    classmap: ClassMap, group: str, exclude: list[str] | tuple[str, ...] = ()
+) -> list[str]:
+    """The fine classes a head for `group` is trained on — THE single place that decides.
+
+    fine_of_group(group) minus the held-out classes (cfg.fgc.exclude_classes), in
+    classes.yaml order. Everything that has to agree on a head's column order — the
+    train loop that sizes the head, the dataset that assigns labels, the checkpoint's
+    `fine_classes`, eval/infer that rebuild the head — goes through here, so a held-out
+    class can never be dropped in one place and kept in another (labels shifted by one
+    column relative to the head, silently).
+
+    Leave-classes-out is how the one-shot claim is tested (docs/PLAN_STAGE2_ONESHOT.md,
+    protocol P1): a class the encoder never saw can only be recognized through its
+    template. Its crops are still EXTRACTED (pid-prep-crops is untouched) because the
+    unseen-class test needs them.
+
+    Raises ValueError on a name that is not in classes.yaml (a typo would otherwise
+    leave the class in training and quietly void the protocol), and when the exclusion
+    leaves `group` with nothing to train.
+    """
+    unknown = sorted(set(exclude) - set(classmap.fine_classes))
+    if unknown:
+        raise ValueError(
+            f"fgc.exclude_classes names unknown fine classes {unknown}; valid names are "
+            f"the fine: keys of classes.yaml, e.g. {classmap.fine_classes[:3]}"
+        )
+    held_out = set(exclude)
+    fine = classmap.fine_of_group(group)
+    kept = [name for name in fine if name not in held_out]
+    if fine and not kept:
+        raise ValueError(
+            f"fgc.exclude_classes holds out every fine class of group {group!r} "
+            f"({fine}); nothing is left to train."
+        )
+    return kept
+
+
 def load_classmap(path: str | Path) -> ClassMap:
     """Parse classes.yaml into a ClassMap, validating it matches the documented schema."""
     path = Path(path)

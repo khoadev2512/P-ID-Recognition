@@ -38,7 +38,7 @@ from PIL import Image
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_eval_transform
-from utils.model import load_arcface_encoder
+from utils.model import checkpoint_excluded_classes, load_arcface_encoder
 from utils.oneshot import ViewSpec, build_prototypes
 
 logger = logging.getLogger(__name__)
@@ -225,6 +225,9 @@ class IsoPrototypePipeline(BasePipeline):
                 "embed_dim": int(cfg.fgc.arcface.embed_dim),
                 "imgsz": int(cfg.fgc.imgsz),
                 "encoder_train_classes": train_classes,
+                # Leave-classes-out encoders (protocol P1) must be told apart from
+                # full-vocabulary ones by the file alone, not by its name on Drive.
+                "encoder_excluded_classes": checkpoint_excluded_classes(ckpt),
                 "vocab_csv": str(cfg.oneshot.vocab_csv),
                 "symbols_dir": str(cfg.oneshot.symbols_dir),
                 "fgc_groups_only": bool(cfg.oneshot.get("fgc_groups_only", False)),

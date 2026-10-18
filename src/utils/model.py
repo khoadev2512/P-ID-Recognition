@@ -192,6 +192,16 @@ def load_arcface_encoder(
     return model, fine_classes
 
 
+def checkpoint_excluded_classes(ckpt_path: str | Path) -> list[str]:
+    """Classes held out of training a pid-fgc-train checkpoint (fgc.exclude_classes).
+
+    Checkpoints written before leave-classes-out existed have no such key; nothing was
+    held out of those, so [] is the truth for them rather than a guess.
+    """
+    state = torch.load(Path(ckpt_path), map_location="cpu", weights_only=False)
+    return list(state.get("excluded_classes", []))
+
+
 class FocalLoss(nn.Module):
     """Standard multi-class focal loss (ref [1]).
 

@@ -108,6 +108,16 @@ fgc:
   #   pid-fgc-train   fgc.global_encoder=true fgc.metric_learning=true
   global_encoder: false
 
+  # Leave-classes-out (docs/PLAN_STAGE2_ONESHOT.md, protocol P1): fine classes (Symbol_N
+  # names from classes.yaml) held OUT of training, so the one-shot test on them can only
+  # succeed through the ISO template — the evidence that the method is one-shot at all.
+  # Their crops are still extracted (the test needs them); only the head and the
+  # train/val datasets drop them. Fill with EXACTLY the H list fixed in B5, BEFORE any
+  # training and before seeing any result — choosing it after is cherry-picking.
+  #   pid-fgc-train fgc.global_encoder=true fgc.metric_learning=true \
+  #     'fgc.exclude_classes=[<H_in + H_out from B5, comma-separated Symbol_N>]'
+  exclude_classes: []
+
   # Long-tail handling (§2.2.3).
   loss: focal           # ce | focal (ref [1])
   balanced_sampler: true

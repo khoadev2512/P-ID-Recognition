@@ -235,7 +235,8 @@ class EvaluationPipeline(BasePipeline):
         import torch
         from torch.utils.data import DataLoader
 
-        from utils.dataset import build_dataset
+        from utils.classmap import training_fine_classes
+        from utils.dataset import build_dataset, excluded_classes
         from utils.model import build_model
 
         split = str(self.cfg.eval.split)
@@ -251,7 +252,11 @@ class EvaluationPipeline(BasePipeline):
                 logger.warning("No checkpoint at %s for group=%s; skipping.", ckpt_path, group)
                 continue
 
-            fine_names = self.classmap.fine_of_group(group)
+            # Same list the head was trained on (held-out classes removed), so names
+            # line up with the checkpoint's columns.
+            fine_names = training_fine_classes(
+                self.classmap, group, excluded_classes(self.cfg)
+            )
             num_fine = len(fine_names)
 
             dataset = build_dataset(self.cfg, split, group)

@@ -32,9 +32,14 @@ from PIL import Image
 
 from pipeline.base import BasePipeline
 from utils import bbox_utils
-from utils.classmap import OTHER_CLASS_NAME, OTHER_FINE_ID, UNREFINED_FINE_ID
+from utils.classmap import (
+    OTHER_CLASS_NAME,
+    OTHER_FINE_ID,
+    UNREFINED_FINE_ID,
+    training_fine_classes,
+)
 from utils.cli import CONFIG_DIR
-from utils.dataset import build_eval_transform
+from utils.dataset import build_eval_transform, excluded_classes
 from utils.model import ArcFaceModel, build_model
 from utils.types import BBox
 
@@ -80,8 +85,12 @@ class FGCInferPipeline(BasePipeline):
         )
         self.transform = build_eval_transform(cfg)
         self._models: dict[str, torch.nn.Module] | None = None
+        # The head's column order: the classes it was TRAINED on (fgc.exclude_classes
+        # removed), from the same function pid-fgc-train sized it with.
+        exclude = excluded_classes(cfg)
         self._fine_classes_per_group: dict[str, list[str]] = {
-            group: self.classmap.fine_of_group(group) for group in self.classmap.fgc_groups
+            group: training_fine_classes(self.classmap, group, exclude)
+            for group in self.classmap.fgc_groups
         }
         # Only ArcFace checkpoints carry class centers -> only they support the "Other"
         # reject gate. cfg.fgc.metric_learning selects that path in build_model.

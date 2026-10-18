@@ -26,7 +26,7 @@ from torch.utils.data import Dataset, WeightedRandomSampler
 from torchvision import transforms
 
 from utils.augment import SubpartWarp
-from utils.classmap import load_classmap
+from utils.classmap import load_classmap, training_fine_classes
 from utils.paths import DataPaths
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
@@ -100,15 +100,21 @@ def build_eval_transform(cfg: DictConfig) -> transforms.Compose:
     return _build_transform(cfg, split="val")
 
 
+def excluded_classes(cfg: DictConfig) -> list[str]:
+    """cfg.fgc.exclude_classes as a plain list; absent or null means none held out."""
+    return list(cfg.fgc.get("exclude_classes", None) or [])
+
+
 def build_dataset(cfg: DictConfig, split: str, group: str) -> Dataset:
-    """ImageFolder-equivalent restricted to `group`'s fine classes, with GROUP-LOCAL
-    label indices (0..len(fine_of_group(group))-1, in classmap.fine_of_group(group)
-    order) -- NOT global fine ids, since each group gets its own classifier head sized
-    to only its own fine classes.
+    """ImageFolder-equivalent restricted to `group`'s TRAINING fine classes, with
+    GROUP-LOCAL label indices (0..n-1, in classmap.training_fine_classes order) -- NOT
+    global fine ids, since each group gets its own classifier head sized to only its
+    own fine classes. Held-out classes (cfg.fgc.exclude_classes) are absent from every
+    split here: this dataset feeds a head that has no column for them.
     """
     paths = DataPaths(root=Path(str(cfg.data_root)))
     classmap = load_classmap(paths.classes_yaml)
-    fine_classes = classmap.fine_of_group(group)
+    fine_classes = training_fine_classes(classmap, group, excluded_classes(cfg))
     root = paths.crops_fgc / split
     transform = _build_transform(cfg, split)
     return _GroupCropDataset(root, fine_classes, transform)
