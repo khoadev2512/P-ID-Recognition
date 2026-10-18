@@ -127,6 +127,18 @@ fgc:
     hflip: 0.0          # asymmetric symbols — flips can change class; off by default
     rotate: 0
     jitter: 0.2
+    # Per-subpart augment (OSSR-PID technique #2, raster form — see utils.augment for why
+    # it is not component-only affine). Train split only, on the native crop before
+    # Resize. p: 0.0 turns it off — the subpart on/off ablation axis.
+    subpart:
+      p: 0.5
+      rotate: 8.0          # per-component, degrees
+      scale: [0.92, 1.08]  # per-component
+      shear: 0.05          # per-component
+      warp: 0.04           # smooth-field max displacement, fraction of crop side
+      warp_grid: 3
+      p_thin: 0.35         # biased thin: ISO templates are drawn thinner than DigitizePID
+      p_thick: 0.15
 
   # Routing: only fine-classify confident detections in an fgc group (see pipeline.fgc_infer).
   route:

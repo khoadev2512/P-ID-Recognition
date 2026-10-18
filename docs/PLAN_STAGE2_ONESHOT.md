@@ -16,7 +16,7 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 | Stage 1 (YOLOv8, 8 coarse) | ✅ mAP50=0.995 — **không train lại**. `best.pt` nằm trên Drive, không có ở local |
 | GĐ2 one-shot core (`utils/oneshot.py`, `pid-iso-prototypes`) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
 | `fgc.global_encoder` (prep-crops / train / infer guard) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
-| Per-subpart augment (OSSR-PID #2) | ❌ chưa code |
+| Per-subpart augment (OSSR-PID #2) | ✅ code `SubpartWarp` + test xanh (B1, 2026-10-18), ⏳ chờ user duyệt ảnh |
 | GĐ4 one-shot inference | ❌ chưa code |
 | GĐ5 eval one-shot + "Other" | ❌ chưa code |
 | Leave-classes-out (`fgc.exclude_classes`) — protocol chính để chứng minh one-shot | ❌ chưa code |
@@ -119,24 +119,56 @@ thừa sau block import `importorskip` trong `tests/test_global_encoder.py`), đ
 Augment cả crop không dạy được model rằng *từng bộ phận* có thể lệch nhẹ mà danh tính giữ
 nguyên — OSSR-PID affine riêng từng subpart vì lý do này.
 
-**Thiết kế đề xuất** (bản pixel của "subpart" trên graph của OSSR-PID):
-1. Nhị phân hoá crop (Otsu) → `cv2.connectedComponentsWithStats` trên phần mực.
-2. Mỗi component đủ lớn (bỏ nhiễu < vài px): affine **độc lập** quanh tâm của nó —
-   rotation U(-20°, 20°), scale U(0.9, 1.1), shear U(-0.05, 0.05).
-3. Ghép lại trên nền trắng bằng `np.minimum` (mực tối thắng) — không có alpha nên đè an toàn.
-4. Fallback: ≤1 component (symbol liền một nét) → affine cả crop với cùng range.
+**Trạng thái (2026-10-18)**: ✅ code + test xanh (229 pass, ruff sạch) · ⏳ chờ 🧑 duyệt ảnh.
 
-**Code**:
-- `src/utils/augment.py` (mới): `SubpartAffine(p, rotate, scale, shear, min_area)` — một
-  transform PIL→PIL, seed được qua `random.Random` để test lặp lại được.
-- `src/utils/dataset.py::_build_transform`: chèn **trước** `Resize`, chỉ khi `split=="train"`.
-- `configs/config.yaml`: `fgc.aug.subpart: {p: 0.5, rotate: 20, scale: [0.9, 1.1], shear: 0.05, min_area: 4}`.
-  `p: 0.0` = tắt → là trục ablation (có / không subpart augment).
-- `tests/test_augment.py`: số component giữ nguyên; p=0 trả ảnh y hệt; kích thước không đổi;
-  ảnh toàn trắng không crash; eval transform **không** chứa augment.
+**Thiết kế ban đầu bị bỏ** — affine riêng từng connected component (±20°), fallback affine
+cả crop. Đo trên ~1,600 crop thật (12 ảnh): chỉ **0–13% crop valve** (Symbol_1–16; riêng
+Symbol_5 37%) tách được ≥2 component — thân, ống, trang trí là MỘT nét liền. Với valve nó
+thoái hoá thành xoay cả crop. Đã thử chia nét bằng k-means trên toạ độ mực → nét bị rách ở
+chỗ cắt (artefact bản vẽ thật không có) → cũng bỏ.
 
-**Xong khi**: test xanh + xuất ~16 ảnh augment của 3–4 class valve ra scratchpad để
-🧑 **user duyệt bằng mắt** (user nhận diện symbol giỏi hơn — đừng tự kết luận augment "trông ổn").
+**Thiết kế đã chốt — `SubpartWarp`** (user chọn "phương án 3" 2026-10-18), bản raster gần
+đúng của kỹ thuật OSSR-PID, trên crop gốc **trước** `Resize`:
+1. Otsu → mực; nền = median pixel không-mực (giữ nền xám của DigitizePID, không ép trắng);
+   làm việc trong không gian "độ tối trên nền", ghép lại bằng mực-tối-thắng.
+2. Component đủ lớn (≥3% lượng mực), nếu ≥2: affine **độc lập** quanh tâm — rotation ±8°,
+   scale 0.92–1.08, shear ±0.05 (nhỏ hơn ±20° của OSSR-PID vì xoay cả symbol là việc của
+   `fgc.aug.rotate`).
+3. Trường dịch chuyển mượt (lưới 3×3 nội suy cubic, tối đa 4% cạnh crop): dịch các *vùng*
+   của symbol so với nhau (tỉ lệ cone, cỡ chấm, lệch actuator) mà **không làm đứt nét**.
+4. Độ dày nét ±1px, **lệch về mảnh** (p_thin 0.35 / p_thick 0.15): template ISO vẽ nét mảnh
+   hơn crop DigitizePID ~1.1–2× (độ dày / cạnh symbol: ISO 0.025–0.037 vs crop 0.041–0.051).
+
+**Bằng chứng (mini-P1; ảnh, số liệu, script: `docs/experiments/b1_subpart/`)**: ResNet34+ArcFace train 12 class valve
+(250 crop/class, 6 epoch), giữ ra S1/S3/S4/S10, nhận bằng template ISO thật
+(X8074/X8068/2101/X8076 — map lấy từ cột `reg_number` của `symbol_map.csv`, chưa chốt B5),
+4 view xoay, 408 crop val, 5 seed:
+
+| Cấu hình | template ISO | 1 crop DigitizePID (đối chứng) |
+|---|---|---|
+| chỉ ImageNet, không train | 0.706 | 0.613 |
+| không subpart | 0.691 ± 0.151 | 0.825 ± 0.054 |
+| CC-only (thiết kế ban đầu) | 0.670 ± 0.105 | 0.909 ± 0.108 |
+| **`SubpartWarp`** | **0.770 ± 0.201** | **0.906 ± 0.073** |
+
+Đọc: CC-only giúp trong miền nhưng KHÔNG giúp sang ISO (−0.021 so với không subpart); train
+không augment còn thua baseline ImageNet trên ISO → động lực cho B1. `SubpartWarp` tốt nhất
+trung bình nhưng **độ lệch seed ngang khoảng chênh** (4 class test, kết quả từng class phân
+cực 0/1) → là *hướng*, chưa phải kết quả; ablation `fgc.aug.subpart.p=0` vs bật ở R1/R4 mới
+quyết định.
+
+**Code**: `src/utils/augment.py` (`SubpartWarp`, PIL→PIL, `seed=None` dùng `random` toàn cục
+để DataLoader worker reseed được) · `src/utils/dataset.py::_build_transform` (chèn trước
+`Resize`, chỉ train, bỏ hẳn khi `p=0`) · `configs/config.yaml` `fgc.aug.subpart` ·
+`tests/test_augment.py` (22 test: p=0 y hệt, nét liền vẫn liền, part rời vẫn rời, nền giữ
+xám, mực không mất, thin/thick đúng chiều, eval transform không augment).
+
+**Xong khi**: 🧑 duyệt `docs/experiments/b1_subpart/B1_review.png` (S1/3/7/10/13/14) và
+`B1_review_pairs.png` (cặp dễ nhầm S12↔S13, S15↔S16, S2↔S5) — augment không được làm mất
+chi tiết phân biệt class.
+
+**Phát hiện phụ**: template `X8071.png` (ball valve) trong `iso_symbols_clean/` bị lỗi —
+symbol rất nhỏ + một vạch lạc phía trên → phải sửa trước R2.
 
 ---
 
@@ -382,7 +414,7 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 
 **Phase A — Code**
 - [x] B0 pytest + ruff xanh (207 pass, 2026-10-18)
-- [ ] B1 subpart augment + user duyệt ảnh
+- [ ] B1 subpart augment (✅ code + test 2026-10-18) + user duyệt ảnh ⏳
 - [ ] B1b `fgc.exclude_classes` + tests chống rò rỉ
 - [ ] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out
 - [ ] B6a GĐ4 one-shot infer + coarse_map

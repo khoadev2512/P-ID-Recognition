@@ -25,6 +25,7 @@ from PIL import Image
 from torch.utils.data import Dataset, WeightedRandomSampler
 from torchvision import transforms
 
+from utils.augment import SubpartWarp
 from utils.classmap import load_classmap
 from utils.paths import DataPaths
 
@@ -68,7 +69,12 @@ class _GroupCropDataset(Dataset):
 
 def _build_transform(cfg: DictConfig, split: str) -> transforms.Compose:
     imgsz = int(cfg.fgc.imgsz)
-    ops: list = [transforms.Resize((imgsz, imgsz))]
+    ops: list = []
+    if split == "train" and float(cfg.fgc.aug.subpart.p) > 0:
+        # Per-subpart augment runs on the native crop, BEFORE Resize: it needs a clean
+        # ink mask, which downscaling would blur (see utils.augment).
+        ops.append(SubpartWarp.from_cfg(cfg.fgc.aug.subpart))
+    ops.append(transforms.Resize((imgsz, imgsz)))
     if split == "train":
         aug = cfg.fgc.aug
         ops += [
