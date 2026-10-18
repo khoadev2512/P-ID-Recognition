@@ -1,7 +1,16 @@
-# HANDOFF — Trạng thái dự án & hướng đi (cập nhật 2026-10-09)
+# HANDOFF — Trạng thái dự án & hướng đi (cập nhật 2026-10-10)
 
 File này để **tiếp tục ở session sau** mà không phải làm lại những gì đã thử. Đọc file này
 + `docs/RENDER_RULES.md` + `~/.claude/projects/.../memory/*.md` là nắm toàn bộ.
+
+> **VIỆC TIẾP THEO → `docs/PLAN_STAGE2_ONESHOT.md`** (lập 2026-10-14). User chốt: **code
+> hết trước (Phase A: B0, B1, B2, B6a, B6b, B7-code, B4a), rồi mới chạy từng GĐ trên Colab
+> (Phase B: R1 train → R2 prototypes → R3 fine-tune nếu cần → R4 eval + chốt số).**
+> **Protocol chính = leave-classes-out (P1)**: giữ một nhóm class H ra khỏi train encoder và
+> test one-shot + "Other" trên chính chúng — test trên class encoder đã thấy KHÔNG chứng minh
+> được one-shot. Danh sách H phải chọn ở B5, TRƯỚC khi train.
+> **Nếu hướng chính thất bại → `docs/BACKUP_PLAN.md`**: định nghĩa thất bại (F1–F5), chẩn đoán
+> trước khi đổi hướng, các hướng thay thế đã xếp hạng, cây quyết định + mốc thời gian.
 
 ---
 
@@ -18,6 +27,11 @@ fine-grained + **"Other"/open-set gate**.
 - Symbol ngoài vocab → **"Other"** (cosine < ngưỡng). ĐÂY LÀ ĐÓNG GÓP CHÍNH.
 
 **ĐÃ BỎ**: toàn bộ hướng render synthetic P&ID (2 cách đều thất bại — xem Mục 4).
+
+**TRẠNG THÁI 2026-10-10**: GĐ2 (one-shot core: prototype directory + cosine match +
+voting + "Other" gate) ĐÃ CODE XONG. User ĐÃ CHỐT: **1 encoder TOÀN CỤC**
+(`fgc.global_encoder=true`) — đã code xuyên 3 stage. Chưa chạy pytest (máy thiếu
+uv/torch). Việc tiếp theo: **train GĐ1 trên Colab** với global encoder.
 
 ---
 
@@ -61,11 +75,70 @@ Pipeline gốc (src/pipeline, src/utils) — 2 package flat, Hydra config `confi
   `fgc.route.other_min_cosine=0.35` (PLACEHOLDER, chưa calibrate), `detector.resume/resume_dir`,
   `fgc.resume_from`. `fgc.groups=[valve,blind_disc,heat_exchanger,instrument]`.
 
+**GĐ2 ONE-SHOT CORE ĐÃ CODE XONG (session 2026-10-10):**
+- `src/utils/oneshot.py` — LÕI one-shot, KHÔNG phụ thuộc pipeline/:
+  - `ViewSpec` (scales × orientations) + `make_views`/`refit_box`/`rotate_quarter`.
+    QUAN TRỌNG: `scale` là HỆ SỐ BOX-FIT, không phải resolution (model input cố định
+    128px nên multi-scale theo pixel là no-op). s>1 pad trắng quanh symbol (bbox lỏng,
+    giống YOLO crop), s<1 crop vào (bbox chặt). Đây mới đúng domain gap giữa ISO
+    template (bbox vector sát) và detector crop.
+  - `embed_images` (L2-norm sẵn) + `aggregate_views` (mean rồi RE-NORMALIZE — không
+    renorm thì prototype multi-view có norm nhỏ hơn single-view → không dùng chung
+    ngưỡng cosine được).
+  - `PrototypeDirectory` {fine_name → unit embedding} + cột `coarse` song song +
+    `meta` (provenance). `match()`, `topk()`, `match_views()`, `subset_by_coarse()`,
+    `save()/load()` (có `format_version`).
+  - `build_prototypes()` — views → embed → mean → unit vector, giữ thứ tự template.
+- `src/pipeline/iso_prototypes.py` — Hydra stage `pid-iso-prototypes`: đọc vocab.csv +
+  iso_symbols_clean → đẩy qua encoder ArcFace ĐÓNG BĂNG → lưu prototype directory.
+  Log "prototype separation" (mean/max cosine giữa các prototype + cặp dễ lẫn nhất) —
+  check rẻ nhất xem encoder GĐ1 có transfer sang ISO hay không, KHÔNG cần label ISO.
+- `src/utils/model.py`: `load_arcface_encoder(cfg, ckpt, device)` — dựng lại
+  ArcFaceModel từ checkpoint pid-fgc-train, eval mode. num_fine đọc từ `head.weight`
+  (không lấy từ config → không lệch). Báo lỗi rõ nếu ckpt là linear-head
+  (metric_learning=false → không có embedding space) hoặc lệch embed_dim.
+- `src/utils/classmap.py`: `OTHER_CLASS_NAME="__other__"` CHUYỂN về đây (cạnh
+  OTHER_FINE_ID) vì cả 2 gate dùng; fgc_infer re-export để call site cũ không vỡ.
+- `configs/config.yaml`: section `oneshot.*` (symbols_dir, vocab_csv, encoder_ckpt,
+  prototypes, fgc_groups_only, coarse_filter, background, template_views, query_views,
+  aggregate, other_min_cosine).
+- Tests: `tests/test_oneshot.py` (~45 test, dùng `_FakeEncoder` — projection tuyến tính
+  cố định của pixel → test TOÀN BỘ logic one-shot KHÔNG cần train, KHÔNG cần timm),
+  `tests/test_iso_prototypes.py` (parse vocab + build end-to-end trên 39 symbol ISO
+  THẬT với ArcFace chưa train → kiểm wiring, không kiểm chất lượng).
+
+**QUYẾT ĐỊNH THIẾT KẾ GĐ2 (đã cân nhắc, đừng bàn lại):**
+1. **Prototype = 1 view (upright) mặc định.** Template ISO là artwork chuẩn, đã đúng
+   hướng → one-shot trung thực. Mở rộng `template_views.scales` chỉ để làm ablation.
+   Augment mạnh (rot ±20°, shear) là việc của GĐ3 (fine-tune), KHÔNG nhét vào prototype.
+2. **Query views VOTE, không average.** Symbol xoay 90° chỉ khớp template ở 1 trong 4
+   orientation; mean embedding bị 3 view vô nghĩa kéo lệch, majority thì sống.
+3. **Chỉ view vượt ngưỡng mới được bỏ phiếu** (khác OSSR-PID một chút, có lý do):
+   với symbol bất đối xứng, 3 orientation sai là nearest-neighbour nhiễu và có thể
+   thắng 2-1 ngược lại view đúng. Gate đã là phát biểu "đây là match thật" nên dùng
+   luôn làm điều kiện được bỏ phiếu → không cần ngưỡng thứ hai, và cosine thắng luôn
+   >= ngưỡng. Không view nào vượt → "Other" (n_votes=0, báo cosine cao nhất để calibrate).
+4. **`oneshot.other_min_cosine` TÁCH RIÊNG khỏi `fgc.route.other_min_cosine`.** Một cái
+   đo khoảng cách tới class center ĐÃ TRAIN, cái kia tới prototype 1-template — 2 phân
+   bố cosine khác nhau, KHÔNG dùng chung số. Cả hai vẫn là PLACEHOLDER 0.35.
+5. **`coarse_filter`** để ghép đúng encoder per-group với họ ISO tương ứng
+   (valve.pt ↔ coarse valve+check_valve = 11 prototype), vì không gian train để tách
+   valve không nói gì về vessel.
+
+**GLOBAL ENCODER ĐÃ CODE (session 2026-10-10, theo quyết định Mục 6b):**
+`utils/classmap.py` (GLOBAL_GROUP sentinel + fine_of_group), `pipeline/fgc_train.py`
+(`training_groups()`), `pipeline/extract_crops.py` (`_wanted_anns()`),
+`pipeline/fgc_infer.py` (chặn + hướng dẫn), `configs/config.yaml`
+(`fgc.global_encoder: false` — GĐ1 phải override `=true`).
+
 **Resume (Colab ~6h sessions) ĐÃ CODE**: detector.resume (YOLO last.pt), fgc.resume_from.
 
-**Tests**: ~109 pass, ruff sạch. test_arcface, test_resume, test_detect_infer_wbf,
-test_convert_yolo_to_coco, test_extract_iso_symbols, test_render_pid(_replace),
-test_visualize_detections.
+**Tests**: ~109 pass trước session này + ~90 test mới (test_oneshot, test_iso_prototypes,
+test_global_encoder)
+CHƯA CHẠY ĐƯỢC (xem Mục 7: máy session 2026-10-10 không có uv/torch) — phần logic
+torch-free đã verify tay trên data thật, phần torch cần `uv run pytest` để xác nhận.
+test_arcface, test_resume, test_detect_infer_wbf, test_convert_yolo_to_coco,
+test_extract_iso_symbols, test_render_pid(_replace), test_visualize_detections.
 
 **Scripts** (scripts/):
 - `convert_yolo_to_coco.py` — DigitizePID YOLO → COCO (8 coarse, Symbol_N). DÙNG CHO HƯỚNG CŨ.
@@ -73,6 +146,8 @@ test_visualize_detections.
 - `extract_bg_patches.py` — [HƯỚNG RENDER ĐÃ BỎ] cắt background patch.
 - `render_pid.py`, `render_pid_replace.py` — [HƯỚNG RENDER ĐÃ BỎ] 2 renderer, đều không ổn.
 - `visualize_detections.py` — vẽ box + legend + lọc score (--score-thr, --fill, --show-text).
+
+**Entrypoints** (pyproject [project.scripts]): thêm `pid-iso-prototypes`.
 
 ---
 
@@ -88,7 +163,12 @@ test_visualize_detections.
   valve_gate...), pid_group, fgc_group (yes/no THỦ CÔNG), desc. 12 coarse, 5 fgc_group.
 - `data/raw/digitize_pid_npy/` (30M) — bản .npy gốc (có graph/lines/words), giữ cho graph sau.
 - `data/canonical/` — DigitizePID đã convert COCO (8 coarse, Symbol_N). HƯỚNG CŨ.
-- `data/canonical_iso/` — [RENDER ĐÃ BỎ] 500 ảnh replace, có thể XÓA.
+- `data/canonical_iso/` — [RENDER ĐÃ BỎ] ĐÃ XÓA (kiểm 2026-10-14).
+- **Kiểm 2026-10-14**: `data/canonical/` = DigitizePID gốc (convert_yolo_to_coco, KHÔNG phải
+  bản render): 500 ảnh 7168×4561, 59,498 ann, 32 category `Symbol_N` với supercategory =
+  8 coarse, không có cờ `fgc` → build_classes dùng fallback "coarse >1 fine" (đúng).
+  `data/derived/` chỉ có `yolo_coarse/`. `data/raw/real/` và `synthetic/` trống.
+  `bg_patches/` (28M) là đồ của hướng render đã bỏ, xóa được.
 - Ảnh/data KHÔNG theo git (.gitignore `data/*`), trừ iso_symbols_clean + vocab.
 - **Colab**: data lên Google Drive, code qua git. Fix I/O: copy tiles/crops Drive→/content
   local trước train (Drive đọc 27k file chậm → cháy quota). Xem notebooks/train_stage1_colab.ipynb.
@@ -152,39 +232,95 @@ Paper khác: SynthPID (2604.16513, data-gen topology-preserving, cần seed real
 
 User chốt: **train DigitizePID + fine-tune ISO**. Làm từng giai đoạn, verify từng cái.
 
-### GĐ1 — Train embedding base (DigitizePID) [code gần xong, cần chạy]
-- `fgc --train data_root=<dpid> fgc.metric_learning=true` trên DigitizePID crop (32 class).
-- CẦN THÊM: per-subpart augment (OSSR-PID kỹ thuật #2) vào dataset.py/fgc_train.
+### GĐ1 — Train embedding base (DigitizePID) [CẦN CHẠY — code đã đủ]
+- `pid-prep-crops fgc.global_encoder=true` (BẮT BUỘC chạy lại, xem Mục 6b) rồi
+  `pid-fgc-train fgc.global_encoder=true fgc.metric_learning=true` → `__global__.pt`
+  (1 head, 32 class DigitizePID).
+- CẦN THÊM (chưa code): per-subpart augment (OSSR-PID kỹ thuật #2) vào dataset.py —
+  affine RIÊNG từng vùng, rotation -20..20°, scale 0.9-1.1, shear -0.05..0.05.
+  Hiện `fgc.aug` chỉ có hflip/rotate/jitter áp lên cả crop.
 - Chạy Colab (DigitizePID 7168px nặng, cần GPU + tiling + fix I/O).
 
-### GĐ2 — ISO template → prototype (CỐT LÕI one-shot) [CẦN CODE, file mới]
-- Đưa 39 ISO symbol (iso_symbols_clean) qua model GĐ1 → 39 vector prototype.
-- Lưu "ISO prototype directory" {fine_name → embedding}.
-- Đây là bước biến "closed-set DigitizePID" thành "one-shot ISO".
+### GĐ2 — ISO template → prototype (CỐT LÕI one-shot) ✅ CODE XONG 2026-10-10
+- `pid-iso-prototypes oneshot.encoder_ckpt=runs/<run>/fgc_checkpoints/<group>.pt`
+- 39 ISO symbol → 39 vector prototype, lưu `data/derived/iso_prototypes.pt`.
+- Chi tiết + 5 quyết định thiết kế: xem Mục 2.
+- CÒN LẠI của GĐ2: chạy thật sau khi có checkpoint GĐ1, đọc log "prototype separation"
+  (nếu max off-diagonal cosine ~1.0 → 2 symbol ISO không tách được, one-shot giữa chúng
+  là tung xu; đó là tín hiệu encoder GĐ1 chưa transfer).
 
 ### GĐ3 — Fine-tune với ISO template [CẦN CODE]
 - Fine-tune model GĐ1 với 39 ISO template (augment mạnh vì ít mẫu).
 - Giúp ISO prototype tách biệt hơn trong embedding space.
 
-### GĐ4 — Inference one-shot + "Other" [gate đã có, cần sửa fgc_infer]
-- Crop query → embedding → cosine với 39 ISO prototype → ISO fine_name gần nhất.
-- Cosine < ngưỡng → "Other" (gate đã có, calibrate other_min_cosine trên val).
-- Thêm multi-scale + voting (OSSR-PID #3).
+### GĐ4 — Inference one-shot + "Other" [lõi đã có, CẦN WIRE vào fgc_infer]
+- Đã có: `PrototypeDirectory.match_views(...)` (multi-scale + voting + gate) và
+  `subset_by_coarse(...)` để giới hạn theo coarse class Stage 1 đã đoán.
+- CẦN LÀM: thêm nhánh one-shot vào `fgc_infer._classify_crop` — thay softmax-argmax
+  trên head đã train bằng cosine tới ISO prototype. Dự kiến cờ `fgc.oneshot=true` +
+  đọc `oneshot.prototypes`; `_safe_fine_id` cần map ISO fine_name → id (hiện map qua
+  classmap của DigitizePID, VOCAB KHÁC NHAU → đây là chỗ cần quyết).
+- Calibrate `oneshot.other_min_cosine` trên val.
 
 ### GĐ5 — Eval [cần mở rộng evaluation.py]
 - Accuracy nhận ISO, "Other" precision/recall (cần tập symbol out-of-vocab để test),
   cross-domain (train DigitizePID → nhận ISO), so OSSR-PID.
 
-**User ĐANG PHÂN VÂN bắt đầu GĐ nào** (câu hỏi cuối chưa trả lời): GĐ2 (code one-shot core,
-test logic model giả) HAY GĐ1 (train base Colab trước) HAY viết plan+notebook đầy đủ.
-→ Gợi ý: GĐ2 trước (code one-shot core, test bằng model nhỏ), train thật sau.
+**ĐÃ CHỌN GĐ2 và làm xong (2026-10-10).** Thứ tự còn lại: GĐ1 (train Colab) → chạy GĐ2
+thật → GĐ4 (wire fgc_infer) → GĐ3 (fine-tune ISO, chỉ làm nếu GĐ2 cho separation kém)
+→ GĐ5 (eval).
+
+---
+
+## 6b. ĐÃ CHỐT: 1 ENCODER TOÀN CỤC (`fgc.global_encoder=true`) — 2026-10-10
+
+**Lý do** (đừng bàn lại): per-group head học các embedding space RIÊNG BIỆT, cosine
+giữa 2 space khác nhau KHÔNG so sánh được → prototype directory duy nhất và "Other"
+toàn vocab đều đòi mọi class ở CÙNG MỘT space (như OSSR-PID). Thêm nữa, vocab ISO
+(12 coarse) ≠ coarse DigitizePID (8): các họ ISO pump/vessel/compressor/motor/piping/
+fitting KHÔNG có encoder per-group nào tương ứng.
+
+**Cờ `fgc.global_encoder` xuyên 3 stage (phải nhất quán cả 3):**
+| Stage | khi `global_encoder=true` |
+|---|---|
+| `pid-prep-crops` | cắt crop cho MỌI symbol, không chỉ class thuộc fgc_group. Class không có crop = thiếu hẳn khỏi embedding space. **Lưu ý: DigitizePID phải chạy LẠI prep-crops**, vì lần trước chỉ cắt 28/32 class (thiếu reducer/flange/flow_direction/safety_valve). |
+| `pid-fgc-train` | train 1 head duy nhất, size = toàn bộ fine vocab → checkpoint `__global__.pt` |
+| `pid-fgc-infer` | TỪ CHỐI (raise NotImplementedError có hướng dẫn) — stage này load 1 ckpt/group và route theo coarse; đối ứng của nó là one-shot GĐ4 |
+
+**Code**: `utils/classmap.py` thêm sentinel `GLOBAL_GROUP="__global__"`, và
+`fine_of_group(GLOBAL_GROUP)` trả về TOÀN BỘ fine vocab → nhờ vậy dataset, train loop
+và cách đặt tên checkpoint đều đi đường global mà không cần code path thứ hai.
+`fgc_train.training_groups()` quyết định train gì. `extract_crops._wanted_anns()` quyết
+định cắt gì. Tests: `tests/test_global_encoder.py`.
+
+**Lệnh GĐ1 (Colab)**:
+```
+pid-prep-crops  fgc.global_encoder=true
+pid-fgc-train   fgc.global_encoder=true fgc.metric_learning=true
+pid-iso-prototypes oneshot.encoder_ckpt=runs/<run>/fgc_checkpoints/__global__.pt
+```
+
+**CÒN MỞ — vocab nào là vocab cuối của output?** GĐ4 trả về ISO fine_name, nhưng
+`classmap`/`classes.yaml` hiện là vocab DigitizePID (Symbol_N). Cần quyết: sinh
+`classes.yaml` từ vocab ISO, hay để prototype directory tự làm vocab của Stage 2.
+Đây là chỗ `fgc_infer._safe_fine_id` sẽ vướng khi wire GĐ4.
+
+**CÒN MỞ — `evaluation.py` lặp theo `classmap.fgc_groups`** nên cũng chưa hiểu global
+encoder; sẽ phải mở rộng ở GĐ5 (hiện fgc_infer chặn trước nên user gặp lỗi rõ ràng,
+không phải lỗi mơ hồ).
 
 ---
 
 ## 7. MÔI TRƯỜNG / LƯU Ý VẬN HÀNH
 
 - `uv run pytest` / `uv run ruff check src/ tests/ scripts/` — phải xanh trước khi commit.
-- Repo CHƯA phải git (user tự quản lý git). ĐỪNG `git init`/`rm -rf .git` (đã có lần nhầm).
+- **CẢNH BÁO session 2026-10-10 (vẫn đúng 2026-10-14)**: máy KHÔNG có `uv` và KHÔNG có torch/timm
+  (chỉ system python3.9 + numpy/PIL/yaml/pytest) → code GĐ2 CHƯA chạy pytest/ruff.
+  Đã verify tay phần torch-free (ViewSpec/refit_box/rotate_quarter/make_views/
+  read_vocab/load_templates trên 39 symbol ISO thật) + transcribe thuật toán voting
+  sang numpy để kiểm semantics (tally, tie-break, gate admission). PHẦN TORCH
+  (embed/PrototypeDirectory/save-load/pipeline end-to-end) CẦN `uv run pytest` xác nhận.
+- Repo ĐÃ là git (user tự quản lý branch/commit). ĐỪNG `git init`/`rm -rf .git` (đã có lần nhầm).
 - Colab: ảnh/checkpoint trên Drive; code qua git; copy tiles/crops → /content local trước train.
 - `fgc.route.other_min_cosine=0.35` là PLACEHOLDER — PHẢI calibrate trên val thật.
 - Ngôn ngữ làm việc: tiếng Việt. User là tác giả luận văn, có chuyên môn P&ID (nhận diện symbol

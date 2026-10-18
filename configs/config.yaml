@@ -95,6 +95,19 @@ fgc:
   # these are the four multi-fine groups.
   groups: [valve, blind_disc, heat_exchanger, instrument]
 
+  # true -> train ONE head over the ENTIRE fine vocabulary instead of one per fgc_group
+  # (checkpoint __global__.pt). This is the configuration the one-shot ISO path needs:
+  # per-group heads learn SEPARATE embedding spaces and cosines across spaces are not
+  # comparable, so a single ISO prototype directory and a vocabulary-wide "Other" gate
+  # both require every class in ONE space (as in OSSR-PID). It also covers the ISO
+  # families (pump, vessel, compressor, motor, piping, fitting) that no per-group head
+  # corresponds to. Read by pid-prep-crops (extracts EVERY symbol, not just fgc_group
+  # ones) and pid-fgc-train. pid-fgc-infer cannot consume a global encoder — one-shot
+  # inference against the prototype directory is its counterpart (HANDOFF §6, GĐ4).
+  #   pid-prep-crops  fgc.global_encoder=true
+  #   pid-fgc-train   fgc.global_encoder=true fgc.metric_learning=true
+  global_encoder: false
+
   # Long-tail handling (§2.2.3).
   loss: focal           # ce | focal (ref [1])
   balanced_sampler: true
@@ -137,6 +150,72 @@ fgc:
   # fgc.epochs; groups without a checkpoint start fresh. Example:
   #   pid-fgc-train fgc.resume_from=runs/2026-.../fgc_checkpoints
   resume_from: null
+
+# One-shot ISO 10628-2 recognition (docs/HANDOFF.md §6, GĐ2-GĐ4).
+#
+# The idea: train the Stage-2 embedding on DigitizePID (lots of real crops), then
+# recognize the ISO vocabulary from ONE template image per symbol by cosine distance to
+# that template's embedding ("prototype"). Adding an ISO symbol is adding a row to
+# oneshot.vocab_csv + one PNG and re-running pid-iso-prototypes — no retraining.
+oneshot:
+  # ISO symbol library. Both are tracked in git (un-ignored in .gitignore) because they
+  # are small, hand-checked, and define the label vocabulary.
+  symbols_dir: ${data_root}/raw/iso_symbols_clean   # one <reg_number>.png per symbol
+  vocab_csv: ${data_root}/raw/iso_symbols/vocab.csv # reg_number -> fine_name/coarse/fgc_group
+
+  # ArcFace checkpoint used as the FROZEN encoder (from pid-fgc-train with
+  # fgc.metric_learning=true). Required by pid-iso-prototypes, e.g.:
+  #   pid-iso-prototypes oneshot.encoder_ckpt=runs/2026-.../fgc_checkpoints/valve.pt
+  encoder_ckpt: null
+
+  # Built prototype directory: written by pid-iso-prototypes, read by one-shot inference.
+  prototypes: ${data_root}/derived/iso_prototypes.pt
+
+  # true -> keep only vocab rows flagged fgc_group=yes (the visually-confusable families:
+  # valve, check_valve, heat_exchanger, agitator, blind_disc). false -> all 39 symbols.
+  fgc_groups_only: false
+
+  # Restrict the directory to these ISO coarse classes (null = all of them). Needed when
+  # encoder_ckpt is one of pid-fgc-train's PER-GROUP checkpoints: the valve-group encoder
+  # should back valve-family prototypes, since a space trained to separate valves says
+  # nothing useful about vessels. Example:
+  #   pid-iso-prototypes oneshot.encoder_ckpt=.../valve.pt \
+  #     'oneshot.coarse_filter=[valve,check_valve]' \
+  #     oneshot.prototypes=data/derived/iso_prototypes_valve.pt
+  coarse_filter: null
+
+  # Background colour used when a view pads around a symbol. P&ID artwork is
+  # black-on-white, so white.
+  background: [255, 255, 255]
+
+  # SUPPORT side: views averaged into each prototype. Templates are canonical artwork
+  # already in their upright orientation, so one view is the honest one-shot default;
+  # widen `scales` as an ablation on box-fit robustness.
+  template_views:
+    scales: [1.0]
+    orientations: [0]
+
+  # QUERY side: views of a detector crop, voted over (OSSR-PID technique #3). A crop's
+  # box is looser/tighter than the template's exact vector bbox (scales) and symbols are
+  # drawn rotated in real sheets (orientations). `scale` is a BOX-FIT factor, not a
+  # resolution: >1 pads background around the crop, <1 center-crops into it.
+  query_views:
+    scales: [1.0, 1.25]
+    orientations: [0, 90, 180, 270]
+
+  # How the query views collapse into one decision: vote (majority over per-view nearest
+  # prototype) | mean (average the view embeddings first). vote is the OSSR-PID recipe
+  # and the only one that survives a rotated query; mean is its ablation counterpart.
+  aggregate: vote
+
+  # "Other" / open-set gate on the one-shot cosine: below this the crop is
+  # out-of-vocabulary (fine_id=-2, OTHER_CLASS_NAME) instead of being forced into the
+  # nearest ISO symbol. SEPARATE from fgc.route.other_min_cosine: that gate measures
+  # distance to TRAINED class centers, this one to single-template prototypes, and the
+  # two cosine distributions are not interchangeable. 0.35 is a PLACEHOLDER copied from
+  # that gate -- calibrate on val (pid-iso-prototypes logs the inter-prototype cosine,
+  # which this threshold must sit above to mean anything).
+  other_min_cosine: 0.35
 
 # Evaluation protocol (report §2.2.3, Table 1).
 eval:

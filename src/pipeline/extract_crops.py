@@ -10,6 +10,12 @@ per-fine-class folder tree that torchvision ImageFolder can read directly:
 Only symbols in fgc_groups (valve / instrument_bubble / fitting) are extracted by
 default; controlled by cfg.fgc.groups (classmap.needs_fgc is the source of truth,
 should match).
+
+cfg.fgc.global_encoder=true extracts EVERY symbol instead, including the coarse
+families with a single fine child that the per-group path has no head for. That is
+required by the one-shot ISO path: the global embedding encoder trains over the whole
+fine vocabulary, so a class with no crops here would simply be missing from the
+embedding space it is supposed to be separable in.
 """
 
 from __future__ import annotations
@@ -68,13 +74,9 @@ class ExtractCropsPipeline(BasePipeline):
                 # rather than guessing a split for it.
                 continue
 
-            fgc_anns = [
-                ann
-                for ann in anns_by_image.get(coco_image_id, [])
-                if self.classmap.needs_fgc(
-                    category_id_to_category[ann["category_id"]]["supercategory"]
-                )
-            ]
+            fgc_anns = self._wanted_anns(
+                anns_by_image.get(coco_image_id, []), category_id_to_category
+            )
             if not fgc_anns:
                 continue
 
@@ -98,6 +100,21 @@ class ExtractCropsPipeline(BasePipeline):
                 out_dir.mkdir(parents=True, exist_ok=True)
                 out_path = out_dir / f"{image_id}_{ann_index}.png"
                 cv2.imwrite(str(out_path), crop)
+
+    def _wanted_anns(
+        self, anns: list[dict], category_id_to_category: dict[int, dict]
+    ) -> list[dict]:
+        """Annotations to crop: every symbol under cfg.fgc.global_encoder, else only
+        those whose coarse family is routed to a fine head (classmap.needs_fgc)."""
+        if bool(self.cfg.fgc.get("global_encoder", False)):
+            return list(anns)
+        return [
+            ann
+            for ann in anns
+            if self.classmap.needs_fgc(
+                category_id_to_category[ann["category_id"]]["supercategory"]
+            )
+        ]
 
     @staticmethod
     def _add_margin(

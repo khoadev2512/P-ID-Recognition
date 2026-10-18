@@ -21,6 +21,7 @@ from omegaconf import DictConfig
 from torch.utils.data import DataLoader
 
 from pipeline.base import BasePipeline
+from utils.classmap import GLOBAL_GROUP
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_balanced_sampler, build_dataset
 from utils.model import ArcFaceModel, build_loss, build_model
@@ -47,13 +48,31 @@ class FGCTrainPipeline(BasePipeline):
         ckpt_root = self.output_dir / "fgc_checkpoints"
         ckpt_root.mkdir(parents=True, exist_ok=True)
 
-        # classmap.fgc_groups (not cfg.fgc.groups) is the validated source of truth —
-        # cfg.fgc.groups is just the human-authored expectation of the same list.
-        for group in self.classmap.fgc_groups:
+        for group in self.training_groups():
             self._train_group(group, device, ckpt_root)
+
+    def training_groups(self) -> list[str]:
+        """Which heads to train: one per fgc_group, or a single global one.
+
+        cfg.fgc.global_encoder=true trains ONE model over the entire fine vocabulary
+        (GLOBAL_GROUP) instead of one per coarse family. That is the configuration the
+        one-shot ISO path needs: per-group heads learn SEPARATE embedding spaces, and
+        cosines from different spaces are not comparable — so a single ISO prototype
+        directory and a vocabulary-wide "Other" gate both require every class in one
+        space (as in OSSR-PID). It also covers the ISO families (pump, vessel,
+        compressor, motor, piping, fitting) that no per-group head corresponds to.
+
+        Otherwise: classmap.fgc_groups (NOT cfg.fgc.groups) is the validated source of
+        truth — cfg.fgc.groups is just the human-authored expectation of the same list.
+        """
+        if bool(self.cfg.fgc.get("global_encoder", False)):
+            return [GLOBAL_GROUP]
+        return self.classmap.fgc_groups
 
     def _train_group(self, group: str, device: torch.device, ckpt_root: Path) -> None:
         cfg = self.cfg
+        # fine_of_group resolves GLOBAL_GROUP to the whole fine vocabulary, so the rest
+        # of this method is identical for both paths.
         fine_classes = self.classmap.fine_of_group(group)
         if not fine_classes:
             logger.warning("fgc_group=%s has no fine classes in classes.yaml; skipping.", group)

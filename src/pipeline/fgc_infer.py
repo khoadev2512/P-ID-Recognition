@@ -32,7 +32,7 @@ from PIL import Image
 
 from pipeline.base import BasePipeline
 from utils import bbox_utils
-from utils.classmap import OTHER_FINE_ID, UNREFINED_FINE_ID
+from utils.classmap import OTHER_CLASS_NAME, OTHER_FINE_ID, UNREFINED_FINE_ID
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_eval_transform
 from utils.model import ArcFaceModel, build_model
@@ -40,8 +40,11 @@ from utils.types import BBox
 
 logger = logging.getLogger(__name__)
 
-# Sentinel label for an out-of-vocabulary crop rejected by the ArcFace "Other" gate.
-OTHER_CLASS_NAME = "__other__"
+# Sentinel label for an out-of-vocabulary crop rejected by an "Other" gate. Defined in
+# utils.classmap (next to OTHER_FINE_ID, and shared with utils.oneshot's one-shot gate);
+# re-exported here because `from pipeline.fgc_infer import OTHER_CLASS_NAME` is the
+# import path existing call sites and tests already use.
+__all__ = ["FGCInferPipeline", "OTHER_CLASS_NAME", "main"]
 
 
 def _read_stage1_detections(path: Path) -> list[tuple[int, BBox, float]]:
@@ -115,6 +118,21 @@ class FGCInferPipeline(BasePipeline):
         return models
 
     def validate(self) -> bool:
+        # A global encoder trains ONE head over the whole fine vocabulary, so there is
+        # no per-group <group>.pt to load and no within-group routing to do. Inference
+        # for that configuration is the one-shot path (match crops against the ISO
+        # prototype directory), which is not wired into this stage yet -- say so here
+        # rather than failing later on a missing valve.pt.
+        if bool(self.cfg.fgc.get("global_encoder", False)):
+            raise NotImplementedError(
+                "fgc.global_encoder=true trains a single global embedding encoder, which "
+                "this stage cannot consume: it loads one checkpoint per fgc_group and "
+                "routes by coarse class. Build the ISO prototype directory instead "
+                "(pid-iso-prototypes oneshot.encoder_ckpt=<run>/fgc_checkpoints/"
+                "__global__.pt); one-shot inference against it is GĐ4 in "
+                "docs/HANDOFF.md §6 and is not implemented yet. To use this stage, "
+                "train with fgc.global_encoder=false (per-group heads)."
+            )
         if self.cfg.fgc.ckpt_dir is None:
             raise ValueError(
                 "cfg.fgc.ckpt_dir must be set to run FGC inference, e.g.:\n"

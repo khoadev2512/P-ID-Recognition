@@ -47,6 +47,21 @@ import yaml
 UNREFINED_FINE_ID = -1
 OTHER_FINE_ID = -2
 
+# Pseudo-group name for the SINGLE GLOBAL embedding encoder (cfg.fgc.global_encoder).
+# The per-group default trains one head per coarse family, which is right for closed-set
+# within-family classification but wrong for the one-shot ISO path: separate embedding
+# spaces can't be compared, so a global "Other" gate and a single ISO prototype
+# directory both need every class to live in ONE space (as in OSSR-PID). Passing this
+# name wherever a group name is expected selects "all fine classes" — see
+# ClassMap.fine_of_group. The leading/trailing underscores keep it from colliding with a
+# real coarse class from classes.yaml.
+GLOBAL_GROUP = "__global__"
+
+# The label NAME that pairs with OTHER_FINE_ID. Lives here, next to the id it maps to,
+# because both the trained-head gate (pipeline.fgc_infer) and the one-shot prototype
+# gate (utils.oneshot) emit it, and utils/ must not import from pipeline/.
+OTHER_CLASS_NAME = "__other__"
+
 
 @dataclass
 class ClassMap:
@@ -79,6 +94,16 @@ class ClassMap:
         return coarse_class in self.fgc_groups
 
     def fine_of_group(self, coarse_class: str) -> list[str]:
+        """Fine classes under one coarse class, in classes.yaml order.
+
+        GLOBAL_GROUP returns the ENTIRE fine vocabulary instead — every fine class
+        under every coarse class, including the 1:1 families the per-group path skips.
+        That is what the global embedding encoder trains over, and routing the sentinel
+        through this one accessor is what lets the dataset, the train loop and the
+        checkpoint naming all take the global path without a second code path.
+        """
+        if coarse_class == GLOBAL_GROUP:
+            return list(self._fine_classes)
         return [fine for fine, coarse in self.fine_to_coarse.items() if coarse == coarse_class]
 
 
