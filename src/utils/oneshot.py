@@ -466,3 +466,31 @@ def build_prototypes(
         coarse=[coarse_of[n] for n in names] if coarse_of else [],
         meta={**(meta or {}), "template_views": spec.as_dict(), "n_prototypes": len(names)},
     )
+
+
+# ------------------------------------------------------------------ #
+# Protocol P1: the held-out class lists
+# ------------------------------------------------------------------ #
+
+
+def holdout_classes(cfg) -> tuple[list[str], list[str]]:
+    """(h_in, h_out) from cfg.oneshot.holdout — the unseen-class lists of protocol P1.
+
+    The single source for both the leave-out training run (fgc.exclude_classes is
+    h_in + h_out) and the P1 evaluation, so the two can never disagree about which
+    classes the encoder did not see. A class in both lists is an error: it cannot be
+    an ISO symbol to recognize and an out-of-vocabulary symbol to reject at once.
+    Names are checked against classes.yaml where they are used
+    (utils.classmap.training_fine_classes), not here, since that needs the classmap.
+    """
+    node = cfg.oneshot.get("holdout", None) or {}
+    h_in = list(node.get("h_in", None) or [])
+    h_out = list(node.get("h_out", None) or [])
+    for name, lst in (("h_in", h_in), ("h_out", h_out)):
+        dupes = sorted({c for c in lst if lst.count(c) > 1})
+        if dupes:
+            raise ValueError(f"oneshot.holdout.{name} lists {dupes} more than once")
+    both = sorted(set(h_in) & set(h_out))
+    if both:
+        raise ValueError(f"oneshot.holdout: {both} in both h_in and h_out")
+    return h_in, h_out

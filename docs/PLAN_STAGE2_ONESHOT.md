@@ -63,7 +63,7 @@ Quy tắc bắt buộc:
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► B2 Colab plumbing ─► B6a GĐ4 ─► B6b GĐ5 ─► B7-code GĐ3 ─► B4a baseline
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► B6a GĐ4 ─► B6b GĐ5 ─► B7-code GĐ3 ─► B4a baseline
 B5 🧑 map symbol_map.csv + CHỌN danh sách H ──── song song suốt Phase A, ⛔ PHẢI XONG trước R1 ────►
 ```
 
@@ -212,7 +212,33 @@ class → head global 30 class; tên sai → lỗi):
 
 ---
 
-## B2 — Colab plumbing 🤖
+## B2 — Colab plumbing 🤖 ✅ XONG 2026-10-19
+
+**Đã làm** (281 test pass, ruff sạch):
+- `run_pipeline.py prototypes` → `IsoPrototypePipeline` (`tests/test_run_pipeline.py`).
+- **Danh sách H có một nguồn duy nhất**: `oneshot.holdout.{h_in,h_out}` trong config,
+  `utils/oneshot.py::holdout_classes(cfg)` (kiểm trùng, kiểm giao nhau). Notebook dựng
+  `fgc.exclude_classes` từ đây, KHÔNG gõ tay; B6b đọc cùng chỗ.
+- Notebook `train_stage2_colab.ipynb` viết lại (25 cell): tự dò Drive (`MyDrive/pid` hoặc
+  `MyDrive/PID_Recognition`, hai notebook cũ lệch nhau); cài đủ deps (bản cũ thiếu
+  ultralytics/sahi/ensemble-boxes, mà `run_pipeline.py` import ngay đầu file); cắt crop
+  toàn cục ở LOCAL → `crops_fgc_global.zip` + assert đủ 32 class (không bao giờ đụng
+  `crops_fgc/` 28 class trên Drive: tên file đánh số khác nhau, cắt chồng sẽ ra crop
+  trùng); R1a / R1b có cell resume (tự lấy run mới nhất); cell `finalize` kiểm rò rỉ
+  (không cột nào của H, đúng 32 − K hàng, `excluded_classes` khớp) rồi copy thành
+  `runs/encoders/__global_lo__.pt` / `__global__.pt`; R2 prototypes cho cả hai encoder
+  (template + vocab lấy từ repo); cell eval comment lại.
+- `tests/test_colab_notebook.py`: chặn các bẫy cũ quay lại (zip 28 class, train không
+  global, H gõ tay, eval theo group).
+- `docs/COLAB_RUNBOOK.md` §5b.
+- **Chạy khô** đúng các lệnh notebook trên 7 ảnh thật (4 train / 3 val): crop đủ 32/32 class
+  ở cả 2 split → R1a 29 class (H ví dụ 3 class) → resume cùng H ok, khác H bị chặn → R1b
+  32 class → finalize đúng, phát hiện rò rỉ khi kỳ vọng sai → prototypes ×2, meta ghi
+  `encoder_excluded_classes`.
+- Lưu ý (có sẵn từ trước, chưa sửa): checkpoint chỉ ghi khi val_acc tăng → resume có thể
+  lặp lại epoch. Ghi trong runbook.
+
+**Kế hoạch gốc** (giữ để đối chiếu):
 
 Notebook `notebooks/train_stage2_colab.ipynb` hiện gọi `src/run_pipeline.py`, **chưa** biết
 global encoder, và sẽ **tái dùng `crops_fgc.zip` cũ trên Drive (28 class)** — bẫy im lặng.
@@ -304,7 +330,9 @@ giá"). Làm ngay sau khi map xong, TRƯỚC R1, TRƯỚC khi thấy bất kỳ 
 - **H_out — 2–4 class OOV** (vd. instrument bubble ISA, plug valve edrawmax) → tập "Other"
   thật sự unseen.
 - Đừng rút cạn một họ: mỗi coarse family vẫn còn ít nhất 1 class trong train.
-- Ghi H vào `fgc.exclude_classes` (B1b) + HANDOFF kèm lý do chọn từng class.
+- Ghi H vào `oneshot.holdout.h_in` / `h_out` trong `configs/config.yaml` (KHÔNG vào
+  `fgc.exclude_classes` — mặc định đó áp cho mọi run, kể cả R1b đủ 32 class; notebook tự
+  dựng override cho R1a từ `oneshot.holdout`) + HANDOFF kèm lý do chọn từng class. Push.
 - (Tùy quota Colab) 2–3 bộ H khác nhau → báo cáo trung bình ± độ lệch, chắc hơn 1 bộ.
 
 Hiện `symbol_map.csv` có 9/32 dòng DONE, 23 dòng TODO (đa số là valve và instrument).
@@ -435,7 +463,7 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 - [x] B0 pytest + ruff xanh (207 pass, 2026-10-18)
 - [x] B1 subpart augment `SubpartWarp` + user duyệt ảnh (2026-10-18)
 - [x] B1b `fgc.exclude_classes` + tests chống rò rỉ (2026-10-18)
-- [ ] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out
+- [x] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out (2026-10-19)
 - [ ] B6a GĐ4 one-shot infer + coarse_map
 - [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3 + guard rò rỉ
 - [ ] B7-code GĐ3 fine-tune ISO (code sẵn, chạy có điều kiện; tôn trọng exclude_classes + exclude_iso)

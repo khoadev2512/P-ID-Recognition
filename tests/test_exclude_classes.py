@@ -250,3 +250,43 @@ def test_resume_with_the_same_exclusion_continues(tmp_path):
     cfg.fgc.resume_from = str(ckpt.parent)
     cfg.fgc.epochs = 2
     FGCTrainPipeline(cfg).run()
+
+
+# ------------------------------------------------------------------ #
+# oneshot.holdout: the single source of the held-out lists (protocol P1)
+# ------------------------------------------------------------------ #
+
+from utils.oneshot import holdout_classes  # noqa: E402
+
+
+def _holdout_cfg(h_in, h_out):
+    return OmegaConf.create({"oneshot": {"holdout": {"h_in": h_in, "h_out": h_out}}})
+
+
+def test_holdout_lists_are_read_in_order():
+    assert holdout_classes(_holdout_cfg(["b", "a"], ["c"])) == (["b", "a"], ["c"])
+
+
+def test_holdout_absent_or_null_is_empty():
+    assert holdout_classes(OmegaConf.create({"oneshot": {}})) == ([], [])
+    assert holdout_classes(_holdout_cfg(None, None)) == ([], [])
+
+
+def test_a_class_cannot_be_both_in_vocab_and_out_of_vocab():
+    with pytest.raises(ValueError, match="both h_in and h_out"):
+        holdout_classes(_holdout_cfg(["a", "b"], ["b"]))
+
+
+def test_a_duplicate_in_one_list_is_an_error():
+    with pytest.raises(ValueError, match="more than once"):
+        holdout_classes(_holdout_cfg(["a", "a"], []))
+
+
+def test_the_shipped_config_holdout_is_valid():
+    """configs/config.yaml's lists (filled by hand at B5) must parse and be disjoint —
+    caught here rather than at the start of a Colab session."""
+    from pathlib import Path
+
+    cfg = OmegaConf.load(Path(__file__).resolve().parents[1] / "configs" / "config.yaml")
+    h_in, h_out = holdout_classes(cfg)
+    assert isinstance(h_in, list) and isinstance(h_out, list)

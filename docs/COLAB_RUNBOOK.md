@@ -80,6 +80,42 @@ RUNS = "/content/drive/MyDrive/pid/runs"     # mọi lệnh train dưới đây 
 - Group nào chưa có checkpoint → train từ đầu.
 - Checkpoint MỚI ghi vào run dir mới của phiên này → phiên sau trỏ `resume_from` vào đó.
 
+## 5b. Stage 2 one-shot — encoder toàn cục (`notebooks/train_stage2_colab.ipynb`)
+
+Đây là cấu hình dùng cho luận văn (docs/PLAN_STAGE2_ONESHOT.md, Phase B). Notebook làm theo thứ tự:
+
+| Cell | Việc | Kết quả |
+|---|---|---|
+| 3 | Cắt crop **toàn cục** (`fgc.global_encoder=true`) ở local, zip lên Drive | `data/derived/crops_fgc_global.zip`, có assert đủ 32 class |
+| 4 | Đọc danh sách H từ `oneshot.holdout` trong config (điền ở B5) | Danh sách trống hoặc tên sai thì báo lỗi |
+| 5 | **R1a**: train leave-out, `fgc.exclude_classes=<h_in + h_out>` | `runs/encoders/__global_lo__.pt` |
+| 6 | **R1b**: train đủ 32 class | `runs/encoders/__global__.pt` |
+| 7 | **R2**: `run_pipeline.py prototypes` cho từng encoder + log separation | `runs/encoders/iso_prototypes{_lo,}.pt` |
+
+Lệnh tương đương (chạy tay):
+```python
+!python src/run_pipeline.py prep --step crops data_root=$LOCAL fgc.global_encoder=true
+!python src/run_pipeline.py fgc --train data_root=$LOCAL run_dir=$RUNS/r1a \
+    fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 "fgc.exclude_classes=[...]"
+!python src/run_pipeline.py prototypes oneshot.encoder_ckpt=$RUNS/encoders/__global_lo__.pt \
+    oneshot.prototypes=$RUNS/encoders/iso_prototypes_lo.pt \
+    oneshot.symbols_dir=/content/pid/data/raw/iso_symbols_clean \
+    oneshot.vocab_csv=/content/pid/data/raw/iso_symbols/vocab.csv
+```
+
+Cạm bẫy:
+- **Không dùng `derived/crops_fgc/` hay `crops_fgc.zip` cũ** (28 class, cắt theo nhóm). Cũng không
+  cắt chồng vào thư mục cũ, vì tên file của hai chế độ đánh số khác nhau và sẽ ra crop trùng.
+- **Template ISO nằm trong git** (`data/raw/iso_symbols_clean/`), không nằm trên Drive. Vì vậy
+  bước prototypes phải trỏ `oneshot.symbols_dir` và `oneshot.vocab_csv` vào repo đã clone.
+- **Resume R1a phải dùng cùng danh sách H.** Nếu khác, code dừng: head cùng kích thước nhưng
+  cột sẽ mang nghĩa của class khác.
+- **Checkpoint chỉ ghi khi `val_acc` tăng.** Phiên resume nào không tăng `val_acc` thì không ghi
+  checkpoint mới, nên phiên sau resume lại từ epoch tốt nhất cũ và mất các epoch đã chạy. Vì vậy
+  nên chạy hết 60 epoch trong một phiên nếu kịp: một epoch khoảng 59k crop.
+- **`evaluate` chưa dùng được với encoder toàn cục.** Nó lặp theo `fgc_groups` nên bỏ qua im lặng.
+  Phần đánh giá one-shot là B6b.
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

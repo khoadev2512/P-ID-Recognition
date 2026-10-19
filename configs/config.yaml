@@ -112,10 +112,12 @@ fgc:
   # names from classes.yaml) held OUT of training, so the one-shot test on them can only
   # succeed through the ISO template — the evidence that the method is one-shot at all.
   # Their crops are still extracted (the test needs them); only the head and the
-  # train/val datasets drop them. Fill with EXACTLY the H list fixed in B5, BEFORE any
-  # training and before seeing any result — choosing it after is cherry-picking.
+  # train/val datasets drop them. Leave the default EMPTY: the H list lives in
+  # oneshot.holdout (B5) and is passed as an override for the leave-out run only — a
+  # default here would also strip the full-vocabulary encoder (R1b). The Colab notebook
+  # builds the override from oneshot.holdout; by hand:
   #   pid-fgc-train fgc.global_encoder=true fgc.metric_learning=true \
-  #     'fgc.exclude_classes=[<H_in + H_out from B5, comma-separated Symbol_N>]'
+  #     'fgc.exclude_classes=[<oneshot.holdout.h_in + h_out, comma-separated Symbol_N>]'
   exclude_classes: []
 
   # Long-tail handling (§2.2.3).
@@ -238,6 +240,16 @@ oneshot:
   # that gate -- calibrate on val (pid-iso-prototypes logs the inter-prototype cosine,
   # which this threshold must sit above to mean anything).
   other_min_cosine: 0.35
+
+  # Unseen-class protocol P1 (docs/PLAN_STAGE2_ONESHOT.md): DigitizePID classes held out
+  # of the leave-out encoder (R1a). h_in = held out AND mapped to an ISO symbol (one-shot
+  # accuracy); h_out = held out AND out-of-vocabulary (the "Other" positives). The ONE
+  # place the lists live: R1a trains with fgc.exclude_classes = h_in + h_out built from
+  # here (utils.oneshot.holdout_classes), and the P1 eval reads the same lists. Fill at
+  # B5, BEFORE any training and before seeing any result; never edit after.
+  holdout:
+    h_in: []
+    h_out: []
 
 # Evaluation protocol (report §2.2.3, Table 1).
 eval:
