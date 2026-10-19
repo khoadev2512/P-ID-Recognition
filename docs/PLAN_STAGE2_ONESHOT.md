@@ -167,8 +167,9 @@ xám, mực không mất, thin/thick đúng chiều, eval transform không augme
 `B1_review_pairs.png` (cặp dễ nhầm S12↔S13, S15↔S16, S2↔S5) — augment không được làm mất
 chi tiết phân biệt class.
 
-**Phát hiện phụ**: template `X8071.png` (ball valve) trong `iso_symbols_clean/` bị lỗi —
-symbol rất nhỏ + một vạch lạc phía trên → phải sửa trước R2.
+**Phát hiện phụ (đã xử lý 2026-10-18)**: template `X8071.png` bị lỗi → cả bộ
+`data/raw/iso_symbols_clean/` được tạo lại từ SVG vector BK-2020-04 (`scripts/extract_iso_symbols_svg.py`,
+chi tiết `docs/experiments/iso_templates_bk2020/`). Mini-P1 ở trên đo trên bộ template CŨ.
 
 ---
 
@@ -456,5 +457,8 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 - Code session 2026-10-10 đang là **thay đổi chưa commit** trên branch
   `feat/prepare-for-colab-stage-2` (kèm fix ruff của B0) — commit trước khi bắt đầu B1.
 - Repo đã là git. Không `git init` / xoá `.git`.
+- Template ISO (`data/raw/iso_symbols_clean/`) sinh từ SVG của Steven Baltakatei Sandoval,
+  BK-2020-04-PID-1, **CC BY-SA 4.0** — luận văn phải ghi nguồn. Tạo lại:
+  `scripts/extract_iso_symbols_svg.py` (xem `docs/experiments/iso_templates_bk2020/`).
 - Cả hai ngưỡng (`fgc.route.other_min_cosine`, `oneshot.other_min_cosine`) đều là
   placeholder 0.35 — **không** dùng chung số, chỉ `oneshot.*` được calibrate ở B8.

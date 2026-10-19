@@ -1,5 +1,10 @@
 """Extract individual ISO 10628-2 symbol images from the standard's symbol-sheet PDF.
 
+SUPERSEDED for the one-shot template library: data/raw/iso_symbols_clean/ is now rendered
+from the vector sheets by scripts/extract_iso_symbols_svg.py (exact per-symbol groups
+instead of a crop heuristic; this script produced a broken X8071). Kept for
+data/raw/iso_symbols/ and the synthetic renderer.
+
 The PDF (ISO_10628-2_2012_Symbols.pdf, 7 pages, ~304 symbols) lays symbols out in a
 regular grid: each symbol's graphic sits to the LEFT of a two-line text label
 `REG#:<id>` / `DESC:<description>`. We locate every REG# text span, then crop a fixed
