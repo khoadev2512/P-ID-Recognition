@@ -18,6 +18,7 @@ X8068,valve,valve_globe,valve,yes,Valve globe type
 X8071,valve,valve_ball,valve,yes,Valve ball type
 X8075,valve,valve_butterfly,valve,yes,Valve butterfly type
 X8076,valve,valve_needle,valve,yes,Valve needle type
+X8087,valve,valve_control,valve,yes,"Valve, control type, continuously operated"
 2102,valve,valve_angle,valve,yes,Valve angle type (general)
 2103,valve,valve_three_way,valve,yes,Valve three way type (general)
 X8077,check_valve,check_valve_general,valve,yes,Check valve (general)
@@ -33,8 +34,10 @@ C2027,agitator,agitator_turbine,equipment,yes,Agitator turbine type
 516,piping,reducer,piping,no,Reducer
 511,piping,flanged_connection,piping,no,Flanged connection
 X411,piping,hose,piping,no,Hose
+X8174,piping,piping_heated_cooled_insulated,piping,no,"Piping, heated or cooled and insulated"
 C0097,blind_disc,blind_disc,fitting,yes,Blind disc
 C0098,blind_disc,open_disc,fitting,yes,Open disc
 2044,blind_disc,interchangeable_disc,fitting,yes,Interchangeable disc (blind disc)
+2045,blind_disc,interchangeable_disc_open,fitting,yes,Interchangeable disc (open disc in function)
 2034,fitting,viewing_glass,fitting,no,Viewing glass
 2033,fitting,silencer,fitting,no,Silencer

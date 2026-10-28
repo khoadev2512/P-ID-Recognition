@@ -1,7 +1,7 @@
 """Build the ISO 10628-2 prototype directory (one-shot plan GĐ2, docs/HANDOFF.md §6).
 
 This is the stage that converts a model trained on DigitizePID into a recognizer for
-the ISO vocabulary. It never trains anything: it pushes each of the 39 ISO symbol
+the ISO vocabulary. It never trains anything: it pushes each of the 42 ISO symbol
 templates through a FROZEN ArcFace encoder (a pid-fgc-train checkpoint) and stores the
 resulting unit vectors as {fine_name -> embedding}.
 
@@ -72,7 +72,7 @@ def read_vocab(
     `fgc_groups_only` keeps the fgc_group=yes rows (the visually-confusable families);
     `coarse_filter` keeps only the named ISO coarse classes. The latter exists because
     pid-fgc-train writes one checkpoint PER fgc_group: a directory built with the
-    valve-group encoder should hold valve-family prototypes, not all 39, since an
+    valve-group encoder should hold valve-family prototypes, not all 42, since an
     embedding space trained to separate valves says nothing useful about vessels. Both
     filters apply, in that order.
     """

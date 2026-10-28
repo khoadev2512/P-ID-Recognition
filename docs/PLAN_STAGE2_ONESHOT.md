@@ -321,6 +321,19 @@ vào một trong hai loại:
 
 Đây là cách lấy tập test "Other" mà **không cần thu thêm data** — đóng góp chính có số đo thật.
 
+**Công cụ (2026-10-19)**: `docs/symbol_mapping/review_b5/` — mỗi class 8 crop thật + template
+đang map (`classes_*.png`), toàn bộ template (`iso_templates_all.png`). Cột `status` dùng
+`ISO` / `OOV` / `VARIANT` / `UNSURE` (thay TODO/DONE). VARIANT = cùng nghĩa với một
+symbol ISO nhưng vẽ theo quy ước khác (vd. S2: ball valve có X trong vòng, ISO X8071 vòng trơn;
+có `reg_number`); VARIANT và UNSURE bị loại khỏi H — VARIANT dùng cho phân tích phụ về
+quy ước vẽ, tách khỏi P1. Kiểm bằng
+`uv run python scripts/check_b5.py` (lỗi = chưa được train R1).
+
+**Quyết định template (user chốt 2026-10-22, TRƯỚC khi có kết quả)**: S17–S19 (blind disc)
+được DigitizePID vẽ gắn trên cặp mặt bích (= S21 / ISO 511), template ISO chỉ có phần chỉ thị
+đĩa → dùng **template ISO trơn** (phương án A) cho P1. Template ghép (chỉ thị + 511) chỉ là
+ablation tùy chọn, theo quy tắc cố định "symbol ISO đặt trên mối nối mặt bích thì ghép 511".
+
 **Chọn danh sách H** (đã chốt: leave-classes-out là protocol CHÍNH — xem mục "Protocol đánh
 giá"). Làm ngay sau khi map xong, TRƯỚC R1, TRƯỚC khi thấy bất kỳ kết quả nào:
 - **H_in — 6–8 class map được sang ISO**, trải nhiều họ (không chỉ valve: có blind_disc / HX

@@ -18,6 +18,7 @@ X8068,Valve globe type,BK-2020-04-PID-1-SHT6.svg,X8068.png
 X8071,Valve ball type,BK-2020-04-PID-1-SHT6.svg,X8071.png
 X8075,Valve butterfly type,BK-2020-04-PID-1-SHT6.svg,X8075.png
 X8076,Valve needle type,BK-2020-04-PID-1-SHT6.svg,X8076.png
+X8087,"Valve, control type, continuously operated",BK-2020-04-PID-1-SHT6.svg,X8087.png
 2102,Valve angle type (general),BK-2020-04-PID-1-SHT6.svg,2102.png
 2103,Valve three way type (general),BK-2020-04-PID-1-SHT6.svg,2103.png
 X8077,Check valve (general),BK-2020-04-PID-1-SHT6.svg,X8077.png
@@ -33,8 +34,10 @@ C2027,Agitator turbine type,BK-2020-04-PID-1-SHT7.svg,C2027.png
 516,Reducer,BK-2020-04-PID-1-SHT6.svg,516.png
 511,Flanged connection,BK-2020-04-PID-1-SHT6.svg,511.png
 X411,Hose,BK-2020-04-PID-1-SHT6.svg,X411.png
+X8174,"Piping, heated or cooled and insulated",BK-2020-04-PID-1-SHT6.svg,X8174.png
 C0097,Blind disc,BK-2020-04-PID-1-SHT6.svg,C0097.png
 C0098,Open disc,BK-2020-04-PID-1-SHT6.svg,C0098.png
 2044,Interchangeable disc (blind disc),BK-2020-04-PID-1-SHT6.svg,2044.png
+2045,Interchangeable disc (open disc in function),BK-2020-04-PID-1-SHT6.svg,2045.png
 2034,Viewing glass,BK-2020-04-PID-1-SHT6.svg,2034.png
 2033,Silencer,BK-2020-04-PID-1-SHT6.svg,2033.png

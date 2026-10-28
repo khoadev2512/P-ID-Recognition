@@ -5,9 +5,9 @@ Two layers:
   - vocab/template parsing, which needs no torch and guards the failure modes that
     would otherwise produce a quietly incomplete directory (missing column, blank or
     duplicated fine_name, a vocab row with no PNG);
-  - an end-to-end build over the REAL ISO library in data/raw/ (39 symbols, tracked in
+  - an end-to-end build over the REAL ISO library in data/raw/ (42 symbols, tracked in
     git) using a tiny untrained ArcFace model as the encoder. Untrained weights make
-    the embeddings meaningless but the wiring real: the stage either produces 39 named,
+    the embeddings meaningless but the wiring real: the stage either produces 42 named,
     unit-norm, coarse-tagged prototypes from the actual files on disk, or it doesn't.
 """
 
@@ -223,7 +223,7 @@ def test_the_real_iso_library_is_complete():
     unique. If this fails, the ISO library on disk drifted from vocab.csv."""
     rows = read_vocab(ISO_VOCAB_CSV)
     templates, coarse_of = load_templates(ISO_SYMBOLS_DIR, rows)
-    assert len(rows) == len(templates) == len(coarse_of) == 39
+    assert len(rows) == len(templates) == len(coarse_of) == 42
 
 
 # ------------------------------------------------------------------ #
@@ -329,11 +329,11 @@ def test_load_arcface_encoder_rejects_a_non_checkpoint(tmp_path):
 
 @requires_iso_library
 def test_build_the_real_iso_prototype_directory(tmp_path):
-    """GĐ2 end to end on the real 39-symbol ISO library.
+    """GĐ2 end to end on the real 42-symbol ISO library.
 
     The encoder is untrained, so nothing here asserts recognition QUALITY -- it asserts
     that the stage turns the files on disk into a well-formed, self-describing
-    directory: 39 unit-norm rows named by vocab.csv's fine_name, tagged with their
+    directory: 42 unit-norm rows named by vocab.csv's fine_name, tagged with their
     coarse class, and carrying the encoder provenance needed to interpret them later.
     """
     cfg = _cfg(tmp_path)
@@ -344,9 +344,9 @@ def test_build_the_real_iso_prototype_directory(tmp_path):
     directory = PrototypeDirectory.load(cfg.oneshot.prototypes)
     expected = [r["fine_name"] for r in read_vocab(ISO_VOCAB_CSV)]
     assert directory.names == expected
-    assert len(directory) == 39
+    assert len(directory) == 42
     assert directory.dim == 32
-    assert torch.allclose(directory.embeddings.norm(dim=1), torch.ones(39), atol=1e-5)
+    assert torch.allclose(directory.embeddings.norm(dim=1), torch.ones(42), atol=1e-5)
     # Every prototype knows its coarse family, so fgc_infer can restrict matching.
     assert set(directory.coarse) >= {"valve", "pump", "heat_exchanger", "blind_disc"}
     # Provenance travels with the file, not just the run log.
@@ -361,15 +361,15 @@ def test_build_the_real_iso_prototype_directory(tmp_path):
 
 @requires_iso_library
 def test_fgc_groups_only_builds_the_confusable_families_subset(tmp_path):
-    """The ablation knob: 20 of the 39 ISO symbols are flagged as needing fine-grained
-    distinction (valve 8, check_valve 3, heat_exchanger 3, agitator 3, blind_disc 3)."""
+    """The ablation knob: 22 of the 42 ISO symbols are flagged as needing fine-grained
+    distinction (valve 9, check_valve 3, heat_exchanger 3, agitator 3, blind_disc 4)."""
     cfg = _cfg(tmp_path, fgc_groups_only=True)
     cfg.oneshot.encoder_ckpt = str(_write_arcface_ckpt(cfg, tmp_path / "enc.pt"))
 
     IsoPrototypePipeline(cfg).run()
 
     directory = PrototypeDirectory.load(cfg.oneshot.prototypes)
-    assert len(directory) == 20
+    assert len(directory) == 22
     assert set(directory.coarse) == {
         "valve",
         "check_valve",
@@ -383,7 +383,7 @@ def test_fgc_groups_only_builds_the_confusable_families_subset(tmp_path):
 @requires_iso_library
 def test_coarse_filter_builds_a_per_group_directory(tmp_path):
     """The per-group route: the valve-group encoder backs only the valve-family
-    prototypes (8 valve + 3 check_valve rows in the real vocab)."""
+    prototypes (9 valve + 3 check_valve rows in the real vocab)."""
     cfg = _cfg(tmp_path, coarse_filter=["valve", "check_valve"])
     cfg.oneshot.encoder_ckpt = str(_write_arcface_ckpt(cfg, tmp_path / "enc.pt"))
 
@@ -391,7 +391,7 @@ def test_coarse_filter_builds_a_per_group_directory(tmp_path):
 
     directory = PrototypeDirectory.load(cfg.oneshot.prototypes)
     assert set(directory.coarse) == {"valve", "check_valve"}
-    assert len(directory) == 11
+    assert len(directory) == 12
     assert directory.meta["coarse_filter"] == ["valve", "check_valve"]
 
 

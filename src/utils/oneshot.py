@@ -243,7 +243,7 @@ class PrototypeDirectory:
     `coarse` (parallel to `names`) lets GĐ4 restrict matching to the coarse class
     Stage 1 already predicted — matching a valve crop against only the valve
     prototypes is both faster and strictly more accurate than matching it against all
-    39, and it keeps the two stages composed the way the rest of the pipeline is.
+    of them, and it keeps the two stages composed the way the rest of the pipeline is.
     """
 
     names: list[str]
