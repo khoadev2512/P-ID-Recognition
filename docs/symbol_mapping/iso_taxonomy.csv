@@ -1,0 +1,64 @@
+reg_number,variant,group,group_name,fine_name,desc_bk2020,in_vocab,scope,html_code,port_config,directional,placement,port_override,notes
+2101,1,G1,valve_inline,valve_general,Valve (general),yes,html,2101,2_straight,no,pipe,,
+X8068,1,G1,valve_inline,valve_globe,"Valve, globe type",yes,html,X8068,2_straight,no,pipe,,
+X8071,1,G1,valve_inline,valve_ball,"Valve, ball type",yes,html,X8071,2_straight,no,pipe,,
+X8074,1,G1,valve_inline,valve_gate,"Valve, gate type",yes,html,X8074,2_straight,no,pipe,,
+X8075,1,G1,valve_inline,valve_butterfly,"Valve, butterfly type (form A)",yes,html,X8075,2_straight,no,pipe,,two SVG groups share this REG#; same class
+X8075,2,G1,valve_inline,valve_butterfly,"Valve, butterfly type (form B)",yes,html,X8075,2_straight,no,pipe,,two SVG groups share this REG#; same class
+X8076,1,G1,valve_inline,valve_needle,"Valve, needle type",yes,html,X8076,2_straight,no,pipe,,
+X8087,1,G1,valve_inline,valve_control,"Valve, control type, continuously operated",yes,html,X8087,2_straight,no,pipe,,left stub sits inside the diagonal arrow's box
+X8077,1,G1,valve_inline,check_valve_general,Check valve (general),yes,html,X8077,2_straight,yes,pipe,,
+X2113,1,G1,valve_inline,check_valve_globe,"Check valve, globe type",yes,html,X2113,2_straight,yes,pipe,,
+X8078,1,G1,valve_inline,check_valve_swing,Swing check valve (Form 1),yes,html,X8078,2_straight,yes,pipe,,not a ball check valve: BK-2020 has none
+X8165,1,G1,valve_inline,check_valve_swing_form2,Swing check valve (Form 2),no,html,X8165,2_straight,yes,pipe,,
+X2124,1,G1,valve_inline,safety_valve_spring,"Safety valve, spring loaded, globe type",yes,html,X2124,2_straight,yes,pipe,,measured 2 straight ports
+2102,1,G2,valve_angle_3way,valve_angle,"Valve, angle type (general)",yes,html,2102,2_angle,no,pipe,,
+X8069,1,G2,valve_angle_3way,valve_angle_globe,"Valve, angle globe type",no,html,X8069,2_angle,no,pipe,,
+X8072,1,G2,valve_angle_3way,valve_angle_ball,"Valve, angle ball type",no,html,X8072,2_angle,no,pipe,,
+X2125,1,G2,valve_angle_3way,safety_valve_spring_angle,"Safety valve, spring loaded, globe angle type",no,html,X2125,2_angle,yes,pipe,,
+2103,1,G2,valve_angle_3way,valve_three_way,"Valve, three way type (general)",yes,html,2103,3,no,pipe,,
+X8070,1,G2,valve_angle_3way,valve_three_way_globe,"Valve, three way globe type",no,html,X8070,3,no,pipe,,
+X8073,1,G2,valve_angle_3way,valve_three_way_ball,"Valve, three way ball type",no,html,X8073,3,no,pipe,,
+516,1,G3,piping_fitting,reducer,Reducer,yes,html,511,2_straight,no,pipe,,
+511,1,G3,piping_fitting,flanged_connection,Flanged connection,yes,html,,2_straight,no,pipe,"L,R",in scope since 2026-11-01 (vessel nozzles; disc between flanges); BK-2020 pipe pieces dropped
+C0096,1,G3,piping_fitting,orifice_plate,Orifice plate,no,html,C0096,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
+C0097,1,G3,piping_fitting,blind_disc,Blind disc,yes,html,C0097,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
+C0098,1,G3,piping_fitting,open_disc,Open disc,yes,extra,,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
+2044,1,G3,piping_fitting,interchangeable_disc,Interchangeable disc (blind disc),yes,html,X8088,2_straight,no,pipe,"L,R@tail",drawn as a spectacle blind (figure-8: filled + open disc); no stubs
+2045,1,G3,piping_fitting,interchangeable_disc_open,Interchangeable disc (open disc in function),yes,html,X8088,2_straight,no,pipe,"L,R@tail",drawn as a spectacle blind (figure-8: open + filled disc); no stubs
+2034,1,G3,piping_fitting,viewing_glass,Viewing glass,yes,html,2034,2_straight,no,pipe,,
+533,1,G3,piping_fitting,compensator,Compensator,no,html,533,2_straight,no,pipe,,
+X8090,1,G3,piping_fitting,strainer,Strainer,no,html,X8090,2_straight,no,pipe,,
+X8150,1,G3,piping_fitting,strainer_cone,Cone type strainer,no,html,X8150,2_straight,no,pipe,,
+X411,1,G3,piping_fitting,hose,Hose,yes,extra,,2_straight,no,pipe,,
+X8174,1,G3,piping_fitting,piping_heated_cooled_insulated,"Piping, heated or cooled and insulated",yes,extra,,2_straight,no,pipe,,
+C0093,1,G3,piping_fitting,mixing_nozzle_injector,"Mixing nozzle, injector",no,html,C0093,3,no,pipe,,
+2301,1,G4,equipment,pump_general,"Pump, liquid type (general)",yes,html,2301,2,yes,pipe,,ports not collinear in use: route with an L jog
+2322,1,G4,equipment,pump_centrifugal,"Pump, centrifugal type",yes,html,2322,2,yes,pipe,,ports not collinear in use: route with an L jog
+8091,1,G4,equipment,pump_gear,"Pump, gear type",yes,html,X8091,2,yes,pipe,,REG# has no X prefix
+X8095,1,G4,equipment,pump_diaphragm,"Pump, diaphragm type",yes,extra,,2,yes,pipe,,
+2302,1,G4,equipment,compressor_vacuum,"Compressor, vacuum pump (general)",yes,html,2302,2,yes,pipe,,
+X8179,1,G4,equipment,compressor_centrifugal,"Compressor, centrifugal type",yes,extra,,2,yes,pipe,,
+2511,1,G4,equipment,hx_straight_tube,Heat exchanger with straight tubes,yes,html,2511,4,no,pipe,,
+2514,1,G4,equipment,hx_coil,Heat exchanger with coil shaped tubes,yes,extra,,4,no,pipe,,
+2515,1,G4,equipment,hx_double_pipe,Heat exchanger of double-pipe type,no,html,2515,4,no,pipe,,
+X8079,1,G4,equipment,hx_general,"Heat exchanger (general), condenser",yes,extra,,4,no,pipe,,
+301,1,G4,equipment,tank,"Tank, vessel",yes,extra,,multi,no,pipe,,ports anywhere on the outline
+2062,1,G4,equipment,vessel_dished_ends,"Tank, vessel with dished ends",no,html,2062,multi,no,pipe,,ports anywhere on the outline
+2063,1,G4,equipment,vessel_spherical,Spherical vessel,yes,extra,,multi,no,pipe,,ports anywhere on the outline
+X8100,1,G4,equipment,column,Column (general),yes,extra,,multi,no,pipe,,ports anywhere on the outline
+C0082,1,G4,equipment,motor_electric,Electric motor (general),yes,extra,,attach,no,attach,,not on a pipe: drawn next to a pump/compressor
+2672,1,G4,equipment,agitator_general,"Agitator (general), stirrer (general)",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
+C2024,1,G4,equipment,agitator_impeller,"Agitator, impeller type",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
+C2027,1,G4,equipment,agitator_turbine,"Agitator, turbine type",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
+X8080,1,G5,safety_vent_end,rupture_disc,Rupture disc,no,html,X8081,2_straight,no,pipe_or_end,,only one kind in BK-2020
+X8088,1,G5,safety_vent_end,breather_valve,Breather valve,yes,html,X8083,2_straight,no,pipe_or_end,,
+2036,1,G5,safety_vent_end,flame_arrestor,Flame arrestor,no,html,X8084,2_straight,no,pipe_or_end,,
+C0087,1,G5,safety_vent_end,flame_arrestor_explosion_proof,"Flame arrestor, explosion-proof",no,html,X8085,2_straight,no,pipe_or_end,,
+C0088,1,G5,safety_vent_end,flame_arrestor_detonation_proof,Flame arrestor detonation-proof,no,html,X8086,2_straight,no,pipe_or_end,,
+C0091,1,G5,safety_vent_end,flame_arrestor_fire_resistant,Flame arrestor fire-resistant,no,extra,,2_straight,no,pipe_or_end,,
+2181,1,G5,safety_vent_end,steam_trap,Self-operating release valve (steam trap),no,html,X2134,2_straight,yes,pipe_or_end,,only one kind in BK-2020
+2033,1,G5,safety_vent_end,silencer,Silencer,yes,html,2033,2_straight,no,pipe_or_end,,
+2040,1,G5,safety_vent_end,funnel,Funnel,no,html,X8089,1,no,end,B,the stem is the port
+2039,1,G5,safety_vent_end,vent,Vent (outlet to atmosphere for steam/gas),no,extra,,1,no,end,B,the stem is the port
+241,1,G0,overlay,flow_direction,Flowmotion in direction of arrow,yes,html,,2_straight,yes,overlay,"L,R","arrowhead only (the marker); the 6.25 mm line is the pipe it sits on. G0: no rule draws it, V3 puts it on arrow nodes"

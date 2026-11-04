@@ -1,0 +1,80 @@
+# V3 of docs/PLAN_ISO_RENDER_PID2GRAPH.md: which ISO symbol (or overlay) stands for a PID2Graph
+# node. Own file on purpose: configs/config.yaml belongs to Stage 1/2 and is not touched.
+# Read it with utils.iso_mapping.load_config(); the symbols inside a group come from the
+# taxonomy (docs/symbol_mapping/iso_taxonomy.csv), not from this file.
+render_iso:
+  scope: html          # html = the 47 drawable templates | all = all 63 (taxonomy `scope`)
+  p_replace: 0.3       # chance that a 1-port instrumentation bubble becomes a group-5 device
+  template_dir: data/raw/template_iso_svg
+  taxonomy_csv: docs/symbol_mapping/iso_taxonomy.csv
+
+  # PID2Graph node size classes, source-image px (before the sheet is scaled). `2_straight`
+  # nodes are measured across the pipe, all others by the longer side. Only rules with a `size`
+  # key look at it (here: `general`).
+  size_class:
+    small_max: 25      # <= small_max -> small
+    large_min: 120     # >= large_min -> large, in between -> medium
+
+  # V4 (utils.iso_layout): scale the sheet and vary row / column spacing, topology untouched.
+  layout:
+    scale: 3                 # S: source px -> output px
+    column_tol: 3            # source px; coordinates this close to a column's first one share it
+    gap_scale: [0.85, 1.15]  # extra factor on the gap between two columns (not across a symbol)
+    straight_max: 15         # source px; a straight fitting's two ports are put on one line when
+                             # they differ by at most this (measurement noise, not a real jog)
+
+  # V5 (utils.page_svg): one SVG per sheet, 1 SVG unit = 1 output px.
+  page:
+    stroke_px: 3             # one stroke width for pipes and symbols alike
+    junction_dot: false      # filled dot at 3-way crossings
+    shrink_steps: [0.9, 0.8] # an ISO symbol that newly overlaps another is shrunk, then boxed
+    nozzle_stub: 0.5         # a device at a line end that sits against a vessel (a link of no
+                             # length) moves this fraction of its size away; a pipe joins them
+    replaced_size: 14        # source px: a group-5 device standing in for a bubble is sized like
+                             # one on a `general` node (median long side 14 px), not like the bubble
+
+  # A disc or plate is held between two flanges and is often drawn so; the ISO symbol alone is
+  # just as correct. V3 rolls `p` per symbol of these classes and turns the `symbol` template to
+  # the disc's pipe axis; V5 draws it at the tip of the disc's stem with its own COCO box.
+  flanges:
+    p: 0.5
+    symbol: flanged_connection   # 511
+    classes: [orifice_plate, blind_disc, open_disc, interchangeable_disc,
+              interchangeable_disc_open]
+
+  # Flat, first match wins. Filters (all optional): label, size, ports (port_config kinds of
+  # the node: "0" "1" "2_straight" "2_angle" "2_same" "3" "4" "multi"), next_to / not_next_to
+  # (labels of the nodes its pipes lead to: at least one / none of them; a bubble on a valve
+  # is its actuator, not a branch; a fitting next to a tank stands at a vessel nozzle), tagged
+  # (true / false: a bubble, an `instrumentation` node, is linked to the node).
+  #   kind     iso (default) | arrow | leader | flag | bubble | generic
+  #   groups   taxonomy groups G1..G5 an iso rule draws from; configs narrows them to templates
+  #            with these taxonomy `port_config` values, classes to these `fine_name`s
+  #   replace  roll p_replace first; on a miss the next rule is tried
+  # A rule that finds no fitting template falls through to the next; no rule -> plain box.
+  rules:
+    # a 1-port arrow whose head touches a pipe (a crossing) is a leader: the head of a thin line
+    # from a tag (72 in OPEN100). One against a symbol or at a pipe end (7) is a flow arrow.
+    - {label: arrow, ports: ["1"], next_to: [crossing], kind: leader}  # leader_arrow
+    - {label: arrow, kind: arrow}              # flow_direction overlay along the pipe
+    - {label: inlet/outlet, kind: flag}        # simple flag arrow, no label
+    - {label: valve, groups: [G1, G2]}         # 2_straight -> G1; 2_angle, 3 -> G2
+    - {label: pump, groups: [G4], configs: ["2"]}
+    - {label: tank, groups: [G4], configs: [multi]}   # never a heat exchanger
+    # a small fitting with a tag (FO / RO) is a flange pair in OPEN100: all 11 of them, in the
+    # 12 sheets. Drawn as a bare flange pair, it is never a disc or any other fitting.
+    - {label: general, size: small, ports: ["2_straight"], tagged: true, groups: [G3],
+       classes: [flanged_connection]}
+    # at a vessel nozzle (in OPEN100 a flange pair): only what is fitted there; an orifice plate
+    # needs straight pipe both sides, strainers / sight glasses sit on the line
+    - {label: general, size: small, ports: ["2_straight"], next_to: [tank], groups: [G3],
+       classes: [flanged_connection, blind_disc, open_disc, interchangeable_disc,
+                 interchangeable_disc_open, compensator, reducer]}
+    - {label: general, size: small, ports: ["2_straight", "3"], groups: [G3]}
+    - {label: general, size: small, ports: ["1"], groups: [G5]}
+    - {label: general, size: large, groups: [G4], configs: [multi, "4"]}
+    # not on a valve (its actuator) nor a `general` node: at a flange pair the tag (FO / RO) names
+    # the orifice, so a G5 device there would be a wrong symbol, and its line would lose the gap
+    - {label: instrumentation, ports: ["1"], not_next_to: [valve, general], groups: [G5],
+       replace: true}
+    - {label: instrumentation, kind: bubble}   # ISA bubble, labelled other_isa
