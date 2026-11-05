@@ -5,6 +5,8 @@ A variant is the V3 -> V4 -> V5 pipeline run with its own random choices:
   assign   V3 symbol per node (and flanges, agitators, clearance)
   layout   V4 axis mapping, `layout.gap_scale`
   style    stroke width `w` and one factor on every symbol's size
+  degrade  the whole-image degradation of V7 (utils.iso_degrade; drawn after the page, so it
+           cannot change what the three stages above produce)
 
 Each stage has its own `random.Random` seeded from (base seed, source id, variant index, stage
 name; `derive_seed`) by a hash, so a draw added to one stage never moves another's, and variant
@@ -46,7 +48,7 @@ from utils.iso_templates import Template
 from utils.page_svg import Page, rasterize, render_page
 from utils.pid2graph import PipeRun, Sheet
 
-STAGES = ("assign", "layout", "style")
+STAGES = ("assign", "layout", "style", "degrade")
 HASH_HEX_DIGITS = 4  # bits per hex digit
 # G1 reference scale: `page.stroke_px` is 3 at `layout.scale` 3, and `variants.stroke` is the
 # range of w in units of scale / 3
@@ -180,6 +182,7 @@ class Rendered:
     runs: list[PipeRun]
     source: Sheet
     cfg: dict[str, Any]
+    sheet: Sheet | None = None  # the sheet after V4 (node boxes in page px)
 
 
 def plan_variant(
@@ -208,7 +211,7 @@ def render_variant(
     sheet4, runs4 = transform_layout(sheet, runs, random.Random(draft.seeds["layout"]), cfg)
     source = scale_symbols(sheet, draft.size_factor, sized_nodes(draft.assignments))
     page = render_page(sheet4, runs4, draft.assignments, cfg_v, source)
-    return Rendered(page, runs4, source, cfg_v)
+    return Rendered(page, runs4, source, cfg_v, sheet4)
 
 
 def quality_failures(log: Mapping[str, int], max_log: Mapping[str, int]) -> list[str]:

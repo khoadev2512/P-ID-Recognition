@@ -1,0 +1,60 @@
+
+gate (k >= 3.5)
+scenario                 tests  fail strict-fail
+clean                      288     0           0
+all_erode                  288     0           0
+all_dilate                 288    15          15
+only_rotate_deg            288     0           0
+only_shear_deg             288     0           0
+only_erode                 288     0           0
+only_dilate                288     3           3
+only_blur                  288     5           5
+only_pixelate              288     1           1
+only_lighting              288     0           0
+only_noise_sigma           288     0           0
+only_jpeg_quality          288     0           0
+
+below the gate
+scenario                 tests  fail strict-fail
+clean                       96     0           0
+all_erode                   96     1           1
+all_dilate                  96    12          12
+only_rotate_deg             96     0           0
+only_shear_deg              96     0           0
+only_erode                  96     1           1
+only_dilate                 96     2           2
+only_blur                   96     4           4
+only_pixelate               96     1           1
+only_lighting               96     0           0
+only_noise_sigma            96     0           0
+only_jpeg_quality           96     0           0
+
+failures of the all-maximum scenarios (class confused):
+  all_dilate  k=3.0 w=2.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.813
+  all_dilate  k=3.0 w=3.0 G1 2101 (valve_general) -> X8068 (valve_globe) self 0.814
+  all_dilate  k=3.0 w=3.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.827
+  all_dilate  k=3.0 w=3.0 G1 X8076 (valve_needle) -> X8068 (valve_globe) self 0.831
+  all_dilate  k=3.0 w=3.0 G1 X8077 (check_valve_general) -> X2113 (check_valve_globe) self 0.844
+  all_erode   k=3.0 w=4.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.875
+  all_dilate  k=3.0 w=4.0 G1 2101 (valve_general) -> X8068 (valve_globe) self 0.814
+  all_dilate  k=3.0 w=4.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.825
+  all_dilate  k=3.0 w=4.0 G1 X8076 (valve_needle) -> X8068 (valve_globe) self 0.829
+  all_dilate  k=3.0 w=4.0 G1 X8077 (check_valve_general) -> X2113 (check_valve_globe) self 0.84
+  all_dilate  k=3.5 w=2.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.823
+  all_dilate  k=3.5 w=3.0 G1 2101 (valve_general) -> X8068 (valve_globe) self 0.793
+  all_dilate  k=3.5 w=3.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.809
+  all_dilate  k=3.5 w=3.0 G1 X8077 (check_valve_general) -> X2113 (check_valve_globe) self 0.841
+  all_dilate  k=3.5 w=4.0 G1 2101 (valve_general) -> X8068 (valve_globe) self 0.816
+  all_dilate  k=3.5 w=4.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.827
+  all_dilate  k=3.5 w=4.0 G1 X8076 (valve_needle) -> X8068 (valve_globe) self 0.829
+  all_dilate  k=3.5 w=4.0 G1 X8077 (check_valve_general) -> X2113 (check_valve_globe) self 0.841
+  all_dilate  k=5.5 w=3.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.8
+  all_dilate  k=5.5 w=4.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.815
+  all_dilate  k=7.5 w=3.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.786
+  all_dilate  k=7.5 w=4.0 G1 X8074 (valve_gate) -> X8075_1 (valve_butterfly) self 0.803
+  all_dilate  k=3.0 w=2.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.853
+  all_dilate  k=3.0 w=3.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.846
+  all_dilate  k=3.0 w=4.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.838
+  all_dilate  k=3.5 w=3.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.841
+  all_dilate  k=3.5 w=4.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.833
+  all_dilate  k=5.5 w=4.0 G2 2103 (valve_three_way) -> X8070 (valve_three_way_globe) self 0.827

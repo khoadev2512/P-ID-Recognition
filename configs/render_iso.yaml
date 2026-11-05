@@ -125,3 +125,17 @@ render_iso:
     g1:                  # scripts/check_g1.py criteria (1 ports, 2 stroke, 3 overlaps, 5 edges,
       drop: [1, 2, 3, 5, 6, 7]  # 6 signal lines, 7 tags): failure drops the variant
       flag: []                  # failure is recorded in the variant's json, the variant is kept
+
+  # V7 (utils.iso_degrade): whole-image degradation of a V6 variant, one image per variant. Every
+  # range is [low, high] and a draw is uniform inside it. Strength follows the variant's stroke
+  # width w so thin lines survive: |morph| x w/2 px of stroke-width change (< 0 erodes, > 0
+  # dilates), blur sigma = blur x w/2 px, pixelation block = 1 + pixelate x (w/2 - 1) px.
+  degrade:
+    rotate_deg: [-1.0, 1.0]   # clockwise, about the page centre
+    shear_deg: [-0.5, 0.5]
+    morph: [-1.0, 0.4]        # the high ends are what scripts/check_degrade_survival.py allows
+    blur: [0.0, 0.35]
+    pixelate: [0.0, 0.5]
+    lighting: [0.0, 0.2]      # depth of a smooth brightness falloff (1 = black corner)
+    noise_sigma: [0.0, 10.0]  # gray levels
+    jpeg_quality: [55, 90]    # [strongest, mildest]; the saved file is this JPEG

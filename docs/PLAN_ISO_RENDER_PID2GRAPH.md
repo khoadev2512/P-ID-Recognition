@@ -1110,7 +1110,7 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 
 **Hạn chế**: hash 16×16 loại cả biến thể "cùng bố cục, khác ký hiệu"; chỉ 12 topology; số biến thể 26–36/tờ không đều.
 
-## V7 — Làm suy giảm toàn ảnh 🤖 (~1 ngày)
+## V7 — Làm suy giảm toàn ảnh 🤖 (~1 ngày) — 🟢 XONG 2026-11-06 (548 test)
 
 - Chép (không import) `degrade()` của `scripts/render_pid.py` (noise, blur, pixelate) + thêm dilation/erosion,
   nghiêng nhẹ ±1°, JPEG, ánh sáng không đều.
@@ -1118,6 +1118,27 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 - **Kiểm tra chi tiết còn sống**: với mỗi template nhóm van (`template_iso_svg/`, G1/G2), vẽ đơn lẻ ở kích thước đích, suy giảm
   ở mức tối đa, rồi so NCC với mọi template cùng nhóm — phải vẫn gần template của chính nó nhất.
   Template nào trượt → hạ tham số tối đa.
+
+**Đã làm** (số liệu, ảnh, câu hỏi: `docs/experiments/iso_render/v7/REPORT.md`):
+- Code: `src/utils/iso_degrade.py` (viết lại ý tưởng `degrade()`, không import), khối `render_iso.degrade`,
+  `scripts/make_degraded.py`; giai đoạn seed riêng `degrade` (không đổi seed/ảnh của V3–V5; test).
+  Thứ tự: mòn/nở → xoay + nghiêng (`warpAffine`) → pixelate → blur → ánh sáng → nhiễu → JPEG (file lưu là JPEG đó).
+- **Giới hạn theo `w`** (liên tục [2, 4]): đổi bề rộng nét ≤ w/2 ("kernel erosion ≤ w/2" hiểu là bề rộng nét; chờ user
+  xác nhận), blur σ ≤ w/2, pixelate ≤ w/2; thêm ràng buộc đo trên nét vẽ thật: độ đậm giữa nét ≥ 0.55 (mòn w/2
+  cộng blur w/2 làm nét w = 2 còn ~0.40). Đo: nét mỏng nhất vẫn 0.57–0.59, trang thật còn 0.51–0.68 độ đậm.
+- **Kiểm chi tiết còn sống** (NCC, G1, G2, G5, 3 agitator, `flanged_connection` vs G3; k ≥ 3.5 px/mm, w = 2/3/4):
+  ở mức tối đa của plan, nở / blur / pixelate làm nhầm `valve_gate`↔`valve_butterfly`, `valve_general`, `valve_needle`,
+  `check_valve_general`, `valve_three_way` → hạ trần: **nở 0.4·w/2, blur 0.35·w/2, pixelate 0.5**; xoay, nghiêng,
+  ánh sáng, nhiễu, JPEG không phải hạ. Sau đó 0 thất bại ở mọi kịch bản (288 phép/kịch bản). 50/384 tổ hợp có
+  cặp lớp gần đồng nhất ngay cả khi sạch (margin < 0.03 = ngưỡng ồn) nên không kết luận được (vd. `valve_globe` ↔
+  `check_valve_globe`).
+- **Hình học đi theo ảnh**: affine chính xác lưu trong JSON; hộp COCO dời theo **mực** của ký hiệu (sai lệch cạnh
+  ≤ 0.9 px so với ảnh xoay thật; dời 4 góc lệch tới 11.5 px ở leader, 8.3 px ở bình, 6.2 px bình cao); nút GraphML
+  (bong bóng = vòng tròn đã dời), `ports`, `stems` cũng dời. 0 hộp ra ngoài trang.
+- Chạy 413 biến thể: 1.6 s/ảnh, 93 s với 8 tiến trình, **1.7 GB** (JPEG 4.2 MB/ảnh).
+- Bố cục: `data/iso_open100/variants/…` sạch (V6) và `data/iso_open100/degraded/sheet<i>/v<NNN>.{jpg,json}` cùng tên;
+  V8 chọn sạch / suy giảm / cả hai.
+
 
 ## V8 — Xuất dataset + nối vào pipeline 🤖 (~0.5 ngày)
 

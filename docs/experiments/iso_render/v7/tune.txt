@@ -1,0 +1,34 @@
+fraction of each range that survives alone: {'only_erode': 1.0, 'only_dilate': 0.8, 'only_rotate_deg': 1.0, 'only_shear_deg': 1.0, 'only_blur': 0.7, 'only_pixelate': 1.0, 'only_lighting': 1.0, 'only_noise_sigma': 1.0, 'only_jpeg_quality': 1.0, 'together_extra_scale_of_dilate_blur_pixelate': 0.4}
+final degrade block: {'rotate_deg': [-1.0, 1.0], 'shear_deg': [-0.5, 0.5], 'morph': [-1.0, 0.42515280000000016], 'blur': [0.0, 0.3720087000000001], 'pixelate': [0.0, 0.5314410000000002], 'lighting': [0.0, 0.2], 'noise_sigma': [0.0, 10.0], 'jpeg_quality': [55.0, 90]}
+
+gate (k >= 3.5)
+scenario                 tests  fail strict-fail
+clean                      288     0           0
+all_erode                  288     0           0
+all_dilate                 288     0           2
+only_rotate_deg            288     0           0
+only_shear_deg             288     0           0
+only_erode                 288     0           0
+only_dilate                288     0           0
+only_blur                  288     0           0
+only_pixelate              288     0           0
+only_lighting              288     0           0
+only_noise_sigma           288     0           0
+only_jpeg_quality          288     0           0
+
+below the gate
+scenario                 tests  fail strict-fail
+clean                       96     0           0
+all_erode                   96     0           0
+all_dilate                  96     0           2
+only_rotate_deg             96     0           0
+only_shear_deg              96     0           0
+only_erode                  96     1           1
+only_dilate                 96     0           0
+only_blur                   96     0           0
+only_pixelate               96     0           1
+only_lighting               96     0           0
+only_noise_sigma            96     0           0
+only_jpeg_quality           96     0           0
+
+failures of the all-maximum scenarios (class confused):

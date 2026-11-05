@@ -1,0 +1,19 @@
+rotation 1.0 deg, shear 0.5 deg, both signs; 3706 annotations
+kind                  n  | IoU (median) corners  ink | max edge error px corners  ink | enclosed (min) corners  ink
+iso symbol           1152  |      0.948 0.969 |               2.5   0.9 |               0.762 0.908
+arrow                 904  |      0.925 0.948 |               2.4   0.9 |               0.958 0.946
+bubble                856  |      0.988 0.988 |               1.5   0.9 |               0.969 0.968
+flanged_connection    274  |      0.892 0.943 |               1.8   0.9 |               0.619 0.862
+flag                  212  |      0.990 0.994 |               1.8   0.9 |               0.962 0.988
+leader                172  |      0.862 0.949 |              11.5   0.9 |               0.861 0.936
+vessel                 80  |      0.993 0.997 |               8.3   0.9 |               0.984 0.991
+vessel tall            36  |      0.992 0.996 |               6.2   0.9 |               0.981 0.990
+column                 12  |      0.996 0.997 |               3.0   0.9 |               0.993 0.996
+agitator                8  |      0.993 0.997 |               1.8   0.9 |               0.982 0.993
+
+symbol ink outside every moved box (share of all symbol ink):
+  mean 0.01416, max 0.03083 over 28 warped pages
+--- baseline, no rotation (same sheets, rot 0 shear 0)
+
+symbol ink outside every moved box (share of all symbol ink):
+  mean 0.01256, max 0.02757 over 28 warped pages
