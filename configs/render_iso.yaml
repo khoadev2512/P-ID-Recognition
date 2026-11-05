@@ -139,3 +139,20 @@ render_iso:
     lighting: [0.0, 0.2]      # depth of a smooth brightness falloff (1 = black corner)
     noise_sigma: [0.0, 10.0]  # gray levels
     jpeg_quality: [55, 90]    # [strongest, mildest]; the saved file is this JPEG
+
+  # V8 (pipeline.render_iso, utils.iso_export): export V6 / V7 as a data root the pipeline reads.
+  export:
+    data_root: ${oc.env:PID_DATA_ROOT,data/iso_open100}  # holds variants/ and degraded/ (inputs)
+    src_dir: data/raw/pid2graph/open100       # the source GraphML / PNG (read only)
+    vocab_csv: data/raw/iso_symbols/vocab.csv # Stage 2 vocabulary (read only)
+    images: both          # clean | degraded | both
+    link: hardlink        # hardlink | symlink | copy: how renderings enter canonical/images
+    other_labels: [other_iso, other_isa, other_generic]
+    other_coarse: other   # the coarse class of the three above
+    # not exported to COCO: an annotation with no label (inlet / outlet flags) and these labels
+    drop_labels: [leader_arrow]
+    split:
+      mode: all_test      # all_test | by_source (a seeded split of the 12 sources)
+      test_fraction: 0.5  # by_source only
+      seed: 0
+    workers: 4

@@ -1140,7 +1140,7 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
   V8 chọn sạch / suy giảm / cả hai.
 
 
-## V8 — Xuất dataset + nối vào pipeline 🤖 (~0.5 ngày)
+## V8 — Xuất dataset + nối vào pipeline 🤖 (~0.5 ngày) — 🟢 XONG 2026-11-06 (561 test)
 
 - Data root riêng `data/iso_open100/` với layout giống `data/`: `canonical/{images/,
   annotations.coco.json, classes.yaml}`, `graphml/`, `splits.json`. Chạy pipeline trên tập này bằng
@@ -1152,9 +1152,26 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 - Ghi `annotations.coco.json` (bbox = hộp mực từ `Page.annotations` của V5, `category = fine_name`
   hoặc `other_iso`/`other_isa`/`other_generic`) + GraphML nhãn mới (chuyển từ V5, 2026-10-31).
 - Thống kê: histogram lớp, số ký hiệu/ảnh, tỉ lệ `other_*`.
-- [ ] **Toạ độ bong bóng trong GraphML lấy từ vòng tròn đã dời** (`_bubble_circles`, cũng là bbox
+- [x] **Toạ độ bong bóng trong GraphML lấy từ vòng tròn đã dời** (`_bubble_circles`, cũng là bbox
       annotation), không lấy từ box V4: cặp tag tiếp xúc bị dời tới 10.7 px ("Trước V6", mục 2).
       Kiểm: tâm node bong bóng trong GraphML trùng tâm bbox COCO của nó.
+      → `test_bubble_centre_in_the_graph_is_the_centre_of_its_coco_box` (cả ảnh sạch và suy giảm, ≤ 0.02 px).
+
+**Đã làm** (số liệu, ảnh, câu hỏi: `docs/experiments/iso_render/v8/REPORT.md`):
+- Code: `src/utils/iso_export.py`, `src/pipeline/render_iso.py` (`pid-render-iso`, đọc `variants/` + `degraded/`
+  có sẵn, không đếm cứng), khối `render_iso.export`; `pyproject.toml` chỉ thêm một dòng entry.
+- Định dạng theo code pipeline: ảnh phẳng trong `canonical/images/` (hardlink, 0 byte thêm), `file_name`
+  `synthetic/<stem>.<ext>` (build_manifest bắt tiền tố), `classes.yaml` + `manifest.csv` do chính
+  `BuildClassesPipeline`/`BuildManifestPipeline` sinh, `digitizepid_splits.json` để `pid-prep-manifest` ra đúng split.
+- Danh mục: 42 lớp vocab + `other_iso/isa/generic` (coarse `other`). Cờ inlet/outlet và `leader_arrow` **không**
+  vào COCO (vẫn là nút GraphML); `flow_direction` giữ; agitator trong COCO (`added`), không có nút GraphML.
+- GraphML: cùng nút và cạnh với bản gốc (test), nhãn mới, toạ độ đã vẽ (ảnh suy giảm: toạ độ qua affine V7).
+- Chia tập: `all_test` mặc định (12 gốc → test) hoặc `by_source`; mọi biến thể của một gốc cùng split.
+- Kết quả: 826 ảnh (413 sạch + 413 suy giảm), 89,698 annotation, 108.6 ký hiệu/ảnh, `other_*` 38.2%.
+  Chạy `build_classes`, `build_manifest`, `coco_to_yolo` trên gốc mới (không ghi ngoài `data/iso_open100/`);
+  `data/canonical` và `data/raw` giữ nguyên checksum. Chưa chạy detector/FGC/evaluation.
+- Lưu ý: `classes.yaml` của gốc này có 13 lớp thô khác DigitizePID, nên đánh giá Stage 1 cần detector train trên gốc này
+  hoặc một lớp ánh xạ.
 
 ## V9 — (Tùy chọn) Thêm khung xương 🤖
 
