@@ -203,6 +203,12 @@ SynthPID phải viết cả paper CVPR mới làm tốt (topology-preserving, c�
 - ISO không có instrument bubble (thuộc ISA-5.1) → dùng agitator thay.
 - Stage 1 train DigitizePID đạt mAP50=0.995 (synthetic dễ + 8 coarse tách biệt rõ).
 
+### 4e. Mở lại nhánh render dạng vẽ lại vector trên topology OPEN100, có cổng G1 — G1 ĐẠT 2026-11-02
+Khác 4a/4b: không dán ảnh ký hiệu lên nền có sẵn, mà vẽ lại cả tờ PID2Graph OPEN100 (giữ nguyên
+topology) bằng template vector ISO 10628-2 (BK-2020) có khai báo cổng; ống dừng đúng tại cổng.
+G1 (tờ 3): 4 tiêu chí tự động + user duyệt ảnh đều đạt. Chi tiết, số liệu 12 tờ và các bước tiếp theo
+(V5b bình + agitator → V6–V8): `docs/PLAN_ISO_RENDER_PID2GRAPH.md`. Không đụng Stage 1/2.
+
 ---
 
 ## 5. PAPER THAM CHIẾU CHÍNH (đã đọc kỹ)

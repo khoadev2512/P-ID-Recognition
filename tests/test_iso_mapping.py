@@ -38,6 +38,7 @@ def make_template(
     sides: str,
     placement: str = "pipe",
     in_vocab: bool = True,
+    fine_name: str | None = None,
 ) -> Template:
     ports = tuple(
         TemplatePort(i, s, _MID[s][0] * 10, _MID[s][1] * 10, _MID[s][0], _MID[s][1], "stub")
@@ -48,7 +49,7 @@ def make_template(
         reg_number=file,
         variant=1,
         group=group,
-        fine_name=f"name_{file}",
+        fine_name=fine_name or f"name_{file}",
         in_vocab=in_vocab,
         scope="html",
         port_config=port_config,
@@ -70,7 +71,12 @@ TEMPLATES = {
         make_template("V3W", "G2", "3", "BLR"),
         make_template("FIT", "G3", "2_straight", "LR"),
         make_template("PUMP", "G4", "2", "LR"),
-        make_template("VESSEL", "G4", "multi", "BL", in_vocab=False),
+        make_template(
+            "VESSEL", "G4", "multi", "BL", in_vocab=False, fine_name="vessel_dished_ends"
+        ),
+        make_template("COLUMN", "G4", "multi", "BL", fine_name="column"),
+        make_template("AG_A", "G4", "attach", "T", placement="attach", fine_name="agitator_a"),
+        make_template("AG_B", "G4", "attach", "T", placement="attach", fine_name="agitator_b"),
         make_template("HX", "G4", "4", "TTBB"),
         make_template("VENT2", "G5", "2_straight", "LR", placement="pipe_or_end"),
         make_template("FUNNEL", "G5", "1", "B", placement="end"),
@@ -243,8 +249,20 @@ def test_general_fittings_by_size_and_ports():
     out = run(b)
     assert out[small_straight].template.group == "G3"
     assert out[medium].kind == "generic"
-    assert out[small_end].template.group == "G5"
+    assert out[small_end].template.group == "G5"  # no flange pair among these templates
     assert out[large_any].template.group == "G4" and out[large_any].template.port_config == "multi"
+
+
+def test_a_small_fitting_at_a_pipe_end_is_a_flange_pair_not_a_g5_device():
+    b = _Builder()
+    end = b.add("general", (500, 100, 514, 112), "L")
+    flange = make_template(
+        "FLANGE", "G3", "2_straight", "LR", placement="pipe_or_end", fine_name="flanged_connection"
+    )
+    sheet = b.sheet()
+    templates = {**TEMPLATES, "FLANGE": flange}
+    out = assign_symbols(sheet, pipe_runs(sheet), templates, random.Random(0), CFG)
+    assert out[end].template.file == "FLANGE" and out[end].label == "flanged_connection"
 
 
 def test_pump_and_tank_use_their_own_templates():
@@ -255,7 +273,7 @@ def test_pump_and_tank_use_their_own_templates():
     out = run(b)
     assert out[pump].template.file == "PUMP"
     assert out[tank].template.file == "VESSEL" and out[tank].label == "other_iso"
-    assert out[empty_tank].kind == "generic"  # a vessel needs a port to hang pipes on
+    assert out[empty_tank].template.file == "VESSEL"  # a tank may have no pipe, only tag lines
 
 
 def test_a_tank_is_never_a_heat_exchanger_but_a_large_general_may_be():
@@ -686,3 +704,127 @@ def test_real_tagged_fittings_are_all_flange_pairs():
                     assert out[nid].label == "flanged_connection", (sheet.name, nid)
                     assert out[nid].flanges is None
     assert seen == 3 * 11
+
+
+@real
+def test_real_fittings_at_a_pipe_end_are_flange_pairs():
+    """OPEN100: a small one-port `general` node is a flange pair at a vessel nozzle or a pipe end
+    (53 of the 55 on the 12 sheets), never a flame arrestor or another G5 device. G5 devices
+    still come from replaced bubbles."""
+    from utils.pid2graph import port_config, symbol_ports
+
+    seen, g5 = 0, 0
+    for seed in range(3):
+        for sheet, runs, out in _real_runs(seed):
+            for nid, a in out.items():
+                g5 += a.kind == "iso" and a.template.group == "G5"
+                node = sheet.nodes[nid]
+                if node.label != "general" or a.kind == "nested":
+                    continue
+                pcfg = port_config(symbol_ports(sheet, nid, runs))
+                if pcfg.kind == "1" and size_class(node, pcfg, 25, 120) == "small":
+                    seen += 1
+                    assert a.label == "flanged_connection", (sheet.name, nid)
+    assert seen == 3 * 55
+    assert g5 > 0
+
+
+# --- vessels: column / dished ends / lying, and agitators (V5b) -------------------------------
+
+AGITATORS = {
+    "p": 1.0,
+    "host": "vessel_dished_ends",
+    "labels": ["tank"],
+    "aspect": [1.2, 3.0],
+    "clearance": [0.25, 0.65],
+    "classes": ["agitator_a", "agitator_b"],
+}
+
+
+def test_a_vessel_three_times_as_tall_as_wide_is_a_column():
+    b = _Builder()
+    tall = b.add("tank", (100, 100, 200, 400), "T")  # 3.0
+    standing = b.add("tank", (400, 100, 500, 399), "T")  # 2.99
+    big = b.add("general", (700, 100, 820, 500), "T")  # a large general, 3.33
+    out = run(b)
+    assert out[tall].template.file == "COLUMN" and out[tall].label == "column"
+    assert out[standing].template.file == "VESSEL"
+    assert out[big].template.file == "COLUMN"
+
+
+def test_a_vessel_wider_than_tall_lies_down_and_a_standing_one_does_not():
+    b = _Builder()
+    lying = b.add("tank", (100, 100, 400, 200), "T")
+    standing = b.add("tank", (600, 100, 700, 300), "T")
+    out = run(b)
+    assert out[lying].template.rot == 90 and out[standing].template.rot == 0
+
+
+def test_a_column_is_never_drawn_for_a_squat_general():
+    g = _Builder()
+    for i in range(40):
+        g.add("general", (10 + i * 400, 100, 210 + i * 400, 300), "TTBB")
+    assert "COLUMN" not in {a.template.file for a in run(g).values()}
+
+
+def test_agitators_go_into_standing_dished_vessels_only():
+    b = _Builder()
+    ok = b.add("tank", (100, 100, 200, 250), "T")  # 100 wide, 1.5
+    narrow = b.add("tank", (300, 100, 360, 250), "T")  # 60 wide, 2.5: drawn at its own scale
+    squat = b.add("tank", (500, 100, 700, 200), "T")  # lying
+    column = b.add("tank", (800, 100, 900, 500), "T")  # 4.0
+    out = run(b, agitators=AGITATORS)
+    assert out[ok].agitator is not None and out[ok].agitator.placement == "attach"
+    assert out[ok].agitator.fine_name in ("agitator_a", "agitator_b")
+    assert out[narrow].agitator is not None
+    assert out[squat].agitator is None and out[column].agitator is None
+
+
+def test_agitators_go_into_tanks_only_not_into_a_large_general_drawn_as_a_vessel():
+    b = _Builder()
+    tank = b.add("tank", (100, 100, 400, 500), "T")
+    big = b.add("general", (600, 100, 900, 500), "T")  # large, 1.33: an air cooler in OPEN100
+    out = run(b, agitators=AGITATORS)
+    assert out[big].template.file == "VESSEL"
+    assert out[tank].agitator is not None and out[big].agitator is None
+    assert run(b, agitators={**AGITATORS, "labels": ["tank", "general"]})[big].agitator
+
+
+def test_agitators_follow_their_chance_and_use_every_class():
+    b = _Builder()
+    for i in range(60):
+        b.add("tank", (10 + i * 400, 100, 110 + i * 400, 250), "T")
+    out = run(b, agitators={**AGITATORS, "p": 0.3})
+    placed = [a.agitator for a in out.values() if a.agitator is not None]
+    assert 8 <= len(placed) <= 30  # 60 x 0.3 = 18
+    assert {g.fine_name for g in placed} == {"agitator_a", "agitator_b"}
+    gaps = [a.clearance for a in out.values() if a.agitator is not None]
+    assert all(0.25 <= c <= 0.65 for c in gaps) and len(set(gaps)) == len(gaps)
+    assert all(a.agitator is None for a in run(b).values())  # no `agitators` block: none
+
+
+@real
+def test_real_sheets_vessels_follow_the_box_shape_and_agitators_their_rule():
+    cfg = load_config()["agitators"]
+    eligible = 0
+    kinds: Counter[str] = Counter()
+    for sheet, _, out in _real_runs():
+        for nid, a in out.items():
+            node = sheet.nodes[nid]
+            if a.kind != "iso" or a.template.port_config != "multi":
+                continue
+            aspect = node.height / node.width
+            kinds[a.template.fine_name] += 1
+            assert (a.template.fine_name == "column") == (aspect >= 3)
+            assert (a.template.rot == 90) == (aspect < 1 and a.template.fine_name != "column")
+            ok = (
+                a.template.fine_name == "vessel_dished_ends"
+                and node.label in cfg["labels"]
+                and 1.2 <= aspect < 3
+            )
+            if a.agitator is not None:  # PID2Graph has no such node: only the rule can put it here
+                assert ok, (sheet.name, nid)
+            eligible += ok
+    assert kinds["column"] >= 3 and kinds["vessel_dished_ends"] >= 25
+    # 20 tanks qualify on the 12 sheets (plan, V5b), the 0-port tanks of sheet 9 included
+    assert eligible == 20

@@ -28,8 +28,10 @@ from utils.page_svg import (
     _circle_hit,
     _fit_scale,
     _flag_polygon,
+    _make_vessel,
     _ray_polygon,
     _sheet_scale,
+    _vessel_stub,
     ink_hit,
     oriented_ink_box,
     rasterize,
@@ -1010,23 +1012,185 @@ def test_ink_hit_lies_on_the_ink_inside_the_ink_box(templates):
         assert y0 - 0.1 <= ink_hit(o, "L", -50.0)[1] <= y1 + 0.1
 
 
-@needs_templates
-def test_vessels_are_boxes_for_now(templates):
-    vessel = next(t for t in templates.values() if t.port_config == "multi")
-    sheet = Sheet(
-        "vessel",
-        200,
-        200,
-        {
-            "T": _node("T", "tank", 40, 40, 140, 160),
-            "bg": _node("bg", "background", 0, 0, 200, 200),
-        },
-        [],
+def _vessel_tpl(file="2062", rot=0):
+    """Stands in for a vessel template: `_make_vessel` only reads `rot` and `fine_name`."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        rot=rot, fine_name="column" if file == "X8100" else "vessel_dished_ends", file=file
     )
-    page = render_page(sheet, [], {"T": Assignment("iso", "x", vessel)}, CFG, sheet)
-    assert page.annotations[0]["kind"] == "generic"
-    assert page.annotations[0]["label"] == "other_generic"
-    assert page.log["multi_as_generic"] == 1
+
+
+def test_a_vessel_keeps_the_templates_cap_shape_at_any_length():
+    # 100 wide: k = 5 px/mm, the ends 12.5 px deep, whatever the box's length
+    for box in ((100, 100, 200, 300), (100, 100, 200, 700)):
+        v = _make_vessel("T", _vessel_tpl(), box)
+        xs, ys = [p[0] for p in v.poly], [p[1] for p in v.poly]
+        assert (min(xs), min(ys), max(xs), max(ys)) == pytest.approx(box)
+        assert v.cap == pytest.approx(12.5)
+        # straight walls between the ends; the apex is on the axis
+        wall = [p for p in v.poly if abs(p[0] - 100) < 1e-6]
+        assert min(p[1] for p in wall) == pytest.approx(112.5)
+        assert max(p[1] for p in wall) == pytest.approx(box[3] - 12.5)
+        assert v.y_at(150) == pytest.approx(100, abs=0.2)
+        assert v.y_at(101) > 108  # near the wall the end curves down to the body
+
+
+def test_a_vessel_wider_than_tall_lies_with_its_ends_left_and_right():
+    v = _make_vessel("T", _vessel_tpl(rot=90), (100, 100, 400, 160))  # 60 across: k = 3
+    assert v.lying and v.cap == pytest.approx(7.5)
+    assert v.target(100, 130, "L") == pytest.approx((100, 130), abs=0.5)  # the apex of the left end
+    hit = v.target(100, 101, "L")  # a pipe at the end's flank
+    assert hit[0] > 100 + 5  # reaches the curve, deep inside the box
+    top = v.target(300, 100, "T")
+    assert top == pytest.approx((300, 100))  # the straight wall is the box edge
+
+
+def test_a_side_pipe_on_the_flank_of_a_standing_vessel_is_moved_to_the_wall():
+    v = _make_vessel("T", _vessel_tpl(), (100, 100, 200, 300))
+    x, y = v.target(100, 104, "L")  # in the top end's zone (y < 112.5)
+    assert x == pytest.approx(100) and y == pytest.approx(112.5)
+    x, y = v.target(100, 200, "L")
+    assert (x, y) == (pytest.approx(100), pytest.approx(200))
+
+
+def test_a_column_has_tray_lines_a_plain_vessel_has_none():
+    col = _make_vessel("C", _vessel_tpl("X8100"), (100, 100, 200, 400))
+    assert col.column and col.trays_d().count("M") == 6  # three dashes at each end
+    assert _make_vessel("T", _vessel_tpl(), (100, 100, 200, 400)).trays_d() == ""
+
+
+def test_vessel_stub_runs_from_the_outline_to_a_port_beside_it():
+    v = _make_vessel("T", _vessel_tpl(), (100, 100, 200, 300))
+    stub = _vessel_stub(v, (230, 200), "L")  # a symbol right of the vessel, entered from the left
+    assert stub[0] == pytest.approx((200, 200)) and stub[1] == (230, 200)
+    assert _vessel_stub(v, (150, 200), "L") is None  # inside the outline already
+    assert _vessel_stub(v, (230, 500), "L") is None  # not in front of the vessel
+
+
+def _vessel_sheet(box, top_pipe_x=None, extra=()):
+    x0, y0, x1, y1 = box
+    nodes = {
+        "T": _node("T", "tank", x0, y0, x1, y1),
+        "bg": _node("bg", "background", 0, 0, 900, 900),
+    }
+    nodes.update({n.id: n for n in extra})
+    edges = []
+    if top_pipe_x is not None:
+        nodes["c"] = _dot("c", "connector", top_pipe_x, y0)
+        nodes["x"] = _dot("x", "crossing", top_pipe_x, y0 - 80)
+        edges += [("T", "c"), ("c", "x")]
+    return Sheet("vessel", 900, 900, nodes, edges)
+
+
+@needs_templates
+def test_a_vessel_is_drawn_on_its_box_and_the_pipe_stops_on_its_outline(templates):
+    vessel = templates["2062"]
+    sheet = _vessel_sheet((300, 300, 400, 600), top_pipe_x=320)
+    asg = {"T": Assignment("iso", "other_iso", vessel)}
+    page = _render(sheet, asg)
+    ann = next(a for a in page.annotations if a["id"] == "T")
+    assert ann["kind"] == "iso" and ann["label"] == "other_iso"
+    assert ann["fine_name"] == "vessel_dished_ends"
+    assert ann["bbox"] == pytest.approx([298.5, 298.5, 401.5, 601.5])
+    assert page.log["vessels"] == 1
+    entry = next(p for p in page.ports if p["id"] == "T")
+    assert 300 < entry["y"] < 300 + 12.5 + 1  # on the curve, below the box's top edge
+    run = next(pl for pl in _polylines(page.pipes) if len(pl) >= 2)
+    assert max(q[1] for q in run) >= entry["y"]  # the pipe reaches it
+
+
+@needs_templates
+def test_an_agitator_hangs_in_the_vessel_its_shaft_through_the_top(templates):
+    asg = {
+        "T": Assignment(
+            "iso", "other_iso", templates["2062"], agitator=templates["2672"].oriented(0, False)
+        )
+    }
+    page = _render(_vessel_sheet((300, 300, 420, 600)), asg)
+    ag = next(a for a in page.annotations if a["id"] == "T/agitator")
+    assert ag["node"] == "T" and ag["added"] is True
+    assert ag["label"] == ag["fine_name"] == "agitator_general"
+    x0, y0, x1, y1 = ag["bbox"]
+    assert y0 < 300 < y1 < 600  # the shaft sticks out of the top, the blades are inside
+    assert (x0 + x1) / 2 == pytest.approx(360, abs=2)  # on the axis
+    assert page.log["agitators"] == 1
+    assert next(a for a in page.annotations if a["id"] == "T").get("added") is None
+
+
+@needs_templates
+@pytest.mark.parametrize("clearance", [0.25, 0.5, 0.65])
+def test_the_blade_sits_low_in_a_tall_vessel_on_a_shaft_from_the_top(templates, clearance):
+    # ISO 10628-2 X8006: the blade half a diameter above the bottom, the shaft from the top
+    asg = {
+        "T": Assignment(
+            "iso",
+            "other_iso",
+            templates["2062"],
+            agitator=templates["2672"].oriented(0, False),
+            clearance=clearance,
+        )
+    }
+    page = _render(_vessel_sheet((300, 100, 420, 400)), asg)  # d = 120, 2.5 diameters long
+    x0, y0, x1, y1 = next(a for a in page.annotations if a["id"] == "T/agitator")["bbox"]
+    assert y1 == pytest.approx(400 - clearance * 120, abs=3)  # the blade's lowest ink
+    assert y0 < 100  # one shaft, from above the vessel's top
+    img = rasterize(page.svg)
+    cx = round((x0 + x1) / 2)
+    shaft = img[int(y0) + 1 : int(y1 - 40), cx - 2 : cx + 3].min(axis=1)
+    assert (shaft < 128).all()  # unbroken down to the blade
+
+
+@needs_templates
+def test_a_squat_vessel_hangs_the_agitator_from_the_top_as_it_is(templates):
+    asg = {
+        "T": Assignment(
+            "iso", "other_iso", templates["2062"], agitator=templates["2672"].oriented(0, False)
+        )
+    }
+    page = _render(_vessel_sheet((300, 300, 420, 444)), asg)  # 1.2: no room to go lower
+    x0, y0, x1, y1 = next(a for a in page.annotations if a["id"] == "T/agitator")["bbox"]
+    assert y0 < 300 < y1 < 444 - 120 * 0.35
+
+
+@needs_templates
+def test_the_shaft_moves_aside_for_a_pipe_entering_the_top(templates):
+    asg = {
+        "T": Assignment(
+            "iso", "other_iso", templates["2062"], agitator=templates["2672"].oriented(0, False)
+        )
+    }
+    page = _render(_vessel_sheet((300, 300, 600, 700), top_pipe_x=450), asg)
+    ag = next(a for a in page.annotations if a["id"] == "T/agitator")
+    off = abs((ag["bbox"][0] + ag["bbox"][2]) / 2 - 450)
+    assert 20 <= off <= 0.1 * 300 + 2  # off the pipe, yet near the axis
+
+
+@needs_templates
+def test_no_agitator_when_the_pipe_on_the_top_would_push_it_far_off_the_axis(templates):
+    # a shaft 0.12 of the width off the axis reads as a side-mounted agitator: left out
+    asg = {
+        "T": Assignment(
+            "iso", "other_iso", templates["2062"], agitator=templates["2672"].oriented(0, False)
+        )
+    }
+    page = _render(_vessel_sheet((300, 300, 500, 700), top_pipe_x=400), asg)
+    assert not any(a["id"] == "T/agitator" for a in page.annotations)
+    assert page.log["agitators_skipped"] == 1
+
+
+@needs_templates
+def test_an_agitator_that_would_overlap_another_symbol_is_left_out(templates):
+    sheet = _vessel_sheet((300, 300, 420, 600), extra=[_node("g", "general", 340, 340, 380, 380)])
+    asg = {
+        "T": Assignment(
+            "iso", "other_iso", templates["2062"], agitator=templates["2672"].oriented(0, False)
+        ),
+        "g": Assignment("generic", "other_generic"),
+    }
+    page = _render(sheet, asg)
+    assert not any(a["id"] == "T/agitator" for a in page.annotations)
+    assert page.log["agitators"] == 0 and page.log["agitators_skipped"] == 1
 
 
 # --- a real sheet -----------------------------------------------------------------------------

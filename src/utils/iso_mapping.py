@@ -76,6 +76,11 @@ class Assignment:
     flanges   the flange pair a disc or plate is held between (the `flanges` block of the
               config): the `flanges.symbol` template turned to the disc's pipe axis, drawn and
               labelled as a symbol of its own; None = the disc alone, which is just as correct
+    agitator  an agitator template (an `attach` symbol) mounted in this vessel, drawn and labelled
+              as a symbol of its own; PID2Graph has no such node, so it exists only in the picture
+              and the COCO file (V5b)
+    clearance the gap between the agitator's blade and the vessel's bottom, in vessel diameters
+              (ISO 10628-2 X8006 draws 0.5): the shaft is drawn as long as that needs
     """
 
     kind: str
@@ -84,6 +89,8 @@ class Assignment:
     axis: str | None = None
     forward: bool | None = None
     flanges: Template | None = None
+    agitator: Template | None = None
+    clearance: float = 0.5
 
 
 def load_config(path: str | Path | None = None) -> dict[str, Any]:
@@ -121,15 +128,28 @@ def _fits(template_sides: Counter[str], node_sides: Counter[str], placement: str
     )
 
 
-def orientations_for(template: Template, node_sides: list[str]) -> list[Template]:
-    """The orientations of `template` that may stand for a node with these port sides."""
+def orientations_for(
+    template: Template,
+    node_sides: list[str],
+    aspect: float | None = None,
+    allow_empty: bool = False,
+) -> list[Template]:
+    """The orientations of `template` that may stand for a node with these port sides.
+
+    `aspect` is the node's height / width in source px; a `multi` vessel wider than tall
+    (< 1) is turned a quarter so that its dished ends stay at the ends of the long axis.
+    `allow_empty`: a `multi` vessel may have no port at all (a tank whose only pipes are tag
+    lines)."""
     node = Counter(node_sides)
     n = sum(node.values())
     kind = template.port_config
     if kind == "attach":
         return []
     if kind == "multi":
-        return [template.oriented(0, False)] if n >= 1 else []
+        if n < 1 and not allow_empty:
+            return []
+        lying = aspect is not None and aspect < 1.0 and template.fine_name != "column"
+        return [template.oriented(90 if lying else 0, False)]
     if kind == "2":
         if n != 2:
             return []
@@ -154,6 +174,9 @@ def _pick(
     node_sides: list[str],
     rng: random.Random,
     classes: list[str] | None = None,
+    aspect: float | None = None,
+    allow_empty: bool = False,
+    not_classes: list[str] | None = None,
 ) -> Template | None:
     by_class: dict[str, list[list[Template]]] = {}  # fine_name -> [valid orientations / template]
     for t in templates.values():
@@ -161,7 +184,9 @@ def _pick(
             continue
         if classes is not None and t.fine_name not in classes:
             continue
-        valid = orientations_for(t, node_sides)
+        if not_classes is not None and t.fine_name in not_classes:
+            continue
+        valid = orientations_for(t, node_sides, aspect, allow_empty)
         if valid:
             by_class.setdefault(t.fine_name, []).append(valid)
     if not by_class:
@@ -178,6 +203,38 @@ def _flanges_for(
     pipe axis); None when no flange template is in scope."""
     fits = [o for t in flange_tpls for o in t.all_orientations() if set(o.sides) == set(disc.sides)]
     return rng.choice(fits) if fits else None
+
+
+def _agitator_for(
+    node: Node,
+    picked: Template,
+    templates: Mapping[str, Template],
+    cfg: Mapping[str, Any],
+    rng: random.Random,
+) -> tuple[Template, float] | None:
+    """An agitator for a vessel and its blade's clearance (drawn in `cfg["clearance"]`), or
+    None. Only in the `host` class (2062), on a node of one of `labels` (a `tank`: a large
+    `general` drawn as 2062 is no vessel in OPEN100), standing (height / width within
+    `aspect`); the class is drawn uniformly, then its template. A column or a lying vessel (a
+    heater) never gets one."""
+    if not cfg or picked.fine_name != cfg.get("host"):
+        return None
+    if node.label not in cfg.get("labels", [node.label]):
+        return None
+    lo, hi = cfg["aspect"]
+    if not (lo <= node.height / node.width < hi):
+        return None
+    if rng.random() >= float(cfg["p"]):
+        return None
+    by_class: dict[str, list[Template]] = {}
+    for t in templates.values():
+        if t.placement == "attach" and t.fine_name in cfg["classes"]:
+            by_class.setdefault(t.fine_name, []).append(t)
+    if not by_class:
+        return None
+    tpl = rng.choice(by_class[rng.choice(list(by_class))]).oriented(0, False)
+    lo, hi = cfg.get("clearance", [0.5, 0.5])
+    return tpl, rng.uniform(float(lo), float(hi))
 
 
 _TIP_SIDE = {("H", True): "R", ("H", False): "L", ("V", True): "B", ("V", False): "T"}
@@ -256,7 +313,8 @@ def assign_symbols(
     `iso_templates.load_templates`, whose `scope` decides which are drawable. Nodes go in
     sheet order and every random draw comes from `rng`, so a seed reproduces the result.
     The first rule of `cfg["rules"]` whose filters (label, size, ports, next_to, not_next_to,
-    tagged) match and that yields a symbol wins; a `replace` rule first rolls `p_replace`. No rule
+    tagged, min_aspect / max_aspect = height / width in [min, max)) match and that yields a symbol
+    wins; a `replace` rule first rolls `p_replace`. No rule
     -> a plain box. A symbol of a `cfg["flanges"]["classes"]` class gets flanges with chance `p`.
     """
     rules = list(cfg["rules"])
@@ -267,6 +325,7 @@ def assign_symbols(
     flange_classes = set(flange_cfg.get("classes", []))
     p_flanges = float(flange_cfg.get("p", 0.0))
     flange_tpls = [t for t in templates.values() if t.fine_name == flange_cfg.get("symbol")]
+    agitator_cfg = cfg.get("agitators") or {}
     arrow_tpls = [
         t
         for t in templates.values()
@@ -312,12 +371,25 @@ def assign_symbols(
                 continue
             if rule.get("tagged") not in (None, tagged):
                 continue
+            aspect = node.height / node.width if node.width > 0 else 1.0
+            if aspect < float(rule.get("min_aspect", 0.0)):
+                continue
+            if aspect >= float(rule.get("max_aspect", float("inf"))):
+                continue
             if rule.get("replace") and rng.random() >= p_replace:
                 continue
             kind = rule.get("kind", "iso")
             if kind == "iso":
                 picked = _pick(
-                    templates, rule["groups"], rule.get("configs"), sides, rng, rule.get("classes")
+                    templates,
+                    rule["groups"],
+                    rule.get("configs"),
+                    sides,
+                    rng,
+                    rule.get("classes"),
+                    aspect,
+                    bool(rule.get("allow_empty", False)),
+                    rule.get("not_classes"),
                 )
                 if picked is None:
                     continue
@@ -325,7 +397,19 @@ def assign_symbols(
                 flanges = None
                 if picked.fine_name in flange_classes and rng.random() < p_flanges:
                     flanges = _flanges_for(picked, flange_tpls, rng)
-                result = Assignment("iso", label, template=picked, flanges=flanges)
+                agitator = (
+                    _agitator_for(node, picked, templates, agitator_cfg, rng)
+                    if picked.port_config == "multi"
+                    else None
+                )
+                result = Assignment(
+                    "iso",
+                    label,
+                    template=picked,
+                    flanges=flanges,
+                    agitator=agitator[0] if agitator else None,
+                    clearance=agitator[1] if agitator else 0.5,
+                )
             elif kind in ("arrow", "flag"):
                 if sides:
                     axis = "H" if rng.choice(sides) in "LR" else "V"

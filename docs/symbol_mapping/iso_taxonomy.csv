@@ -20,7 +20,7 @@ X2125,1,G2,valve_angle_3way,safety_valve_spring_angle,"Safety valve, spring load
 X8070,1,G2,valve_angle_3way,valve_three_way_globe,"Valve, three way globe type",no,html,X8070,3,no,pipe,,
 X8073,1,G2,valve_angle_3way,valve_three_way_ball,"Valve, three way ball type",no,html,X8073,3,no,pipe,,
 516,1,G3,piping_fitting,reducer,Reducer,yes,html,511,2_straight,no,pipe,,
-511,1,G3,piping_fitting,flanged_connection,Flanged connection,yes,html,,2_straight,no,pipe,"L,R",in scope since 2026-11-01 (vessel nozzles; disc between flanges); BK-2020 pipe pieces dropped
+511,1,G3,piping_fitting,flanged_connection,Flanged connection,yes,html,,2_straight,no,pipe_or_end,"L,R",in scope since 2026-11-01 (vessel nozzles; disc between flanges); BK-2020 pipe pieces dropped; pipe_or_end since 2026-11-05 (a flanged nozzle / pipe end: 53 of the 55 small one-port `general` nodes in OPEN100)
 C0096,1,G3,piping_fitting,orifice_plate,Orifice plate,no,html,C0096,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
 C0097,1,G3,piping_fitting,blind_disc,Blind disc,yes,html,C0097,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
 C0098,1,G3,piping_fitting,open_disc,Open disc,yes,extra,,2_straight,no,pipe,"L,R@tail",no stubs: the pipe passes through
@@ -46,11 +46,11 @@ X8079,1,G4,equipment,hx_general,"Heat exchanger (general), condenser",yes,extra,
 301,1,G4,equipment,tank,"Tank, vessel",yes,extra,,multi,no,pipe,,ports anywhere on the outline
 2062,1,G4,equipment,vessel_dished_ends,"Tank, vessel with dished ends",no,html,2062,multi,no,pipe,,ports anywhere on the outline
 2063,1,G4,equipment,vessel_spherical,Spherical vessel,yes,extra,,multi,no,pipe,,ports anywhere on the outline
-X8100,1,G4,equipment,column,Column (general),yes,extra,,multi,no,pipe,,ports anywhere on the outline
+X8100,1,G4,equipment,column,Column (general),yes,html,,multi,no,pipe,,ports anywhere on the outline
 C0082,1,G4,equipment,motor_electric,Electric motor (general),yes,extra,,attach,no,attach,,not on a pipe: drawn next to a pump/compressor
-2672,1,G4,equipment,agitator_general,"Agitator (general), stirrer (general)",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
-C2024,1,G4,equipment,agitator_impeller,"Agitator, impeller type",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
-C2027,1,G4,equipment,agitator_turbine,"Agitator, turbine type",yes,extra,,attach,no,attach,,not on a pipe: mounted on a vessel
+2672,1,G4,equipment,agitator_general,"Agitator (general), stirrer (general)",yes,html,,attach,no,attach,,not on a pipe: mounted on a vessel
+C2024,1,G4,equipment,agitator_impeller,"Agitator, impeller type",yes,html,,attach,no,attach,,not on a pipe: mounted on a vessel
+C2027,1,G4,equipment,agitator_turbine,"Agitator, turbine type",yes,html,,attach,no,attach,,not on a pipe: mounted on a vessel
 X8080,1,G5,safety_vent_end,rupture_disc,Rupture disc,no,html,X8081,2_straight,no,pipe_or_end,,only one kind in BK-2020
 X8088,1,G5,safety_vent_end,breather_valve,Breather valve,yes,html,X8083,2_straight,no,pipe_or_end,,
 2036,1,G5,safety_vent_end,flame_arrestor,Flame arrestor,no,html,X8084,2_straight,no,pipe_or_end,,

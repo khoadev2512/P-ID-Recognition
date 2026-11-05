@@ -308,9 +308,10 @@ def real_templates() -> dict[str, Template]:
 def test_real_templates_load(real_templates):
     assert len(real_templates) == 63
     # 45 of the 5-group proposal + 511 flanged_connection (2026-11-01) + 241 flow_direction
-    # (2026-11-02, an overlay: no rule draws it, arrows carry it)
-    assert sum(t.scope == "html" for t in real_templates.values()) == 47
-    assert len(load_templates(_REAL_DIR, _TAXONOMY, "html")) == 47
+    # (2026-11-02, an overlay: no rule draws it, arrows carry it) + X8100 column and the three
+    # agitators (2026-11-05, V5b)
+    assert sum(t.scope == "html" for t in real_templates.values()) == 51
+    assert len(load_templates(_REAL_DIR, _TAXONOMY, "html")) == 51
     for t in real_templates.values():
         assert t.ports, t.file
         assert t.body(stroke=0.5).startswith("<g")

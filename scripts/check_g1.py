@@ -56,7 +56,12 @@ def port_ink(page: Page, pipes: np.ndarray, symbols: np.ndarray, tol: int = PORT
     misses: list[dict] = []
     for p in page.ports:
         x, y = int(round(p["x"])), int(round(p["y"]))
-        near = (slice(max(y - tol, 0), y + tol + 1), slice(max(x - tol, 0), x + tol + 1))
+        # every pixel a part of which is within `tol` of the port: a line ending at y = 3755.51
+        # covers half of row 3755 (too light to count) and has its ink in row 3754
+        near = (
+            slice(max(math.floor(p["y"] - tol), 0), math.ceil(p["y"] + tol) + 1),
+            slice(max(math.floor(p["x"] - tol), 0), math.ceil(p["x"] + tol) + 1),
+        )
         zone = (slice(max(y - tol - 2, 0), y + tol + 3), slice(max(x - tol - 2, 0), x + tol + 3))
         lacks = []
         if not pipes[near].any():

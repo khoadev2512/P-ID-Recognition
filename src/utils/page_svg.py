@@ -10,7 +10,10 @@ Order of work: place every ISO symbol by its ports -> shrink or replace symbols 
 overlap -> connect the pipes to the final ports -> draw. A symbol's size comes from its original
 bbox (x S), its position from where the pipes reach it after V4 (see plan §V5).
 
-Not drawn as ISO yet: `multi` templates (vessels) become an `other_generic` box.
+Vessels (`multi` templates: 2062 with dished ends, X8100 column) are drawn from the template's own
+cap curves on the node's box (`_Vessel`): the box gives the diameter and the length, so the
+strokes stay square at any aspect ratio. Pipes stop on the drawn outline (`_Vessel.target`), and
+a standing 2062 may carry an agitator (V5b).
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ EPS = 1e-6
 _INK_PX_PER_MM = 40
 _INK_STROKE_MM = 0.06  # stroke used to measure a template's ink box (geometry + a hair)
 _SIGN = {"L": 1, "T": 1, "R": -1, "B": -1}  # travel direction of a pipe entering that side
+_OPPOSITE_SIDE = {"L": "R", "R": "L", "T": "B", "B": "T"}
 # flanges around a disc (template 511, flanged_connection): its two marks are 2.5 mm apart
 # (centre to centre); a mark is never closer to the disc's stem than _FLANGE_MIN_GAP strokes,
 # so it does not merge with it
@@ -53,6 +57,32 @@ _FLANGE_PAIR = "flanged_connection"
 _LEADER_STROKE = 0.5
 _FLANGE_MIN_GAP = 2.0
 GENERIC_LABEL = "other_generic"
+# a vessel (2062, X8100) in BK-2020: 20 mm across, elliptic ends 2.5 mm deep (a cubic of these
+# control points, in mm: x across, d outwards from the end of the straight body)
+_VESSEL_MM = 20.0
+_CAP_MM = 2.5
+_CAP_CURVE = (
+    (0.0, 0.0),
+    (0.0, 0.0),
+    (2.5, 2.5),
+    (10.0, 2.5),
+    (17.5, 2.5),
+    (20.0, 0.0),
+    (20.0, 0.0),
+)
+_CURVE_STEPS = 24
+# the column's tray lines: three dashes across, this far inside each end of the body
+_TRAY_MM = 2.5
+_TRAY_DASHES_MM = ((0.0, 4.0), (8.0, 12.0), (16.0, 20.0))
+COLUMN = "column"
+# an agitator's shaft sticks out of the vessel's top by this much (ISO 10628-2 X8006), and the
+# template is at most this fraction of the vessel's length (else at the vessel's own scale: the
+# blade is half its diameter)
+_SHAFT_OUT_MM = 3.0
+_AGITATOR_MAX_LENGTH = 0.7
+# the shaft stays within this fraction of the vessel's width from its axis: farther, it reads
+# as a side-mounted agitator (no agitator rather than that)
+_AGITATOR_MAX_OFFSET = 0.1
 # two bubbles joined by a run are moved to touch when their circles are this many strokes apart
 # at most (a run of no length: always)
 _BUBBLE_JOIN_STROKES = 2
@@ -842,8 +872,8 @@ def _nozzle_links(
     placed: dict[str, _Placed],
     kind: dict[str, str],
 ) -> dict[int, tuple[str, str, Port]]:
-    """Links of no length between a placed ISO symbol and a shape drawn as a box (a vessel,
-    for now, or a plain box): run index -> (symbol, box node, the symbol's port on it).
+    """Links of no length between a placed ISO symbol and a vessel or a plain box: run index ->
+    (symbol, vessel / box node, the symbol's port on it).
 
     In OPEN100 these are vessel nozzles: a flange or a closed nozzle against the vessel. The
     ISO symbol is drawn smaller than its box, so without a pipe it would float off the vessel
@@ -855,7 +885,7 @@ def _nozzle_links(
         for p in ports[nid]:
             run = runs[p.run]
             other = run.b if run.a == nid else run.a
-            if run.internal or other == nid or kind.get(other) != "generic":
+            if run.internal or other == nid or kind.get(other) not in ("generic", "vessel"):
                 continue
             if len({tuple(q) for q in run.points}) <= 1 or p.run in degenerate:
                 out[p.run] = (nid, other, p)
@@ -894,6 +924,231 @@ def _drawn_ends(
             if side is not None:
                 out[(idx, end)] = (node, pt[0], pt[1], side, other)
     return out
+
+
+# --- vessels ----------------------------------------------------------------------------------
+
+
+@dataclass
+class _Vessel:
+    """A vessel drawn on a node's box: elliptic ends on a straight body, as BK-2020 draws 2062.
+
+    The box gives the diameter (its short side: `k` = diameter / 20 mm px per mm) and the length
+    (the long side). The cap curves keep the template's shape at that `k`, the body is as long
+    as the box needs, so a stroke is never stretched. A box wider than tall is drawn lying down,
+    with the ends left and right. `poly` is the outline (the curves in short chords), for finding
+    where a pipe meets it."""
+
+    nid: str
+    box: Box
+    lying: bool
+    column: bool
+    k: float
+    poly: list[Point]
+
+    @property
+    def cap(self) -> float:
+        return _CAP_MM * self.k
+
+    @property
+    def length(self) -> float:
+        x0, y0, x1, y1 = self.box
+        return (x1 - x0) if self.lying else (y1 - y0)
+
+    def _page(self, v: float, u: float) -> Point:
+        """Page point of `v` across the vessel and `u` along it (from its first end)."""
+        x0, y0, _, _ = self.box
+        return (x0 + u, y0 + v) if self.lying else (x0 + v, y0 + u)
+
+    def outline_d(self) -> str:
+        return "M" + " L".join(f"{_fmt(x)},{_fmt(y)}" for x, y in self.poly) + " Z"
+
+    def trays_d(self) -> str:
+        """The column's tray lines as a path (empty for a plain vessel)."""
+        if not self.column:
+            return ""
+        parts = []
+        for u in (self.cap + _TRAY_MM * self.k, self.length - self.cap - _TRAY_MM * self.k):
+            for a, b in _TRAY_DASHES_MM:
+                (xa, ya), (xb, yb) = self._page(a * self.k, u), self._page(b * self.k, u)
+                parts.append(f"M{_fmt(xa)},{_fmt(ya)} L{_fmt(xb)},{_fmt(yb)}")
+        return " ".join(parts)
+
+    def ink_box(self, w_px: float) -> Box:
+        return _grow(self.box, w_px / 2)
+
+    def target(self, x: float, y: float, side: str) -> Point:
+        """Where a pipe end at (x, y) entering through `side` meets the outline. A pipe on the
+        flank of a dished end (a side port in the cap's zone) is first moved to the straight
+        body, so that it joins the wall and not the curve far from its box edge."""
+        bx0, by0, bx1, by1 = self.box
+        if not self.lying and side in "LR":
+            y = min(max(y, by0 + self.cap), by1 - self.cap)
+        elif self.lying and side in "TB":
+            x = min(max(x, bx0 + self.cap), bx1 - self.cap)
+        return _ray_polygon(self.poly, (x, y), side) or (x, y)
+
+    def y_at(self, x: float) -> float:
+        """Page y of the top of a standing vessel's outline at `x`."""
+        hit = _ray_polygon(self.poly, (x, self.box[1]), "T")
+        return hit[1] if hit else self.box[1]
+
+    def bottom_at(self, x: float) -> float:
+        """Page y of the bottom of a standing vessel's outline at `x`."""
+        hit = _ray_polygon(self.poly, (x, self.box[3]), "B")
+        return hit[1] if hit else self.box[3]
+
+    @property
+    def diameter(self) -> float:
+        return _VESSEL_MM * self.k
+
+
+@dataclass
+class _Agitator:
+    """An agitator placed in a vessel: the template (`pl`, at the vessel's scale, its blade low in
+    the vessel) and the shaft drawn above it at `x`, from `top` (above the vessel's top) down to
+    `joint`, inside the template's own shaft. `joint` <= `top`: the template's shaft is enough."""
+
+    pl: _Placed
+    x: float
+    top: float
+    joint: float
+
+    @property
+    def nid(self) -> str:
+        return self.pl.nid
+
+    @property
+    def tpl(self) -> Template:
+        return self.pl.tpl
+
+    def ink_box(self, w_px: float) -> Box:
+        x0, y0, x1, y1 = self.pl.ink_box(w_px)
+        if self.joint <= self.top:
+            return (x0, y0, x1, y1)
+        return (min(x0, self.x - w_px / 2), min(y0, self.top), max(x1, self.x + w_px / 2), y1)
+
+    def svg(self, w_px: float) -> str:
+        body = f'<g transform="{self.pl.transform()}">{self.tpl.body(stroke=w_px / self.pl.k)}</g>'
+        if self.joint <= self.top:
+            return body
+        shaft = (
+            f'<path d="M{_fmt(self.x)},{_fmt(self.top)} L{_fmt(self.x)},{_fmt(self.joint)}" '
+            f'fill="none" stroke="black" stroke-width="{_fmt(w_px)}"/>'
+        )
+        return shaft + body
+
+
+def _cubic(p0: Point, c1: Point, c2: Point, p1: Point) -> list[Point]:
+    out = []
+    for i in range(1, _CURVE_STEPS + 1):
+        t = i / _CURVE_STEPS
+        a, b, c, d = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t**2, t**3
+        out.append(
+            (
+                a * p0[0] + b * c1[0] + c * c2[0] + d * p1[0],
+                a * p0[1] + b * c1[1] + c * c2[1] + d * p1[1],
+            )
+        )
+    return out
+
+
+def _make_vessel(nid: str, tpl: Template, box: Box) -> _Vessel:
+    """The vessel of template `tpl` (2062, X8100) drawn on `box`."""
+    x0, y0, x1, y1 = box
+    lying = tpl.rot in (90, 270)
+    diameter, length = ((y1 - y0), (x1 - x0)) if lying else ((x1 - x0), (y1 - y0))
+    k = diameter / _VESSEL_MM
+    cap = _CAP_MM * k
+    # v across, u along: the first end's cap runs out from u = cap to u = 0, the last end's from
+    # u = length - cap to u = length
+    p0, c1, c2, p1, c3, c4, p2 = ((x * k, d * k) for x, d in _CAP_CURVE)
+
+    def at_first(q: Point) -> Point:
+        return (q[0], cap - q[1])
+
+    def at_last(q: Point) -> Point:
+        return (q[0], length - cap + q[1])
+
+    vu: list[Point] = [at_first(p0)]
+    vu += _cubic(at_first(p0), at_first(c1), at_first(c2), at_first(p1))
+    vu += _cubic(at_first(p1), at_first(c3), at_first(c4), at_first(p2))
+    vu += [at_last(p2)]  # down the straight body
+    vu += _cubic(at_last(p2), at_last(c4), at_last(c3), at_last(p1))
+    vu += _cubic(at_last(p1), at_last(c2), at_last(c1), at_last(p0))
+    vessel = _Vessel(nid, box, lying, tpl.fine_name == COLUMN, k, [])
+    vessel.poly = [vessel._page(v, u) for v, u in vu]
+    return vessel
+
+
+def _inside(poly: list[Point], pt: Point) -> bool:
+    """Even-odd test: is `pt` inside the closed polygon `poly`?"""
+    x, y = pt
+    inside = False
+    for (xa, ya), (xb, yb) in zip(poly, [*poly[1:], poly[0]], strict=True):
+        if (ya > y) != (yb > y) and x < xa + (y - ya) * (xb - xa) / (yb - ya):
+            inside = not inside
+    return inside
+
+
+def _vessel_stub(vessel: _Vessel, target: Point, side: str) -> list[Point] | None:
+    """The pipe from the vessel's outline to `target`, a port on `side` of the symbol beside it
+    (as `_nozzle_stub` for a box); None when the port is inside the outline, or the vessel is not
+    in front of it."""
+    if _inside(vessel.poly, target):
+        return None
+    start = _ray_polygon(vessel.poly, target, _OPPOSITE_SIDE[side])
+    if start is None or math.dist(start, target) <= EPS:
+        return None
+    return [start, target]
+
+
+def _place_agitator(
+    vessel: _Vessel,
+    tpl: Template,
+    w_px: float,
+    top_ends: list[float],
+    obstacles: list[Box],
+    clearance: float = 0.5,
+) -> _Agitator | None:
+    """An agitator in a standing vessel: shaft vertical, through the top, the blade low inside.
+
+    As ISO 10628-2 draws it (X8006): the template at the vessel's scale (the blade is half the
+    vessel's diameter; no longer than `_AGITATOR_MAX_LENGTH` of its length), its blade
+    `clearance` diameters above the vessel's bottom, the shaft drawn on from the template's up
+    through the top. When the vessel is too short for that, the template hangs from the top as
+    it is. The shaft is on the axis unless a pipe enters the top there (`top_ends`: x of the
+    pipe ends on the top); then it moves to the nearest place that clears them, at most
+    `_AGITATOR_MAX_OFFSET` of the vessel's width away. A shaft that would reach a symbol
+    outside the vessel (`obstacles`: the other symbols' boxes) stops at the outline instead; an
+    agitator that overlaps one anyway (a symbol inside the vessel) is left out. None when there
+    is no place."""
+    ix0, iy0, ix1, iy1 = oriented_ink_box(tpl)
+    k = min(vessel.k, _AGITATOR_MAX_LENGTH * vessel.length / (iy1 - iy0))
+    blade = (ix1 - ix0) * k
+    x0, _, x1, _ = vessel.box
+    mid = (x0 + x1) / 2
+    off = _AGITATOR_MAX_OFFSET * (x1 - x0)
+    lo = max(x0 + blade / 2 + w_px, mid - off)
+    hi = min(x1 - blade / 2 - w_px, mid + off)
+    clear = 8 * w_px  # only the shaft meets a pipe on the top: the blades are inside
+    step = 2 * w_px
+    shaft = tpl.ports[0]
+    for i in range(int((hi - lo) / step) + 2):
+        for x in (mid,) if i == 0 else (mid - i * step, mid + i * step):
+            if not (lo <= x <= hi and all(abs(x - t) >= clear for t in top_ends)):
+                continue
+            low = vessel.bottom_at(x) - clearance * vessel.diameter - (iy1 - iy0) * k
+            for out_mm in (_SHAFT_OUT_MM, 0.0):
+                top = vessel.y_at(x) - out_mm * k
+                ink_top = max(low, top)  # the template's ink top
+                pl = _Placed(
+                    f"{vessel.nid}/agitator", tpl, k, (x - k * shaft.x_mm, ink_top - k * iy0), []
+                )
+                ag = _Agitator(pl, x, top, ink_top + w_px if ink_top > top else top)
+                if not any(_overlap(ag.ink_box(w_px), o) for o in obstacles):
+                    return ag
+    return None
 
 
 # --- the page ---------------------------------------------------------------------------------
@@ -971,7 +1226,7 @@ def render_page(
     stub = 2 * w_px
     log = dict.fromkeys(
         (
-            "iso", "shrunk", "replaced", "multi_as_generic",
+            "iso", "shrunk", "replaced", "vessels", "agitators", "agitators_skipped",
             "zero_length_runs", "skipped_internal_runs", "unmatched_ports", "loose_ends", "stems",
             "flanges", "nozzles", "resized", "turned", "leaders", "bubbles_moved",
             "bubbles_unsettled",
@@ -1013,12 +1268,14 @@ def render_page(
     circles = _bubble_circles(sheet, runs, kind, w_px, bubble_stats)
     log["bubbles_moved"] = bubble_stats["moved"]  # circles moved to touch their neighbour
     log["bubbles_unsettled"] = bubble_stats["unsettled"]  # pairs left overlapping / apart
+    vessels: dict[str, _Vessel] = {}
     for nid, a in assignments.items():
         if a.kind != "iso":
             continue
-        if a.template.port_config == "multi":
-            kind[nid] = "generic"  # vessels are boxes for now
-            log["multi_as_generic"] += 1
+        if a.template.port_config == "multi":  # drawn on its box, not placed by ports
+            kind[nid] = "vessel"
+            vessels[nid] = _make_vessel(nid, a.template, _node_box(sheet.nodes[nid]))
+            log["vessels"] += 1
             continue
         size_box = _node_box(source.nodes[nid])
         if replaced_px is not None and sheet.nodes[nid].label == "instrumentation":
@@ -1042,6 +1299,24 @@ def render_page(
             placed[nid].min_factor = min(1.0, _fit_scale(a.template, size_box, scale) / k)
         log["iso"] += 1
         log["unmatched_ports"] += max(len(ports[nid]) - len(placed[nid].pairs), 0)
+
+    # an agitator in a standing vessel; the shaft keeps clear of the pipes entering its top
+    agitators: dict[str, _Agitator] = {}
+    all_ends = _drawn_ends(runs, set()) if vessels else {}
+    for nid, vessel in vessels.items():
+        if assignments[nid].agitator is None:
+            continue
+        top_ends = [x for nd, x, _, side, _ in all_ends.values() if nd == nid and side == "T"]
+        others = [
+            _node_box(sheet.nodes[n]) for n, kd in kind.items() if n != nid and kd != "nested"
+        ]
+        a = assignments[nid]
+        ag = _place_agitator(vessel, a.agitator, w_px, top_ends, others, a.clearance)
+        if ag is None:
+            log["agitators_skipped"] += 1
+        else:
+            agitators[nid] = ag
+            log["agitators"] += 1
 
     # a device at the end of a line that sits against a vessel goes to the end of a short nozzle
     nozzles = _nozzle_links(sheet, runs, ports, placed, kind)
@@ -1159,6 +1434,7 @@ def render_page(
             loose,
             flanges.get(nid),
             circles.get(nid),
+            vessels.get(nid),
         ):
             for e in "ab":
                 if (p.run, e) in ends and ends[(p.run, e)][:3] == (nid, p.x, p.y):
@@ -1202,7 +1478,10 @@ def render_page(
         if not hits:
             continue
         target, side = hits[0]
-        line = _nozzle_stub(_node_box(sheet.nodes[box_node]), target, side)
+        if box_node in vessels:
+            line = _vessel_stub(vessels[box_node], target, side)
+        else:
+            line = _nozzle_stub(_node_box(sheet.nodes[box_node]), target, side)
         if line is None:
             continue
         polylines.append(_extend(line, w_px / 2))
@@ -1288,6 +1567,27 @@ def render_page(
                     }
                 )
                 log["flanges"] += 1
+        elif kd == "vessel":
+            vessel = vessels[nid]
+            fine, tpl_file = a.template.fine_name, a.template.file
+            outline.append(f'<path d="{vessel.outline_d()}"/>')
+            if vessel.column:
+                outline.append(f'<path d="{vessel.trays_d()}"/>')
+            if nid in agitators:
+                ag = agitators[nid]
+                sym_parts.append(ag.svg(w_px))
+                annotations.append(
+                    {
+                        "id": ag.nid,
+                        "node": nid,
+                        "label": ag.tpl.fine_name if ag.tpl.in_vocab else OTHER_ISO,
+                        "kind": "iso",
+                        "fine_name": ag.tpl.fine_name,
+                        "template": ag.tpl.file,
+                        "bbox": [round(v, 2) for v in ag.ink_box(w_px)],
+                        "added": True,  # PID2Graph has no such node: picture and COCO only
+                    }
+                )
         elif kd == "generic":
             label = GENERIC_LABEL
             b = _node_box(sheet.nodes[nid])
@@ -1306,7 +1606,7 @@ def render_page(
                 "id": nid,
                 "node": nid,
                 "label": label,
-                "kind": kd,
+                "kind": "iso" if kd == "vessel" else kd,
                 "fine_name": fine,
                 "template": tpl_file,
                 "bbox": [round(v, 2) for v in boxes[nid]],
@@ -1357,6 +1657,7 @@ def _port_targets(
     loose: list[Port],
     flanges: _Placed | None = None,
     circle: Circle | None = None,
+    vessel: _Vessel | None = None,
 ) -> list[tuple[Port, Point, str]]:
     """(pipe end, where it should stop, side it enters) for each pipe end of a symbol.
 
@@ -1386,7 +1687,9 @@ def _port_targets(
         out += [(p, pl.ink_target(p), p.side) for p in free]
         return out
     ends = [*node_ports, *loose]
-    if kd == "bubble":
+    if kd == "vessel" and vessel is not None:
+        out += [(p, vessel.target(p.x, p.y, p.side), p.side) for p in ends]
+    elif kd == "bubble":
         if circle is None:
             b = _node_box(sheet.nodes[nid])
             circle = (((b[0] + b[2]) / 2, (b[1] + b[3]) / 2), min(b[2] - b[0], b[3] - b[1]) / 2)

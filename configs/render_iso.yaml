@@ -3,7 +3,7 @@
 # Read it with utils.iso_mapping.load_config(); the symbols inside a group come from the
 # taxonomy (docs/symbol_mapping/iso_taxonomy.csv), not from this file.
 render_iso:
-  scope: html          # html = the 47 drawable templates | all = all 63 (taxonomy `scope`)
+  scope: html          # html = the 51 drawable templates | all = all 63 (taxonomy `scope`)
   p_replace: 0.3       # chance that a 1-port instrumentation bubble becomes a group-5 device
   template_dir: data/raw/template_iso_svg
   taxonomy_csv: docs/symbol_mapping/iso_taxonomy.csv
@@ -42,11 +42,30 @@ render_iso:
     classes: [orifice_plate, blind_disc, open_disc, interchangeable_disc,
               interchangeable_disc_open]
 
+  # V5b: an agitator in a standing vessel. PID2Graph has no agitator node, so it is added to the
+  # picture and to the COCO file only (never to the GraphML; the annotation carries
+  # `added: true`). Only the `host` class (2062: a column and a lying heater never get one),
+  # only on a node of these `labels` (a large `general` drawn as 2062 is an air cooler or a
+  # detail frame in OPEN100, not a vessel), and only when height / width of the PID2Graph box
+  # is within `aspect`. No width limit: the agitator is drawn at the vessel's own scale.
+  # `clearance`: gap between the blade and the vessel's bottom, in vessel diameters, drawn
+  # uniformly (ISO 10628-2 X8006: 0.5; a real stirred tank has the blade's middle about 1/3
+  # diameter up); the shaft reaches down from the top as far as needed.
+  agitators:
+    p: 0.3
+    host: vessel_dished_ends
+    labels: [tank]
+    aspect: [1.2, 3.0]
+    clearance: [0.25, 0.65]
+    classes: [agitator_general, agitator_impeller, agitator_turbine]
+
   # Flat, first match wins. Filters (all optional): label, size, ports (port_config kinds of
   # the node: "0" "1" "2_straight" "2_angle" "2_same" "3" "4" "multi"), next_to / not_next_to
   # (labels of the nodes its pipes lead to: at least one / none of them; a bubble on a valve
   # is its actuator, not a branch; a fitting next to a tank stands at a vessel nozzle), tagged
-  # (true / false: a bubble, an `instrumentation` node, is linked to the node).
+  # (true / false: a bubble, an `instrumentation` node, is linked to the node), min_aspect /
+  # max_aspect (height / width of the node's box, source px: >= min, < max), allow_empty (a
+  # `multi` vessel with no port at all), not_classes (the opposite of `classes`).
   #   kind     iso (default) | arrow | leader | flag | bubble | generic
   #   groups   taxonomy groups G1..G5 an iso rule draws from; configs narrows them to templates
   #            with these taxonomy `port_config` values, classes to these `fine_name`s
@@ -60,7 +79,12 @@ render_iso:
     - {label: inlet/outlet, kind: flag}        # simple flag arrow, no label
     - {label: valve, groups: [G1, G2]}         # 2_straight -> G1; 2_angle, 3 -> G2
     - {label: pump, groups: [G4], configs: ["2"]}
-    - {label: tank, groups: [G4], configs: [multi]}   # never a heat exchanger
+    # a vessel at least three times as tall as wide is a column (X8100), else a vessel with dished
+    # ends (2062); one lying down (height < width) is drawn turned. Never a heat exchanger.
+    - {label: tank, groups: [G4], configs: [multi], classes: [column], min_aspect: 3,
+       allow_empty: true}
+    - {label: tank, groups: [G4], configs: [multi], classes: [vessel_dished_ends],
+       allow_empty: true}
     # a small fitting with a tag (FO / RO) is a flange pair in OPEN100: all 11 of them, in the
     # 12 sheets. Drawn as a bare flange pair, it is never a disc or any other fitting.
     - {label: general, size: small, ports: ["2_straight"], tagged: true, groups: [G3],
@@ -71,8 +95,15 @@ render_iso:
        classes: [flanged_connection, blind_disc, open_disc, interchangeable_disc,
                  interchangeable_disc_open, compensator, reducer]}
     - {label: general, size: small, ports: ["2_straight", "3"], groups: [G3]}
+    # at a pipe end (a vessel nozzle, a vent or drain behind a valve) a flange pair in OPEN100: 53
+    # of the 55 on the 12 sheets (the others: a vacuum breaker, a funnel). Not a G5 device: a
+    # flame arrestor on a vessel's bottom nozzle is wrong. G5 comes from replaced bubbles only.
+    - {label: general, size: small, ports: ["1"], groups: [G3], classes: [flanged_connection]}
     - {label: general, size: small, ports: ["1"], groups: [G5]}
-    - {label: general, size: large, groups: [G4], configs: [multi, "4"]}
+    - {label: general, size: large, groups: [G4], configs: [multi], classes: [column],
+       min_aspect: 3}
+    - {label: general, size: large, groups: [G4], configs: [multi, "4"], not_classes: [column],
+       max_aspect: 3}
     # not on a valve (its actuator) nor a `general` node: at a flange pair the tag (FO / RO) names
     # the orifice, so a G5 device there would be a wrong symbol, and its line would lose the gap
     - {label: instrumentation, ports: ["1"], not_next_to: [valve, general], groups: [G5],

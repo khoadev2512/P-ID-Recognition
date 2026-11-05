@@ -1,0 +1,62 @@
+group,reg,n_stubs,sides,port_config,desc
+G1,2101,2,LR,2_straight,Valve (general)
+G1,X8068,2,LR,2_straight,"Valve, globe type"
+G1,X8071,2,LR,2_straight,"Valve, ball type"
+G1,X8074,2,LR,2_straight,"Valve, gate type"
+G1,X8075,2,LR,2_straight,"Valve, butterfly type (Form 2)"
+G1,X8076,2,LR,2_straight,"Valve, needle type"
+G1,X8087,1,R,1,"Valve, control type, continuously operated"
+G1,X8077,2,LR,2_straight,Check valve (general)
+G1,X2113,2,LR,2_straight,Check valve globe type
+G1,X8078,2,LR,2_straight,Swing check valve (Form 1)
+G1,X8165,2,LR,2_straight,Swing check valve (Form 2)
+G2,2102,2,BL,2_angle,"Valve, angle type (general)"
+G2,X8069,2,BL,2_angle,"Valve, angle globe type"
+G2,X8072,2,BL,2_angle,"Valve, angle ball type"
+G2,2103,3,BLR,3,"Valve, three way type (general)"
+G2,X8070,3,BLR,3,"Valve, three way globe type"
+G2,X8073,3,BLR,3,"Valve, three way ball type"
+G2,X2124,2,LR,2_straight,"Safety valve, spring loaded, globe type"
+G2,X2125,2,BR,2_angle,"Safety valve, spring loaded, globe angle type"
+G3,2034,2,LR,2_straight,Viewing glass
+G3,2033,2,LR,2_straight,Silencer
+G3,C0093,4,BLRR,4,"Mixing nozzle, injector"
+G3,533,2,LR,2_straight,Compensator
+G3,X8090,2,LR,2_straight,Strainer
+G3,X8150,2,LR,2_straight,Cone type strainer
+G3,C0096,0,,0 (không stub),Orifice plate
+G3,C0097,0,,0 (không stub),Blind disc
+G3,C0098,0,,0 (không stub),Open disc
+G3,2044,0,,0 (không stub),Interchangeable disc (blind disc)
+G3,2045,0,,0 (không stub),Interchangeable disc (open disc in function)
+G3,516,2,LR,2_straight,Reducer
+G3,511,0,,0 (không stub),Flanged connection
+G3,X411,2,LR,2_straight,Hose
+G3,X8174,2,LR,2_straight,"Piping, heated or cooled and insulated"
+G4,2301,2,LR,2_straight,"Pump, liquid type (general)"
+G4,2322,2,LR,2_straight,"Pump, centrifugal type"
+G4,8091,2,LR,2_straight,"Pump, gear type"
+G4,X8095,2,LR,2_straight,"Pump, diaphragm type"
+G4,2302,2,LR,2_straight,"Compressor, vacuum pump (general)"
+G4,X8179,2,LR,2_straight,"Compressor, centrifugal type"
+G4,2511,4,BBTT,4,Heat exchanger with straight tubes
+G4,2514,4,BBTT,4,Heat exchanger with coil shaped tubes
+G4,2515,4,BLLT,4,Heat exchanger of double-pipe type
+G4,X8079,4,BLRT,4,"Heat exchanger (general), condenser"
+G4,2062,2,BL,2_angle,"Tank, vessel with dished ends"
+G4,301,2,BL,2_angle,"Tank, vessel"
+G4,2063,4,BLRT,4,Spherical vessel
+G4,X8100,4,BLRT,4,Column (general)
+G4,C0082,4,BLRT,4,Electric motor (general)
+G4,2672,1,T,1,"Agitator (general), stirrer (general)"
+G4,C2024,1,T,1,"Agitator, impeller type"
+G4,C2027,1,T,1,"Agitator, turbine type"
+G5,X8080,2,LR,2_straight,Rupture disc
+G5,X8088,2,LR,2_straight,Breather valve
+G5,2036,2,LR,2_straight,Flame arrestor
+G5,C0087,2,LR,2_straight,"Flame arrestor, explosion-proof"
+G5,C0088,2,LR,2_straight,Flame arrestor detonation-proof
+G5,C0091,2,LR,2_straight,Flame arrestor fire-resistant
+G5,2040,0,,0 (không stub),Funnel
+G5,2181,2,LR,2_straight,Self-operating   release   valve   (steam   trap)
+G5,2039,0,,0 (không stub),Vent (outlet to atmosphere for steam/gas)

@@ -246,3 +246,7 @@ runs/
 !data/raw/iso_symbols_clean/
 !data/raw/iso_symbols_clean/*.png
 !data/raw/iso_symbols_clean/symbols.csv
+/PID2Graph.zip
+# experiment renders (regenerable; derived from OPEN100 sheets) — numbers and READMEs are tracked
+docs/experiments/**/*.jpg
+docs/experiments/**/*.svg
