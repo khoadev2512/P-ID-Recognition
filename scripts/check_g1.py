@@ -37,6 +37,9 @@ from utils.pid2graph import load_graphml, pipe_runs  # noqa: E402
 
 PORT_TOL_PX = 1  # criterion 1: ink within this many px of the port
 THICKNESS_TOL_PX = 1.0  # criterion 2
+FINE = 4  # criterion 2: supersampling of the thickness measure
+TILE_PX = 200  # criterion 2: side of a tile, 1x px
+TILES = 8  # criterion 2: tiles measured per layer
 STEM_END_PX = 6.0  # criterion 6: the part of a signal line at either end that may sit on ink
 
 
@@ -192,17 +195,39 @@ def bubble_overlaps(page: Page, w_px: float) -> tuple[int, list[tuple[str, str, 
     return len(circles), out
 
 
-def stroke_thickness(ink: np.ndarray, max_px: float = 12.0) -> float:
-    """Median line width in px: twice the distance transform on the ridge, less the centre pixel.
+def stroke_thickness(svg: str, ink: np.ndarray, max_px: float = 12.0) -> float:
+    """Median line width in px of a layer: twice the distance transform on the ridge, less the
+    centre pixel, measured at `FINE`x resolution on the `TILES` tiles of the layer with most ink.
 
-    Ridge = local maxima of the transform; blobs thicker than `max_px` (filled arrows, dots) are
-    left out so they do not count as line width.
+    At 1x the width of an antialiased line is a whole number of pixels that depends on where the
+    line falls (2.65 px reads as 2 or 3, and an even width reads one less than its pixels), which
+    made two layers drawn with one stroke differ by a pixel; at 4x the error is a quarter pixel.
+    `ink` is the layer's 1x mask (it picks the tiles). Ridge = local maxima of the transform;
+    blobs thicker than `max_px` (filled arrows, dots) are left out so they do not count.
     """
-    dist = cv2.distanceTransform(ink.astype(np.uint8), cv2.DIST_L2, 5)
-    ridge = (dist >= cv2.dilate(dist, np.ones((3, 3), np.uint8))) & (dist > 0.5)
-    vals = dist[ridge]
-    vals = vals[2 * vals <= max_px]
-    return float(2 * np.median(vals) - 1) if vals.size else float("nan")
+    import pymupdf
+
+    h, w = ink.shape
+    rows, cols = h // TILE_PX, w // TILE_PX
+    counts = ink[: rows * TILE_PX, : cols * TILE_PX].reshape(rows, TILE_PX, cols, TILE_PX)
+    counts = counts.sum(axis=(1, 3))
+    page = pymupdf.open(stream=svg.encode(), filetype="svg")[0]
+    vals = []
+    for t in np.argsort(counts, axis=None)[::-1][:TILES]:
+        if counts.flat[t] == 0:
+            break
+        r, c = divmod(int(t), cols)
+        clip = pymupdf.Rect(c * TILE_PX, r * TILE_PX, (c + 1) * TILE_PX, (r + 1) * TILE_PX)
+        pix = page.get_pixmap(
+            matrix=pymupdf.Matrix(FINE, FINE), clip=clip, colorspace=pymupdf.csGRAY, alpha=False
+        )
+        fine = np.frombuffer(pix.samples, np.uint8).reshape(pix.height, pix.width) < 128
+        dist = cv2.distanceTransform(fine.astype(np.uint8), cv2.DIST_L2, 5)
+        ridge = (dist >= cv2.dilate(dist, np.ones((3, 3), np.uint8))) & (dist > 0.5)
+        v = dist[ridge]
+        vals.append(v[2 * v <= max_px * FINE])
+    allv = np.concatenate(vals) if vals else np.empty(0)
+    return float((2 * np.median(allv) - 1) / FINE) if allv.size else float("nan")
 
 
 def _overlap(a, b) -> bool:
@@ -227,39 +252,24 @@ def new_overlaps(page: Page, source, tol: float) -> tuple[list[tuple[str, str, b
     return out, len(touching)
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--src", type=Path, default=Path("data/raw/pid2graph/open100"))
-    ap.add_argument("--out", type=Path, default=Path("docs/experiments/iso_render/v5_g1"))
-    ap.add_argument("--sheet", type=int, default=3)
-    ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
-    args.out.mkdir(parents=True, exist_ok=True)
+def evaluate(
+    page: Page,
+    runs,
+    source,
+    cfg: dict,
+    pipes: np.ndarray | None = None,
+    symbols: np.ndarray | None = None,
+) -> tuple[list[str], dict[int, bool]]:
+    """Report lines and pass / fail per automatic criterion (1, 2, 3, 5, 6, 7) of a drawn page.
 
-    cfg = load_config()
-    image = Image.open(args.src / f"{args.sheet}.png")
-    sheet = load_graphml(args.src / f"{args.sheet}.graphml", image.size)
-    runs = pipe_runs(sheet)
-    templates = load_templates(cfg["template_dir"], cfg["taxonomy_csv"], cfg["scope"])
-    rng = random.Random(args.seed)
-    assignments = assign_symbols(sheet, runs, templates, rng, cfg)  # V3 on source px
-    sheet4, runs4 = transform_layout(sheet, runs, rng, cfg)  # V4
-    page = render_page(sheet4, runs4, assignments, cfg, sheet)  # V5
-
-    img = rasterize(page.svg)
-    Image.fromarray(img).save(args.out / f"sheet{args.sheet}.png")
-    (args.out / f"sheet{args.sheet}.svg").write_text(page.svg)
-    pipes = rasterize(page.layer("pipes")) < 128
-    symbols = rasterize(page.layer("symbols")) < 128
-
-    lines = [f"G1 check: sheet {args.sheet}, seed {args.seed}, {page.width}x{page.height} px"]
-    kinds: dict[str, int] = {}
-    for a in page.annotations:
-        key = a["fine_name"] or a["label"] or a["kind"]
-        kinds[f"{a['kind']}:{key}"] = kinds.get(f"{a['kind']}:{key}", 0) + 1
-    lines.append("drawn: " + ", ".join(f"{k}={v}" for k, v in sorted(kinds.items())))
-    lines.append("log: " + ", ".join(f"{k}={v}" for k, v in page.log.items()))
-
+    `runs` are the V4 runs, `source` the sheet before V4 (the one given to `render_page`) and
+    `cfg` the `render_iso` mapping. The layer rasters are made unless given.
+    """
+    if pipes is None:
+        pipes = rasterize(page.layer("pipes")) < 128
+    if symbols is None:
+        symbols = rasterize(page.layer("symbols")) < 128
+    lines: list[str] = []
     n, misses = port_ink(page, pipes, symbols)
     ok1 = not misses
     lines.append(
@@ -271,14 +281,17 @@ def main() -> None:
             f"      {m['id']} ({m['kind']}) at ({m['x']:.1f}, {m['y']:.1f}) lacks {m['lacks']}"
         )
 
-    t_sym, t_pipe = stroke_thickness(symbols), stroke_thickness(pipes)
+    t_sym, t_pipe = (
+        stroke_thickness(page.layer("symbols"), symbols),
+        stroke_thickness(page.layer("pipes"), pipes),
+    )
     ok2 = abs(t_sym - t_pipe) <= THICKNESS_TOL_PX
     lines.append(
         f"[2] stroke thickness: symbols {t_sym:.2f} px, pipes {t_pipe:.2f} px "
         f"(|diff| {abs(t_sym - t_pipe):.2f} <= {THICKNESS_TOL_PX})  -> {'PASS' if ok2 else 'FAIL'}"
     )
 
-    new, original = new_overlaps(page, sheet, float(cfg["layout"]["column_tol"]))
+    new, original = new_overlaps(page, source, float(cfg["layout"]["column_tol"]))
     iso_new = [p for p in new if p[2]]
     ok3 = not iso_new
     lines.append(
@@ -313,8 +326,44 @@ def main() -> None:
     )
     for a, b, over in tag_over[:20]:
         lines.append(f"      {a} x {b}: {over} px")
+    return lines, {1: ok1, 2: ok2, 3: ok3, 5: ok5, 6: ok6, 7: ok7}
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--src", type=Path, default=Path("data/raw/pid2graph/open100"))
+    ap.add_argument("--out", type=Path, default=Path("docs/experiments/iso_render/v5_g1"))
+    ap.add_argument("--sheet", type=int, default=3)
+    ap.add_argument("--seed", type=int, default=0)
+    args = ap.parse_args()
+    args.out.mkdir(parents=True, exist_ok=True)
+
+    cfg = load_config()
+    image = Image.open(args.src / f"{args.sheet}.png")
+    sheet = load_graphml(args.src / f"{args.sheet}.graphml", image.size)
+    runs = pipe_runs(sheet)
+    templates = load_templates(cfg["template_dir"], cfg["taxonomy_csv"], cfg["scope"])
+    rng = random.Random(args.seed)
+    assignments = assign_symbols(sheet, runs, templates, rng, cfg)  # V3 on source px
+    sheet4, runs4 = transform_layout(sheet, runs, rng, cfg)  # V4
+    page = render_page(sheet4, runs4, assignments, cfg, sheet)  # V5
+
+    img = rasterize(page.svg)
+    Image.fromarray(img).save(args.out / f"sheet{args.sheet}.png")
+    (args.out / f"sheet{args.sheet}.svg").write_text(page.svg)
+
+    lines = [f"G1 check: sheet {args.sheet}, seed {args.seed}, {page.width}x{page.height} px"]
+    kinds: dict[str, int] = {}
+    for a in page.annotations:
+        key = a["fine_name"] or a["label"] or a["kind"]
+        kinds[f"{a['kind']}:{key}"] = kinds.get(f"{a['kind']}:{key}", 0) + 1
+    lines.append("drawn: " + ", ".join(f"{k}={v}" for k, v in sorted(kinds.items())))
+    lines.append("log: " + ", ".join(f"{k}={v}" for k, v in page.log.items()))
+
+    check_lines, ok = evaluate(page, runs4, sheet, cfg)
+    lines += check_lines
     lines.append("[4] look at the picture: " + str(args.out / f"sheet{args.sheet}.png"))
-    all_ok = ok1 and ok2 and ok3 and ok5 and ok6 and ok7
+    all_ok = all(ok.values())
     lines.append(f"automatic criteria: {'ALL PASS' if all_ok else 'NOT ALL PASS'}")
 
     report = "\n".join(lines)

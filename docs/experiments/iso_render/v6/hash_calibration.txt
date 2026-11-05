@@ -1,0 +1,6 @@
+Same-sheet hash distances without dedup (240 variants, 20 per sheet, min_distance 0, G1 filter on)
+distance = max(Hamming ahash, Hamming dhash); percentiles [min, 5, 25, 50, 75] of all same-sheet pairs
+hash 8x8   (64 bits):   same-sheet [0, 3, 5, 7, 9]      cross-sheet min/5%/50% [12, 18, 25]
+hash 16x16 (256 bits):  same-sheet [3, 12, 19, 25, 32]  cross-sheet min/5%/50% [52, 67, 89]
+hash 32x32 (1024 bits): same-sheet [15, 46, 72, 98, 127] cross-sheet min/5%/50% [208, 249, 328]
+nearest other variant of the same sheet, 16x16: min 3, p5 6, p10 7, p25 9, median 13

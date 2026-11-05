@@ -1078,12 +1078,37 @@ còn hiện ở 3 seed này, chưa phải là đã sửa). Agitator: seed 0/1/2 
 không tô nền; mũi tên nằm trong bbox bình (tờ 1 `general93`) vẫn vẽ trong thân; chỉ có 3 cột nên lớp `column`
 ít mẫu (V6 phải bù bằng nhiều biến thể); agitator chỉ ~6/seed và dồn về tờ 9 (6 lò phản ứng giống nhau).
 
-## V6 — Sinh nhiều biến thể + lọc trùng 🤖 (~0.5 ngày)
+## V6 — Sinh nhiều biến thể + lọc trùng 🤖 (~0.5 ngày) — 🟢 XONG 2026-11-05 (533 test)
 
 - Nguồn biến thể: phép gán ký hiệu (V3), ánh xạ trục (V4), `w ∈ [2, 4]·S/3` (S = `render_iso.layout.scale`), `gap_scale` của V4, kích thước ký hiệu ±15%.
 - Lọc trùng: aHash + dHash (tự viết, 📎 `diversity.py`) — Hamming < ngưỡng với ảnh cùng gốc → loại;
   chữ ký phép gán trùng → loại.
 - Mặc định ~30–40 biến thể/gốc (SynthPID: lợi ích bão hòa ~400 ảnh).
+
+**Đã làm** (chi tiết, số liệu, ảnh: `docs/experiments/iso_render/v6/REPORT.md`; lệnh `scripts/make_variants.py`):
+- Code: `src/utils/diversity.py` (aHash/dHash tự viết, `Deduper`), `src/utils/iso_variants.py`
+  (`derive_seed`, `plan_variant`, `render_variant`, `generate_sheet`), khối `render_iso.variants` trong
+  `configs/render_iso.yaml`; không sửa V3/V4/V5. `scripts/check_g1.py` tách `evaluate()` để dùng làm bộ lọc.
+- **RNG độc lập**: mỗi giai đoạn (`assign`, `layout`, `style`) một seed dẫn xuất bằng hash từ (base seed, tờ,
+  chỉ số biến thể, tên giai đoạn). `w` ~ U[2, 4] (qua bản sao `cfg`), hệ số cỡ ~ U[0.85, 1.15] một hệ số cả tờ
+  (qua bản sao `source` chỉ nhân hộp ký hiệu đặt theo cổng + mũi tên; bình/hộp/bong bóng không nhân vì vẽ
+  trên hộp V4 — nhân hết làm tiêu chí 3 trượt giả).
+- **Thứ tự lọc**: chữ ký phép gán → lỗi V5 → `Page.log` (`bubbles_unsettled`, `unmatched_ports` > 0) → aHash+dHash
+  (16×16, trùng khi **cả hai** < 8 bit) → G1. `loose_ends`, `agitators_skipped`, `shrunk` không lọc.
+- **Tiêu chí 5 (mũi tên–ký hiệu hở): LOẠI** (chờ user duyệt; đổi bằng `variants.g1.flag`). Họ lỗi này không chỉ ở
+  tờ 10: tờ 4 (20 ca), 2 (10), 1 (3) và tờ 10 (27).
+- `check_g1` tiêu chí 2: bộ đo 1× cũ đọc nét chẵn thiếu 1 px và nét phân số lệch (trượt giả với w liên tục) →
+  đo ở 4× trên 8 ô nhiều mực nhất, ngưỡng 1 px giữ nguyên.
+
+**Kết quả** (base_seed 0, 12 tờ, mục tiêu 36/tờ, tối đa 60 lần thử): 552 lần thử → **413 giữ** (26–36/tờ), loại 66
+trùng ảnh (khoảng cách 3–7 bit) + 73 G1 (60 tiêu chí 5, 13 tiêu chí 1); 0 trùng chữ ký, 0 lỗi, 0 vì `Page.log`.
+0.70 s/biến thể giữ, ~308 KB/biến thể (PNG 207 + SVG 81 + JSON 29 KB), 127 MB cả bộ, 52 s với 10 tiến trình.
+G1 theo w ∈ {2, 2.5, 3, 3.5, 4} × cỡ {0.85, 1, 1.15} (36 lượt/ô): tiêu chí 2, 3, 6, 7 đạt hết; tiêu chí 1 trượt
+nhiều ở w = 2 (8/36 ở cỡ 1.15, cổng `loose` của van thân chéo); tiêu chí 5 trượt nhiều ở cỡ 0.85 (5–8/36).
+Độ phủ: agitator 180 (124 biến thể có ≥ 1), `column` 108 (chỉ 3 nút nguồn), `flanged_connection` 3964, G5 ngoài vocab
+nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<NNN>.{png,svg,json}` (gitignore).
+
+**Hạn chế**: hash 16×16 loại cả biến thể "cùng bố cục, khác ký hiệu"; chỉ 12 topology; số biến thể 26–36/tờ không đều.
 
 ## V7 — Làm suy giảm toàn ảnh 🤖 (~1 ngày)
 

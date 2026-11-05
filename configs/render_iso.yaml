@@ -109,3 +109,19 @@ render_iso:
     - {label: instrumentation, ports: ["1"], not_next_to: [valve, general], groups: [G5],
        replace: true}
     - {label: instrumentation, kind: bubble}   # ISA bubble, labelled other_isa
+
+  # V6 (utils.iso_variants): many renderings of one source sheet. Every stage (V3 assignment, V4
+  # layout, stroke / size) draws from its own seed derived from (base_seed, sheet, variant, stage).
+  variants:
+    count: 36            # variants kept per sheet
+    max_attempts: 60     # candidates tried per sheet at most (dropped ones count)
+    base_seed: 0
+    stroke: [2, 4]       # stroke width w in units of layout.scale / 3 px, so [2, 4] px at scale 3
+    size: [0.85, 1.15]   # one factor per variant on every symbol's size
+    hash_size: 16        # ahash / dhash grid side: hashes have hash_size**2 bits
+    min_distance: 8      # duplicate: both hashes differ from a kept variant's by fewer bits
+    quality:             # Page.log counters that may not exceed these, else the variant is dropped
+      max_log: {bubbles_unsettled: 0, unmatched_ports: 0}
+    g1:                  # scripts/check_g1.py criteria (1 ports, 2 stroke, 3 overlaps, 5 edges,
+      drop: [1, 2, 3, 5, 6, 7]  # 6 signal lines, 7 tags): failure drops the variant
+      flag: []                  # failure is recorded in the variant's json, the variant is kept
