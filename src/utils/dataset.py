@@ -14,6 +14,12 @@ full-image scale, which is the point of the separable stage (§4.2.3).
 
 One classifier head PER fgc_group is the default (a valve-family head, a bubble-family
 head, ...), since fine classes only compete within their group.
+
+Crops are stored with extra context and a `_boxes.csv` per class folder (see
+utils.crop_box): every split cuts the classification view (box + 10% margin, as at
+inference) out of the stored crop; the train split may cut it around a jittered box
+instead (`fgc.aug.box_jitter`, off unless p > 0). Crops without a `_boxes.csv` (cut before
+that format) are used as they are.
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ from torchvision import transforms
 
 from utils.augment import SubpartWarp
 from utils.classmap import load_classmap, training_fine_classes
+from utils.crop_box import BoxJitter, StoredCrop, read_boxes, view
 from utils.paths import DataPaths
 from utils.scan_degrade import ScanDegrade
 
@@ -47,17 +54,34 @@ class _GroupCropDataset(Dataset):
     classes.
     """
 
-    def __init__(self, root: Path, fine_classes: list[str], transform) -> None:
+    def __init__(
+        self,
+        root: Path,
+        fine_classes: list[str],
+        transform,
+        jitter: BoxJitter | None = None,
+    ) -> None:
         self.fine_classes = fine_classes
         self.samples: list[tuple[Path, int]] = []
+        self.stored: dict[Path, StoredCrop] = {}  # crop -> where it sits (utils.crop_box)
         for local_idx, fine_class in enumerate(fine_classes):
             class_dir = root / fine_class
             if not class_dir.is_dir():
                 continue
+            boxes = read_boxes(class_dir)
             for p in sorted(class_dir.iterdir()):
                 if p.suffix.lower() in _IMAGE_SUFFIXES:
                     self.samples.append((p, local_idx))
+                    if p.name in boxes:
+                        self.stored[p] = boxes[p.name]
+        if jitter is not None and len(self.stored) < len(self.samples):
+            missing = len(self.samples) - len(self.stored)
+            raise ValueError(
+                f"fgc.aug.box_jitter needs the stored context of every crop, but {missing} "
+                f"crop(s) under {root} have no _boxes.csv entry: re-run pid-prep-crops"
+            )
         self.transform = transform
+        self.jitter = jitter
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -65,6 +89,10 @@ class _GroupCropDataset(Dataset):
     def __getitem__(self, idx: int):
         path, label = self.samples[idx]
         img = Image.open(path).convert("RGB")
+        where = self.stored.get(path)
+        if where is not None:
+            # The classification view; at train time around a jittered box.
+            img = view(img, where, self.jitter(where.box) if self.jitter else None)
         return self.transform(img), label
 
 
@@ -123,7 +151,8 @@ def build_dataset(cfg: DictConfig, split: str, group: str) -> Dataset:
     fine_classes = training_fine_classes(classmap, group, excluded_classes(cfg))
     root = paths.crops_fgc / split
     transform = _build_transform(cfg, split)
-    return _GroupCropDataset(root, fine_classes, transform)
+    jitter = BoxJitter.from_cfg(cfg.fgc.aug.get("box_jitter")) if split == "train" else None
+    return _GroupCropDataset(root, fine_classes, transform, jitter)
 
 
 def build_balanced_sampler(dataset: Dataset, cfg: DictConfig) -> WeightedRandomSampler:

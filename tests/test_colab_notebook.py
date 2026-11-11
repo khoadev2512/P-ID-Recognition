@@ -27,10 +27,32 @@ def _active(cells: list[str]) -> str:
     )
 
 
-def test_never_reads_the_old_28_class_crop_zip(code_cells):
+def test_never_reads_an_old_crop_zip(code_cells):
+    """crops_fgc.zip: 28 classes. crops_fgc_global.zip: crops without _boxes.csv (before
+    utils.crop_box), which box jitter cannot use."""
     code = _active(code_cells)
-    assert "crops_fgc_global.zip" in code
-    assert "crops_fgc.zip" not in code.replace("crops_fgc_global.zip", "")
+    assert "crops_fgc_ctx.zip" in code
+    assert "crops_fgc.zip" not in code and "crops_fgc_global.zip" not in code
+    assert "_boxes.csv" in code  # checked after unzipping
+
+
+def test_both_encoders_train_and_resume_with_the_same_augment(code_cells):
+    """Scan degradation + box jitter (PLAN 2026-11-11), from one AUG string: a resume
+    without it would silently train the rest of the run without them."""
+    code = _active(code_cells)
+    assert "++fgc.aug.degrade.p=" in code and "++fgc.aug.box_jitter.p=" in code
+    train = [c for c in code_cells if "fgc --train" in _active([c])]
+    assert len(train) == 4  # R1a, R1a resume, R1b, R1b resume
+    assert all("$AUG" in _active([c]) and "$LOADER" in _active([c]) for c in train)
+
+
+def test_leave_out_also_drops_h_extra_and_finalize_checks_it(code_cells):
+    """h_extra (VARIANT of an h_in symbol) must leave R1a's training too, or the encoder
+    still learns the held-out symbol through its variant."""
+    code = _active(code_cells)
+    assert "h_extra" in code and "HELD = H + H_EXTRA" in code
+    assert "EXCLUDE = '[' + ','.join(HELD) + ']'" in code
+    assert "'__global_lo__.pt', HELD)" in code
 
 
 def test_every_training_and_cropping_command_is_global(code_cells):

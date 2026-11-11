@@ -39,6 +39,7 @@ from utils.classmap import (
     training_fine_classes,
 )
 from utils.cli import CONFIG_DIR
+from utils.crop_box import cut
 from utils.dataset import build_eval_transform, excluded_classes
 from utils.model import ArcFaceModel, build_model
 from utils.types import BBox
@@ -250,9 +251,9 @@ class FGCInferPipeline(BasePipeline):
         which guards exactly that case at the call site.
         """
         if self.classmap.needs_fgc(coarse_class) and score >= float(self.cfg.fgc.route.min_score):
-            xyxy = bbox_utils.yolo_to_xyxy(box, image_w, image_h)
-            xyxy_int = bbox_utils.clip_xyxy(xyxy, image_w, image_h)
-            crop = bbox_utils.crop_xyxy(image_np, xyxy_int)
+            # The same view the classifier was trained and validated on: the box grown by
+            # crop_box.CROP_MARGIN_FRAC, clipped to the image (before: the bare box).
+            crop = cut(image_np, bbox_utils.yolo_to_xyxy(box, image_w, image_h))
             if crop.size > 0:
                 return self._classify_crop(coarse_class, crop)
             # Degenerate box (zero-area after clipping, e.g. sits on the image edge)

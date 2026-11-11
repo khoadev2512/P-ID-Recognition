@@ -330,6 +330,53 @@ không phải lỗi mơ hồ).
 
 ---
 
+## 6c. ĐÃ CHỐT: DANH SÁCH H (2026-11-11, trước mọi lượt train Stage 2)
+
+Chốt **trước khi có bất kỳ kết quả nào**; không sửa sau khi đã thấy số (PLAN, mục "Protocol").
+Nguồn: trang kiến trúc "Framework hai stage" (https://claude.ai/artifact/BtJxRzz8PdFjXVhciZiCo6),
+mục "Chốt danh sách H". `check_b5.py`: 0 lỗi, 0 cảnh báo.
+
+**Chia A — bộ chính** (ghi trong `configs/config.yaml` `oneshot.holdout`, dùng cho R1a):
+
+| Vai trò | Lớp | Lý do / hàng xóm còn trong train |
+|---|---|---|
+| `h_in` | S3 valve_globe | S1 gate |
+| `h_in` | S10 valve_needle | S1 gate, S6 butterfly |
+| `h_in` | S5 valve_ball | S1 gate, S14 control |
+| `h_in` | S4 valve_general | S1 gate, S8 check_valve, S14 control |
+| `h_in` | S18 interchangeable_disc | S17 open_disc |
+| `h_in` | S19 interchangeable_disc_open | S17 open_disc |
+| `h_extra` | S2, S13 (theo S5); S12 (theo S4) | VARIANT cùng ký hiệu ISO: bỏ khỏi train, không thi |
+| `h_out` | S9 valve_diaphragm, S15 valve_rotary_generic (khó: trông như van) | S7, S16 vẫn train |
+| `h_out` | S27 isa_bubble_ro, S30 isa_square_sta (dễ) | S26, S28, S29, S31, S32 vẫn train |
+
+- R1a còn 19/32 lớp: S1, S6, S7, S8, S11, S14, S16, S17, S20–S26, S28, S29, S31, S32.
+- Tiêu chí: giữ hàng xóm khó, không rút cạn họ (S21, S24 không chọn được; blind disc rút tối đa
+  2), chặn rò rỉ VARIANT (`h_extra`), `h_out` có cả khó lẫn dễ, đủ mẫu (mỗi lớp ~1,300–1,500
+  train, ~300–380 val).
+- Trên OPEN100-ISO, cả 6 lớp `h_in` đều có mẫu → nhóm "H chọn" của P4 (R1a) có 7,958 instance
+  (sạch + suy giảm).
+- UNSURE (S11, S25) vẫn train (không thuộc H), chỉ bị loại khỏi mọi tập test.
+- `h_extra`: notebook Colab dựng R1a với `fgc.exclude_classes = h_in + h_out + h_extra` và cell
+  finalize kiểm cả `h_extra` (2026-11-11). `check_b5.py` chưa kiểm luật VARIANT (B5b); chia A đã
+  kiểm tay.
+
+**Chia B — bộ dự phòng, đăng ký trước** (chỉ chạy khi còn quota Colab; nếu chạy, báo cáo trung
+bình ± độ lệch trên hai bộ):
+
+| Vai trò | Lớp |
+|---|---|
+| `h_in` | S1 valve_gate, S10 valve_needle, S5 valve_ball, S17 open_disc, S18 interchangeable_disc (giữ S3, S4 trong train) |
+| `h_extra` | S2, S13 (theo S5) |
+| `h_out` | S7 valve_manual, S16 valve_rotary_generic_nc (khó); S26 isa_bubble_field, S32 isa_box_lg (dễ) |
+
+- `h_in` 5 lớp (dưới mức 6–8 của plan: blind disc rút tối đa 2, S3/S4 cố ý giữ lại để đổi vai
+  với chia A). `check_b5.py` sẽ cảnh báo số lượng, không phải lỗi.
+- Chạy chia B = đổi `oneshot.holdout` sang bộ này cho một lượt R1a riêng (run_dir riêng), rồi
+  trả lại chia A. Danh sách cố định từ hôm nay, không chọn lại sau khi thấy số chia A.
+
+---
+
 ## 7. MÔI TRƯỜNG / LƯU Ý VẬN HÀNH
 
 - `uv run pytest` / `uv run ruff check src/ tests/ scripts/` — phải xanh trước khi commit.

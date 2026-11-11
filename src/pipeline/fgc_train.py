@@ -97,10 +97,19 @@ class FGCTrainPipeline(BasePipeline):
             return
 
         sampler = build_balanced_sampler(train_ds, cfg) if cfg.fgc.balanced_sampler else None
+        # Crop augments (subpart warp, scan degradation, box jitter) run on the CPU; on Colab
+        # pass ++fgc.workers=2 to load in parallel. 0 (absent) = in the main process, as before.
+        # Workers reseed `random` / numpy themselves, which the augments rely on.
+        workers = int(cfg.fgc.get("workers", 0) or 0)
+        loader_kw = {"num_workers": workers, "persistent_workers": workers > 0}
         train_loader = DataLoader(
-            train_ds, batch_size=int(cfg.fgc.batch), sampler=sampler, shuffle=(sampler is None)
+            train_ds,
+            batch_size=int(cfg.fgc.batch),
+            sampler=sampler,
+            shuffle=(sampler is None),
+            **loader_kw,
         )
-        val_loader = DataLoader(val_ds, batch_size=int(cfg.fgc.batch), shuffle=False)
+        val_loader = DataLoader(val_ds, batch_size=int(cfg.fgc.batch), shuffle=False, **loader_kw)
 
         model = build_model(cfg, group, len(fine_classes)).to(device)
 

@@ -188,6 +188,11 @@ files — each is just the default config with a couple of fields set by hand as
   `pid-detect-train +detector.aug.degrade.p=0.5` and `pid-fgc-train +fgc.aug.degrade.p=0.5`
   (ranges such as `'+fgc.aug.degrade.noise_sigma=[0,6]'` override the V7 defaults). On
   resume, pass the same override again.
+  Box jitter (`src/utils/crop_box.py`, also off by default) trains Stage 2 on views cut
+  around a shifted / rescaled box, like a detector box: `pid-fgc-train ++fgc.aug.box_jitter.p=0.5`.
+  It needs crops cut since 2026-11-11 (`pid-prep-crops` stores context + `_boxes.csv`); every
+  split, and `pid-fgc-infer`, classifies the box + 10% margin.
+  These augments run on the CPU: `++fgc.workers=2` loads crops in parallel (default 0).
 - **phase3** — real-world held-out eval (never trained on). Run
   `pid-eval eval.split=test eval.mode=det_plus_fgc` and compare against the same
   command run on the synthetic test split — real-source images are always assigned

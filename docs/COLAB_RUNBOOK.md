@@ -86,17 +86,18 @@ RUNS = "/content/drive/MyDrive/pid/runs"     # mọi lệnh train dưới đây 
 
 | Cell | Việc | Kết quả |
 |---|---|---|
-| 3 | Cắt crop **toàn cục** (`fgc.global_encoder=true`) ở local, zip lên Drive | `data/derived/crops_fgc_global.zip`, có assert đủ 32 class |
-| 4 | Đọc danh sách H từ `oneshot.holdout` trong config (điền ở B5) | Danh sách trống hoặc tên sai thì báo lỗi |
+| 3 | Cắt crop **toàn cục** (`fgc.global_encoder=true`) ở local, zip lên Drive | `data/derived/crops_fgc_ctx.zip`, có assert đủ 32 class và `_boxes.csv` ở mọi lớp |
+| 4 | Đọc danh sách H từ `oneshot.holdout` trong config (điền ở B5); đặt `AUG` | Danh sách trống hoặc tên sai thì báo lỗi |
+| 6 | **R1b** (chạy trước, 2026-11-09): train đủ 32 class | `runs/encoders/__global__.pt` |
 | 5 | **R1a**: train leave-out, `fgc.exclude_classes=<h_in + h_out>` | `runs/encoders/__global_lo__.pt` |
-| 6 | **R1b**: train đủ 32 class | `runs/encoders/__global__.pt` |
 | 7 | **R2**: `run_pipeline.py prototypes` cho từng encoder + log separation | `runs/encoders/iso_prototypes{_lo,}.pt` |
 
 Lệnh tương đương (chạy tay):
 ```python
 !python src/run_pipeline.py prep --step crops data_root=$LOCAL fgc.global_encoder=true
 !python src/run_pipeline.py fgc --train data_root=$LOCAL run_dir=$RUNS/r1a \
-    fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 "fgc.exclude_classes=[...]"
+    fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 "fgc.exclude_classes=[...]" \
+    ++fgc.aug.degrade.p=0.5 ++fgc.aug.box_jitter.p=0.5
 !python src/run_pipeline.py prototypes oneshot.encoder_ckpt=$RUNS/encoders/__global_lo__.pt \
     oneshot.prototypes=$RUNS/encoders/iso_prototypes_lo.pt \
     oneshot.symbols_dir=/content/pid/data/raw/iso_symbols_clean \
@@ -106,6 +107,10 @@ Lệnh tương đương (chạy tay):
 Cạm bẫy:
 - **Không dùng `derived/crops_fgc/` hay `crops_fgc.zip` cũ** (28 class, cắt theo nhóm). Cũng không
   cắt chồng vào thư mục cũ, vì tên file của hai chế độ đánh số khác nhau và sẽ ra crop trùng.
+- **Không dùng `crops_fgc_global.zip`** (crop cắt trước 2026-11-11, không có `_boxes.csv`). Crop mới
+  lưu vùng ngữ cảnh + vị trí box (`utils/crop_box.py`); box jitter cần nó và dừng với lỗi nếu thiếu.
+- **R1a và R1b dùng cùng `AUG`** (suy giảm kiểu scan + lệch box), kể cả khi resume. Resume thiếu
+  override thì phần còn lại của run train không có augment mà không báo gì.
 - **Template ISO nằm trong git** (`data/raw/iso_symbols_clean/`), không nằm trên Drive. Vì vậy
   bước prototypes phải trỏ `oneshot.symbols_dir` và `oneshot.vocab_csv` vào repo đã clone.
 - **Resume R1a phải dùng cùng danh sách H.** Nếu khác, code dừng: head cùng kích thước nhưng
@@ -115,6 +120,50 @@ Cạm bẫy:
   nên chạy hết 60 epoch trong một phiên nếu kịp: một epoch khoảng 59k crop.
 - **`evaluate` chưa dùng được với encoder toàn cục.** Nó lặp theo `fgc_groups` nên bỏ qua im lặng.
   Phần đánh giá one-shot là B6b.
+
+## 5c. Chạy R1b — từng bước (2026-11-11)
+
+R1b = encoder đủ 32 lớp, phần lõi luận văn; chạy **trước** R1a. Notebook:
+`notebooks/train_stage2_colab.ipynb`.
+
+**0. Trước khi mở Colab (máy local)**
+- Code mới phải có trên GitHub: Colab `git clone` nhánh `feat/prepare-for-colab-stage-2`. Kiểm
+  `git log origin/feat/prepare-for-colab-stage-2 --oneline -1` trùng commit local mới nhất.
+- Drive có `MyDrive/pid/data/canonical/` (hoặc `MyDrive/PID_Recognition/...`) với `images/`,
+  `annotations.coco.json`, `classes.yaml`, `manifest.csv` của DigitizePID — cùng chỗ đã dùng
+  cho Stage 1.
+
+**1. Runtime**: Runtime → Change runtime type → **T4 GPU**.
+
+**2. Chạy theo thứ tự mục** (mục 6 nằm sau mục 5 trong file):
+
+| Mục | Cell | Việc | Kiểm |
+|---|---|---|---|
+| 1 | GPU + Drive | mount Drive, dò `DRIVE_ROOT` | in ra `DRIVE_ROOT` và số ảnh canonical (500) |
+| 2 | Code + deps | **sửa `REPO_URL`** thành repo của bạn; clone + cài deps | dòng `git log` cuối là commit mới nhất |
+| 3 | Crop toàn cục | phiên đầu: copy ảnh, cắt crop định dạng mới, zip `crops_fgc_ctx.zip` lên Drive; phiên sau: chỉ giải nén | `train` và `val` đều 32 lớp, có `_boxes.csv`; ~47.7k crop train, ~11.8k val |
+| 4 | Danh sách H + `AUG` + `LOADER` | đọc `oneshot.holdout` (R1b không dùng H nhưng cần `AUG`, `LOADER`) | in H_in 6, H_out 4, h_extra 3; `AUG`, `LOADER` |
+| **6** | **R1b train** | 60 epoch, batch 128, `$AUG $LOADER` | log `[fgc/__global__] 32 fine classes`; loss giảm |
+| 6a | Resume R1b | chỉ khi Colab ngắt giữa chừng; tự lấy run mới nhất, cùng `AUG` | in "resume từ ..." |
+| 6b | Finalize | kiểm checkpoint đủ 32 lớp, không lớp nào bị loại → copy `runs/encoders/__global__.pt` | in số lớp, epoch, `val_acc` |
+| 7 | R2 (tuỳ chọn) | prototype ISO cho `__global__.pt` (bỏ qua `_lo` chưa có) | dòng `prototype separation: mean …, max …` |
+
+**3. Cái gì là bình thường**
+- Phiên đầu, mục 3 mất thêm thời gian copy ~1.2 GB ảnh và cắt ~59.5k crop. Zip crop khoảng 1 GB
+  (crop giờ lưu cả vùng ngữ cảnh, ~16 KB/crop đo trên máy local).
+- Augment (subpart, suy giảm, lệch box) chạy trên CPU; `LOADER` dùng 2 worker. Thời gian mỗi
+  epoch **chưa đo trên Colab** (local: ~1.2 ms nạp một crop) — ghi lại thời gian epoch đầu để
+  ước lượng có kịp 60 epoch trong một phiên không.
+- `val_acc` closed-set 32 lớp nên cao (plan B3: > 0.95). Thấp hơn nhiều là dấu hiệu lỗi dữ liệu.
+- Checkpoint chỉ ghi khi `val_acc` tăng (xem cạm bẫy ở §5b).
+
+**4. Không làm**
+- Không xem kết quả từng lớp rồi sửa `oneshot.holdout`: H đã chốt (HANDOFF §6c).
+- Không đổi `AUG` / `LOADER` giữa train và resume (notebook đã dùng chung một chuỗi).
+- Không dùng zip crop cũ (`crops_fgc.zip`, `crops_fgc_global.zip`).
+
+**5. Gửi lại sau khi chạy**: `val_acc` cuối + epoch tốt nhất, thời gian một epoch, đường dẫn
+`runs/encoders/__global__.pt`, dòng `prototype separation` nếu đã chạy mục 7, và lỗi nếu có.
 
 ## 6. Infer + eval (sau khi train xong)
 

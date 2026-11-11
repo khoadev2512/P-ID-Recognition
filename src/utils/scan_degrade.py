@@ -31,6 +31,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
+from utils.augment import SeededRandom
 from utils.iso_degrade import DegradeParams, degrade_image, params_from
 
 # The V7 ranges (configs/render_iso.yaml `degrade:`), rotation and shear left out.
@@ -105,7 +106,7 @@ def _range(node: Mapping[str, Any], key: str) -> tuple[float, float]:
     return lo, hi
 
 
-class ScanDegrade:
+class ScanDegrade(SeededRandom):
     """Training augment: with probability `p`, the image degraded like a V7 page (no geometry).
 
     `__call__` takes and returns a PIL image (Stage 2 crops, on the native crop before

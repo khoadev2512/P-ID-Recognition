@@ -55,7 +55,27 @@ _MIN_SIDE = 8
 _MAX_THIN_LOSS = 0.5
 
 
-class SubpartWarp:
+class SeededRandom:
+    """Picklable `_rng` for augments: a seeded `random.Random`, or the global `random` module
+    (seed=None), which torch's DataLoader reseeds per worker. A module does not pickle, so it
+    is dropped on the way to a worker started with spawn / forkserver (macOS, Python 3.14+)
+    and the worker's own global `random` is used instead."""
+
+    _rng: random.Random | object
+
+    def __getstate__(self) -> dict:
+        state = self.__dict__.copy()
+        if state.get("_rng") is random:
+            state["_rng"] = None
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        if self._rng is None:
+            self._rng = random
+
+
+class SubpartWarp(SeededRandom):
     """PIL -> PIL training augment: per-component affine + smooth warp + stroke jitter.
 
     Applied to the NATIVE crop, before Resize: after downscaling, thin strokes blur

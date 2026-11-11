@@ -36,6 +36,19 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 7. **Stage 1 trên OPEN100-ISO chấm không phân lớp** (2026-11-11, V8_REVIEW §2.1): detector
    DigitizePID chỉ cần khoanh "ký hiệu"; nhãn ISO do Stage 2 gán. Trên bản vẽ ISO **không lọc
    prototype theo lớp thô** của Stage 1 (B6a). Bảng ánh xạ 8 lớp thô chỉ là báo cáo phụ.
+8. **Train Stage 2 (R1b, R1a) với augment** (2026-11-11): `++fgc.aug.degrade.p=0.5` (suy giảm
+   kiểu scan, vì đề thi chính là ảnh suy giảm) và `++fgc.aug.box_jitter.p=0.5` (B1c). Không làm
+   ablation 2×2. Notebook đặt một chuỗi `AUG` dùng cho cả train lẫn resume.
+9. **R1b chạy song song với việc code** (2026-11-11), ngoại lệ của quy tắc "code hết rồi mới
+   chạy" (2026-10-14). Lý do: mọi việc code còn lại (B5b, B6a–B6e) thuộc phía suy luận / chấm,
+   không đổi cách encoder được train. Điều kiện trước R1b: **H đã chốt** (chọn H sau khi thấy
+   số R1b là cherry-picking), notebook có `AUG`, crop cắt theo định dạng mới (B1c). ✅ cả ba
+   (2026-11-11). Cần push nhánh trước khi chạy (Colab clone từ GitHub). Hướng dẫn:
+   `docs/COLAB_RUNBOOK.md` §5c.
+10. **Stage 1 giữ detector coarse 8 lớp đã train**; thêm `agnostic_merge` lúc suy luận (B6e).
+    Detector một lớp (`label_level=agnostic`) là tuỳ chọn để thử giả thuyết OLN (Kim et al.
+    2022: detector không học phân lớp tìm vật thể chưa thấy tốt hơn) → bảng ablation Stage 1
+    ba mức: 1 / 8 / 32 lớp.
 
 Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/artifact/JWSGBLAp2XTxufZru5BcuU
 
@@ -59,7 +72,7 @@ Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/ar
 | OPEN100-ISO (render V8) | ✅ 864 ảnh (432 sạch + 432 suy giảm), 93,800 annotation; **30/42** lớp vocab có mẫu (`docs/experiments/iso_render/v8/`) |
 | Augment suy giảm kiểu scan (`+fgc.aug.degrade.p`, `+detector.aug.degrade.p`) | ✅ code + test, mặc định tắt (`src/utils/scan_degrade.py`) |
 | Closed-set infer / eval với `__global__.pt` | ❌ `fgc_infer` từ chối global encoder, `evaluation` lặp theo group → **B6c** |
-
+| Crop có ngữ cảnh + box jitter (B1c) | ✅ 2026-11-11 (`utils/crop_box.py`); sửa luôn lệch train/suy luận: `fgc_infer` trước cắt box trần, train có lề 10% |
 ---
 
 ## Protocol đánh giá — chứng minh one-shot ĐÚNG NGHĨA (user chốt 2026-10-14)
@@ -87,9 +100,11 @@ chúng. Encoder chưa từng thấy mẫu nào → nhận đúng chỉ có thể
 Quy tắc bắt buộc:
 - **Danh sách H chọn TRƯỚC khi train và TRƯỚC khi thấy bất kỳ kết quả nào** (B5), ghi cố định
   vào config + HANDOFF — chọn sau khi thấy số là cherry-picking.
-- **Calibrate ngưỡng và báo cáo trên 2 phần tách biệt**: DigitizePID chỉ có split train/val,
-  nên với P1 dùng crop H từ ảnh split `train` để calibrate `oneshot.other_min_cosine`, báo cáo
-  trên crop H từ ảnh split `val` (encoder chưa thấy class H ở split nào nên cả hai đều hợp lệ).
+- **Ngưỡng "Other" (τ) không bao giờ nhìn lớp H hay OPEN100-ISO** (thay 2026-11-11; trước:
+  calibrate trên crop H của split `train` — dùng mẫu "lạ" để chỉnh ngưỡng, số lạc quan). τ chỉ
+  chọn trên split `val` DigitizePID (đã chia theo ảnh), crop của các lớp **đã thấy**, theo quy
+  tắc cố định — xem B8 "Ngưỡng Other". So sánh giữa các phiên bản bằng AUROC / OSCR (không phụ
+  thuộc ngưỡng).
 - **Chặn rò rỉ bằng code** (B1b, B6b): eval P1 phải từ chối chạy nếu một class test nằm trong
   `fine_classes` của checkpoint.
 - So với OSSR-PID **chỉ bằng số P1**, kèm câu nêu rõ khác biệt protocol.
@@ -124,16 +139,20 @@ R1b) → báo cáo tách khỏi `other_iso`.
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► B6a GĐ4 ─► B6b GĐ5 ─► B6c closed-set ─► B6d đề thi OPEN100-ISO ─► B4a baseline
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► B5b ─► B6a GĐ4 ─► B6b GĐ5 ─► B6c closed-set
+  ─► B6d đề thi OPEN100-ISO ─► B6e Stage 1 agnostic_merge ─► B4a baseline
 B5 🧑 CHỌN danh sách H (+ B5b 🤖 luật VARIANT trong check_b5) ── song song, ⛔ PHẢI XONG trước R1 ──►
 ```
 
 **Phase B — Chạy từng GĐ** (🧑 Colab, theo thứ tự, mỗi bước xong mới sang bước sau):
 
 ```
-(B4a baseline ImageNet) ─► R1b = train encoder ĐỦ 32 class ─► R1a = train encoder LEAVE-OUT
-  ─► R2 = prototypes (sạch) + separation (cả hai encoder)
-  ─► R4 = B8 eval C (lõi) + P1/P2/P4 (+ P3) + calibrate + chốt số
+H chốt ─► R1b = train encoder ĐỦ 32 class        (song song với Phase A, quyết định 9)
+       ─► R1a = train encoder LEAVE-OUT          (sau B5b)
+       ─► YOLO 32 lớp fine                       (baseline một-stage cho C)
+       ─► (tuỳ chọn) YOLO một lớp                (ablation Stage 1, B6e)
+  ─► R2 = prototypes (sạch) + separation (cả hai encoder)      (sau Phase A)
+  ─► R4 = B8 eval C (lõi) + P1/P2/P4 (+ P3) + τ trên val DigitizePID + chốt số
 ```
 
 **Phase C — Sau R4, tùy chọn (hoãn 2026-11-10)**: B9 (d) code ─► R2' prototype có stub (không
@@ -279,6 +298,31 @@ class → head global 30 class; tên sai → lỗi):
 
 ---
 
+## B1c — Crop có ngữ cảnh + box jitter 🤖 ✅ XONG 2026-11-11
+
+**Vì sao**: box từ detector không trùng box GT (lệch tâm, rộng / hẹp hơn); crop train chỉ có lề
+cố định 10% nên encoder chưa từng thấy crop lệch. Khi làm thì lộ thêm một lỗi: `fgc_infer` cắt
+**box trần** trong khi crop train có lề 10% — train và suy luận nhìn hai view khác nhau.
+
+**Đã làm** (`src/utils/crop_box.py`, 602 test pass, ruff sạch):
+- Một quy tắc cho mọi nơi: view phân loại = box + `CROP_MARGIN_FRAC` (10%) mỗi cạnh, cắt theo
+  mép ảnh (`cut`). `fgc_infer` dùng `cut` → hết lệch.
+- `pid-prep-crops` lưu **vùng ngữ cảnh** (box + 40% mỗi cạnh) và `<lớp>/_boxes.csv` (box + gốc
+  toạ độ). Dataset cắt view từ đó: val / test đúng từng pixel như `cut` lúc suy luận (test 300
+  box ngẫu nhiên, kể cả box chạm mép ảnh); train cắt quanh box lệch (`BoxJitter`).
+- `BoxJitter` (`++fgc.aug.box_jitter.p`, mặc định tắt): dịch tâm ≤ 8% cạnh box, co giãn
+  0.9–1.15 (log-uniform), tỉ lệ khung 0.9–1.1; kiểm dải không vượt vùng ngữ cảnh đã lưu.
+  IoU box lệch / GT > 0.6 trên 500 lần bốc. Ngữ cảnh thật (ống, chữ bên cạnh), không đệm nền.
+- Crop định dạng cũ (không `_boxes.csv`): vẫn dùng được như cũ; bật jitter thì dừng với lỗi
+  "re-run pid-prep-crops".
+- Notebook: zip mới `crops_fgc_ctx.zip` (không bao giờ đọc `crops_fgc_global.zip` cũ), assert
+  `_boxes.csv` ở mọi lớp, chuỗi `AUG` cho R1a/R1b cả train lẫn resume. `tests/test_colab_notebook.py`
+  chặn quên `AUG` khi resume.
+- Tests: `tests/test_crop_box.py` (9).
+- Đã xem trên ảnh DigitizePID thật (6 lớp × 5 view lệch): ký hiệu luôn trọn trong khung.
+
+---
+
 ## B2 — Colab plumbing 🤖 ✅ XONG 2026-10-19
 
 **Đã làm** (281 test pass, ruff sạch):
@@ -335,11 +379,12 @@ vài crop local nếu có data).
 ## B3 — Train encoder toàn cục 🧑 (Colab) — R1a leave-out, R1b đủ 32 class
 
 ```
-prep --step crops   fgc.global_encoder=true                       # 1 lần, đủ 32 class
+prep --step crops   fgc.global_encoder=true                       # 1 lần, đủ 32 class, định dạng B1c
+AUG="++fgc.aug.degrade.p=0.5 ++fgc.aug.box_jitter.p=0.5"         # quyết định 8; cả train lẫn resume
 # R1b — encoder đủ 32 class: lõi closed-set (C), P2, P4, end-to-end (chạy TRƯỚC, 2026-11-09):
-fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60
+fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 $AUG
 # R1a — encoder leave-out cho P1 (mục mở rộng):
-fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 \
+fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 $AUG \
                     'fgc.exclude_classes=[<danh sách H từ B5>]'
 ```
 
@@ -418,6 +463,17 @@ giá"). Làm ngay sau khi map xong, TRƯỚC R1, TRƯỚC khi thấy bất kỳ 
 **Trạng thái (2026-11-09)**: `symbol_map.csv` xong 32/32 (10 ISO / 11 OOV / 9 VARIANT / 2
 UNSURE); `oneshot.holdout.h_in` / `h_out` vẫn rỗng — đây là việc còn lại của B5.
 
+**✅ H ĐÃ CHỐT 2026-11-11** (chi tiết + lý do: HANDOFF §6c; nguồn: trang kiến trúc
+https://claude.ai/artifact/BtJxRzz8PdFjXVhciZiCo6):
+- **Chia A (chính, trong `config.yaml`)**: `h_in` = S3, S10, S5, S4, S18, S19; `h_extra` = S2,
+  S13, S12; `h_out` = S9, S15 (khó), S27, S30 (dễ). R1a còn 19/32 lớp. `check_b5.py` sạch.
+- **Chia B (dự phòng, đăng ký trước, chỉ ghi trong HANDOFF)**: `h_in` = S1, S10, S5, S17, S18;
+  `h_extra` = S2, S13; `h_out` = S7, S16, S26, S32. Chạy nếu còn quota → báo trung bình ± độ lệch.
+- User muốn "chỉnh H sau khi có kết quả sơ bộ" → **không**: chỉnh sau khi thấy số là
+  cherry-picking và phải train lại R1a. Thay vào đó đăng ký trước hai bộ.
+- `h_extra`: notebook đã dựng R1a với `h_in + h_out + h_extra` và finalize kiểm cả `h_extra`
+  (2026-11-11) → R1a không còn bị chặn; B5b chỉ còn phần kiểm luật trong `check_b5.py`.
+
 **Luật mới — anh em VARIANT (2026-11-09)**: hai lớp ISO có lớp VARIANT cùng `reg_number`:
 `valve_general` (S4 ↔ S12, 2101) và `valve_ball` (S5 ↔ S2, S13, X8071). Giữ S5 ra mà S2/S13 vẫn
 train thì encoder vẫn học "van bi" qua biến thể → `valve_ball` không thật sự chưa thấy. Chọn S4
@@ -435,6 +491,9 @@ lớp OOV (S7, S9, S15, S16, S26–S32), không rút cạn họ `instrument`.
 - ERROR khi một lớp trong `h_in` có VARIANT cùng `reg_number` không nằm trong H (`h_extra`).
 - `oneshot.holdout.h_extra` (mặc định `[]`): `holdout_classes` trả thêm danh sách này; notebook
   dựng `fgc.exclude_classes = h_in + h_out + h_extra`; P1 chỉ test `h_in` + `h_out`.
+  ✅ Phần notebook xong 2026-11-11 (cell 4 đọc `h_extra` thẳng từ config, `HELD`; finalize kiểm
+  `HELD`; `tests/test_colab_notebook.py`). Còn: luật trong `check_b5.py` + đưa `h_extra` vào
+  `holdout_classes` để B6b dùng chung một nguồn.
 - Test: S5 trong `h_in` thiếu S2/S13 → lỗi; có đủ → sạch; `h_extra` không vào tập test P1.
 
 Ngoài ra: `data/raw/real/` đang trống. Nếu có P&ID **thật** (scan/bản vẽ dự án) thì đó là
@@ -481,21 +540,28 @@ Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và nh
   `metrics.json`, không gộp.
 - Input chung dạng `<root>/<class>/*.png` + CSV map class → ISO fine_name / OOV, để P3 (ASU)
   cắm vào sau mà không phải sửa code. P1/P2: `crops_fgc/<split>/Symbol_N/` + `symbol_map.csv`.
-- **P1**: chỉ lấy crop của class H; calibrate trên crop từ ảnh split `train`, báo cáo trên
-  crop từ ảnh split `val`. **Guard rò rỉ**: nếu class test nào nằm trong `fine_classes` của
-  checkpoint encoder → raise, không chạy.
+- **P1**: chỉ lấy crop của class H (`h_in`, `h_out`; không `h_extra`), từ cả hai split — τ
+  không nhìn chúng (2026-11-11), nên không cần tách phần calibrate. Ghi số instance. **Guard rò
+  rỉ**: nếu class test nào nằm trong `fine_classes` của checkpoint encoder → raise, không chạy.
 - **In-vocab**: top-1 / top-3 one-shot accuracy, confusion theo ISO fine_name, per-coarse.
-- **"Other"** (in-vocab = negative, OOV = positive): precision, recall, F1 tại ngưỡng hiện
-  tại; **AUROC** trên max-cosine (không phụ thuộc ngưỡng — con số chính của đóng góp #2).
-- **Sweep ngưỡng** 0.0→1.0: in-vocab accuracy (sau reject) vs OOV recall → vẽ PNG, chọn
-  ngưỡng (vd. tại false-reject in-vocab = 5%) → đây là **calibration** của
-  `oneshot.other_min_cosine`, thay placeholder 0.35.
+- **"Other"** (in-vocab = negative, OOV = positive): **AUROC** trên max-cosine và **OSCR**
+  (độ chính xác lớp biết theo tỉ lệ nhận nhầm lớp lạ, quét mọi τ) — hai số so sánh chính,
+  không phụ thuộc ngưỡng; precision / recall / F1 tại τ đã chọn (B8).
+- **Đường quét τ** 0.0→1.0: accuracy lớp biết (sau reject) vs tỉ lệ loại lớp lạ → PNG. Bắt
+  buộc với P4. Đây là hình báo cáo, **không** phải chỗ chọn τ.
+- **Chọn τ** (`oneshot.other_min_cosine`, thay placeholder 0.35): hàm riêng, chỉ đọc split
+  `val` DigitizePID, lớp đã thấy — quy tắc A và B ở B8. Test: hàm chọn τ từ chối khi nhận crop
+  của lớp H hay ảnh OPEN100-ISO.
+- **Box sai của detector**: box dự đoán có IoU < 0.3 với mọi GT trên split `val` DigitizePID →
+  tỉ lệ bị τ loại (cần detector chạy trên val).
 - Ablation sẵn có qua config, không cần code thêm: `aggregate=vote|mean`,
   `query_views` 1 view vs 8 view, `fgc.aug.subpart.p` 0 vs 0.5 (cần 2 lượt train).
 - Ghi vào `metrics.json` dưới key `oneshot`.
 - `tests/test_oneshot_metrics.py`: AUROC = 1.0 khi tách hoàn hảo, 0.5 khi ngẫu nhiên; sweep
   đơn điệu; tập OOV rỗng → bỏ qua metric "Other" có cảnh báo, không crash; **P1 với class
-  test có trong checkpoint → raise**; P1 calibrate/báo cáo đúng hai split khác nhau.
+  test có trong checkpoint → raise**; OSCR = 1 khi tách và gọi tên hoàn hảo; τ@TPR95 chấp
+  nhận đúng 95% crop biết; quy tắc B không bao giờ dùng ★ của chính lớp đó; hàm chọn τ từ
+  chối crop lớp H / OPEN100-ISO.
 
 **Thêm 2026-11-09 — P4 (OPEN100-ISO)**:
 - Input: export V8 (`data/iso_open100/canonical/`, COCO — data root riêng, đọc bằng
@@ -577,6 +643,48 @@ dương giả.
 
 ---
 
+## B6e — Stage 1 không phân lớp lúc suy luận 🤖 (Phase A, ⛔ trước R4) — 2026-11-11
+
+**Vì sao**: WBF trong `detect_infer` (`ensemble_boxes.weighted_boxes_fusion`) chỉ gộp box
+**cùng nhãn**, NMS của YOLO mặc định cũng theo lớp. Trên bản vẽ ISO, detector coarse có thể ra
+hai box chồng nhau khác nhãn cho một ký hiệu lạ (vd. `valve` + `heat_exchanger`): chấm không
+phân lớp thì một box thành FP, end-to-end thì thành hai crop.
+
+**Code**:
+- `detector.agnostic_merge` (mặc định `false` → số DigitizePID không đổi; bật bằng `++` override,
+  không sửa `config.yaml`): YOLO `agnostic_nms=True` mỗi tile; WBF với mọi nhãn coi là một, mỗi
+  box gộp giữ nhãn của box thành phần điểm cao nhất.
+- **Tuỳ chọn** `data.label_level=agnostic` ở `coco_to_yolo`: mọi nhãn YOLO thành lớp 0 → train
+  detector một lớp (một lượt Colab, sau R1b / R1a / YOLO 32 lớp nếu còn quota).
+- Tests: hai box chồng khác nhãn → một box khi bật, hai khi tắt; nhãn giữ theo điểm cao nhất;
+  `label_level=agnostic` ghi toàn lớp 0 và `data.yaml` có `nc: 1`.
+
+**Bảng ablation Stage 1 (luận văn, phần "detection")**:
+
+| Detector | Trạng thái | Đo |
+|---|---|---|
+| 1 lớp (agnostic) | tuỳ chọn, cần `label_level=agnostic` + 1 lượt train | recall nhóm H tự nhiên (P4), mAP DigitizePID không phân lớp |
+| 8 lớp coarse | ✅ đã train | như trên + mAP coarse DigitizePID |
+| 32 lớp fine | trong plan (baseline C) | như trên + mAP fine (so với hai-stage) |
+
+Chọn detector mặc định sau khi có số: recall nhóm H tự nhiên cao hơn mà mAP DigitizePID không
+giảm đáng kể. Không đủ quota → bỏ detector một lớp; coarse + `agnostic_merge` vẫn đủ.
+
+**Ghi chú — có thể làm sau (user, 2026-11-11)**: trang kiến trúc
+(https://claude.ai/artifact/BtJxRzz8PdFjXVhciZiCo6, mục Stage 1) đề xuất **detector một lớp làm
+mặc định**, coarse làm ablation. Tạm thời giữ như plan (coarse đã train + `agnostic_merge`), nhưng
+nếu làm detector một lớp thì theo trang:
+- Dùng `single_cls=True` của Ultralytics thay cho code `label_level=agnostic` (không phải ghi lại
+  nhãn) → phần `label_level=agnostic` ở trên có thể bỏ.
+- **Vùng bỏ qua cho ký hiệu chưa gán nhãn trong DigitizePID** khi train detector, để detector
+  không học coi chúng là nền. Trước hết phải kiểm DigitizePID có ký hiệu chưa gán nhãn không.
+- **Lấy mẫu cân bằng theo nhãn gốc** (`flow_direction`, flange rất đông) dù detector chỉ có một
+  lớp.
+- Lý do trang đưa ra: Stage 1 chỉ cần trả lời "có ký hiệu không"; tên do Stage 2 gán.
+- Kích hoạt lại khi: recall nhóm H tự nhiên của detector coarse thấp ở R4, hoặc khi còn quota.
+
+---
+
 ## B7 — GĐ3: fine-tune với template ISO — ❌ BỎ (2026-11-09)
 
 Train encoder trên template ISO trái với quyết định "template ISO chỉ dùng lúc suy luận", làm
@@ -646,14 +754,51 @@ DigitizePID, chỉ P4 thiếu lớp này.
 
 0. **C** (encoder đủ 32 class, closed-set, B6c): top-1 / macro-F1 / confusion trên crop val;
    mAP end-to-end 32 lớp fine cạnh YOLO một-stage fine.
-1. **P1** (encoder leave-out): calibrate ngưỡng trên crop H từ split `train` → ghi vào
-   `config.yaml` (`oneshot.other_min_cosine`) **kèm comment** nguồn gốc (run nào, tiêu chí
-   false-reject bao nhiêu) → báo cáo trên crop H từ split `val` với ngưỡng đã chốt (không
-   tune lại).
-2. **P2** (encoder đủ 32 class): cùng ngưỡng, báo cáo riêng, gắn nhãn "seen-class".
-3. **P3** nếu đã có ASU: cùng ngưỡng, báo cáo riêng.
-4. **P4** (OPEN100-ISO, cả hai encoder): cùng ngưỡng, theo nhóm S / V / H chọn / H tự nhiên,
-   sạch vs suy giảm, cộng end-to-end.
+1. **P1** (encoder leave-out): AUROC + OSCR trên crop `h_in` / `h_out`; số tại τ của quy tắc A
+   và B (chọn trước, xem "Ngưỡng Other" dưới đây, không tune lại).
+2. **P2** (encoder đủ 32 class): τ riêng của encoder này, cùng quy tắc; báo cáo riêng, gắn nhãn
+   "seen-class".
+3. **P3** nếu đã có ASU: như P2, báo cáo riêng.
+4. **P4** (OPEN100-ISO, cả hai encoder): τ của encoder tương ứng, theo nhóm S / V / H chọn / H
+   tự nhiên, sạch vs suy giảm, cộng end-to-end; **luôn kèm đường quét τ**.
+
+**Ngưỡng "Other" (τ) — thay 2026-11-11, theo trang kiến trúc
+(https://claude.ai/artifact/BtJxRzz8PdFjXVhciZiCo6, mục "Ngưỡng Other")**. Nếu τ được chọn trên
+dữ liệu test thì mọi số P1 mất giá trị. Ba lớp:
+
+1. **So sánh bằng chỉ số không phụ thuộc ngưỡng**: AUROC của max-cosine (`h_in` vs `h_out`),
+   OSCR, đường accuracy-biết / tỉ lệ loại-lạ. Mọi so sánh giữa phiên bản (R1a, R1b, prototype
+   sạch / có stub) dựa trên AUROC và OSCR. AUROC cao mà OSCR thấp = tách biết / lạ tốt nhưng gọi
+   tên sai trong nhóm biết.
+2. **Chọn τ trên split `val` DigitizePID (chia theo ảnh có sẵn, 100 ảnh), theo quy tắc cố định**.
+   Chỉ nhìn crop của các lớp **đã thấy có prototype** (status ISO, còn trong train của encoder
+   đó). Không nhìn `h_in`, `h_out`, OPEN100-ISO. Báo cả hai quy tắc:
+   - **Quy tắc A — τ@TPR95**: τ sao cho 95% crop val của lớp biết được chấp nhận. Chuẩn open-set,
+     không cần lớp lạ; không biết trước loại được bao nhiêu lớp lạ.
+   - **Quy tắc B — bỏ prototype**: với crop val lớp c, bỏ ★ của chính c, tính max-cosine tới các
+     ★ còn lại → crop đó thành "lạ" mà không train thêm; τ tại điểm Youden (hoặc EER) giữa
+     "biết" và "lạ giả lập". Lạ giả lập dễ hơn lạ thật → τ hơi lạc quan; ghi rõ.
+   - Mỗi encoder chọn τ riêng, cùng quy tắc. Ghi τ vào `config.yaml` kèm comment (run, quy tắc).
+   - **Hạn chế đã biết**: với R1a (chia A), lớp đã thấy có prototype chỉ còn **S1, S17, S21,
+     S24** (4 lớp) → τ của R1a ước lượng trên ít lớp; ghi số crop dùng để chọn τ.
+3. **Lớp lạ thứ hai: box sai của detector** (box dự đoán IoU < 0.3 với mọi GT trên val
+   DigitizePID: ống, chữ, góc bảng) → báo tỉ lệ bị τ loại. Lọt nhiều thì thử dạng điểm 2.
+
+**Dạng điểm số**: (1) một τ chung trên max-cosine — mặc định, làm trước; (2) thêm lề top-1/top-2:
+loại nếu cos₁ < τ hoặc cos₁ − cos₂ < δ (δ chọn cùng quy tắc trên val); (3) ngưỡng theo từng
+prototype — chỉ cho lớp S có val, lớp H vẫn τ chung; chỉ là ablation.
+
+**Chuyển ngưỡng sang OPEN100-ISO**: τ chọn trên crop DigitizePID chưa chắc đúng cho OPEN100-ISO
+(phong cách vẽ khác) → luôn kèm đường quét τ trên P4, ghi là hạn chế đã biết. Không tách một
+phần OPEN100-ISO để hiệu chỉnh τ, trừ khi tách theo tờ gốc, công bố danh sách, và báo cáo như
+một thiết lập riêng.
+
+**Thứ tự**: (a) AUROC + OSCR trên P1 cho mọi phiên bản — bảng so sánh chính; (b) τ quy tắc A và
+B trên val cho từng encoder; (c) P1, P2, P4 tại hai τ đó + đường quét; (d) kiểm τ trên box sai
+của detector; nếu lọt nhiều, thêm lề top-1/top-2.
+
+**Siêu tham số khác** (vd. của B9 sau này: số bản có stub, độ dài ống): chọn trên cùng split
+`val` đó; không bao giờ trên P1 hay OPEN100-ISO.
 5. Baseline ImageNet (B4a) chạy P1 và P4.
 6. Bảng luận văn (phương án B):
    - Chương lõi: bảng C (hai-stage vs YOLO một-stage).
@@ -686,6 +831,8 @@ DigitizePID, chỉ P4 thiếu lớp này.
       + Stage 1 không phân lớp (`eval.class_agnostic`) + recall theo nhóm
 - [ ] B6c closed-set infer + eval cho `__global__.pt` (lõi, protocol C)
 - [ ] B6d đề thi OPEN100-ISO: kiểm ảnh suy giảm với config V7 + vùng bỏ qua (`iscrowd`) cho mũi tên dẫn / cờ — ⛔ trước R4
+- [ ] B6e Stage 1 `agnostic_merge` (+ tuỳ chọn `label_level=agnostic`) — ⛔ trước R4
+- [x] B1c crop có ngữ cảnh + box jitter + sửa lề crop lúc suy luận + notebook `AUG` (2026-11-11)
 - [x] ~~B7-code GĐ3 fine-tune ISO~~ — bỏ 2026-11-09
 - [ ] B4a-code baseline ImageNet (tùy chọn)
 - [x] B5 🧑 hoàn thành `symbol_map.csv` (32/32, 2026-11-09)
@@ -694,11 +841,12 @@ DigitizePID, chỉ P4 thiếu lớp này.
 
 **Phase B — Chạy** (🧑 Colab, đúng thứ tự)
 - [ ] (B4a) baseline ImageNet → separation "trước khi học"
-- [ ] R1b = train `__global__.pt` (đủ 32 class), copy về Drive
+- [ ] R1b = train `__global__.pt` (đủ 32 class, `AUG`), copy về Drive — chạy được khi H đã chốt
 - [ ] YOLO một-stage 32 lớp fine (`detector.label_level=fine`) — baseline cho C
+- [ ] (tuỳ chọn) YOLO một lớp (`label_level=agnostic`, B6e) — ablation Stage 1
 - [ ] R1a = train `__global_lo__.pt` (leave-out H + `h_extra`), copy về Drive
 - [ ] R2 = prototypes (sạch) cho cả hai encoder, ghi số separation
-- [ ] R4 = B8: C (lõi) + P1 + P2 + P4 (+ P3) + baseline, calibrate trên train-split của P1
+- [ ] R4 = B8: C (lõi) + P1 + P2 + P4 (+ P3) + baseline; AUROC/OSCR + τ quy tắc A/B trên val DigitizePID (lớp đã thấy)
 
 **Phase C — Sau R4, tùy chọn** (hoãn 2026-11-10)
 - [ ] B9 prototype có stub, cách (d) (`oneshot.template_views.stubs`, mặc định tắt) + 🧑 duyệt contact sheet + quyết `open_disc`

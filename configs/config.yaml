@@ -247,9 +247,14 @@ oneshot:
   # place the lists live: R1a trains with fgc.exclude_classes = h_in + h_out built from
   # here (utils.oneshot.holdout_classes), and the P1 eval reads the same lists. Fill at
   # B5, BEFORE any training and before seeing any result; never edit after.
+  # Chốt 2026-11-11, trước mọi lượt train Stage 2 ("chia A", lý do: HANDOFF §6c / PLAN B5).
+  # h_extra = VARIANT của cùng ký hiệu ISO với một lớp h_in: bị bỏ khỏi train, KHÔNG thi.
+  # Notebook Colab dựng R1a với fgc.exclude_classes = h_in + h_out + h_extra (2026-11-11);
+  # check_b5.py chưa kiểm luật VARIANT (B5b), chia A đã kiểm tay.
   holdout:
-    h_in: []
-    h_out: []
+    h_in: [Symbol_3, Symbol_10, Symbol_5, Symbol_4, Symbol_18, Symbol_19]
+    h_out: [Symbol_9, Symbol_15, Symbol_27, Symbol_30]
+    h_extra: [Symbol_2, Symbol_13, Symbol_12]
 
 # Evaluation protocol (report §2.2.3, Table 1).
 eval:
