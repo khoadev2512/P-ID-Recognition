@@ -11,6 +11,13 @@ File này để **tiếp tục ở session sau** mà không phải làm lại nh
 > được one-shot. Danh sách H phải chọn ở B5, TRƯỚC khi train.
 > **Nếu hướng chính thất bại → `docs/BACKUP_PLAN.md`**: định nghĩa thất bại (F1–F5), chẩn đoán
 > trước khi đổi hướng, các hướng thay thế đã xếp hạng, cây quyết định + mốc thời gian.
+>
+> **CẬP NHẬT 2026-11-09 — xem "Quyết định 2026-11-09" đầu `docs/PLAN_STAGE2_ONESHOT.md`**, thay
+> các chỗ mâu thuẫn trong file này: khung luận văn = phương án B (lõi closed-set DigitizePID +
+> so với YOLO một-stage; ISO và "Other" là phần chuyển giao / mở rộng); **template ISO chỉ dùng
+> lúc suy luận**; GĐ3 (fine-tune ISO) **bỏ**, thay bằng prototype có stub (B9, cách d — hoãn sang
+sau R4, 2026-11-10); R1b chạy
+> trước R1a; S/H trên lớp ISO tính tự động từ `symbol_map.csv` + checkpoint.
 
 ---
 
@@ -22,7 +29,8 @@ fine-grained + **"Other"/open-set gate**.
 
 **HƯỚNG CHỐT CUỐI CÙNG (2026-10-09): one-shot ArcFace, BỎ render synthetic.**
 - Train ArcFace trên **DigitizePID** (data thật, nhiều mẫu) → học embedding space.
-- **Fine-tune với ISO template** (39 symbol library).
+- ~~**Fine-tune với ISO template** (39 symbol library).~~ Bỏ 2026-11-09: template ISO chỉ dùng
+  lúc suy luận (PLAN B7/B9).
 - Nhận symbol ISO MỚI (không có trong train) bằng **cosine distance tới ISO prototype** → one-shot.
 - Symbol ngoài vocab → **"Other"** (cosine < ngưỡng). ĐÂY LÀ ĐÓNG GÓP CHÍNH.
 
@@ -36,6 +44,12 @@ uv/torch). Việc tiếp theo: **train GĐ1 trên Colab** với global encoder.
 ---
 
 ## 1. ĐÓNG GÓP THESIS (đã chốt với user: cả 3 trục, nhấn mạnh #2)
+
+> **2026-11-09 — trọng số đổi (phương án B)**: lõi luận văn là **closed-set fine-grained** trên
+> DigitizePID 32 lớp, hai-stage so với YOLO một-stage (khớp tên đề tài). Ba trục dưới đây chuyển
+> thành phần "chuyển sang ISO" (#3) và "mở rộng" (#1, #2). So với OSSR-PID: kế thừa khung
+> one-shot; khác ở cổng "Other", thêm ký hiệu không train lại (giao thức leave-classes-out), và
+> bộ đánh giá ISO cả tờ (OPEN100-ISO). Pixel vs graph là đơn giản hoá, không phải đóng góp.
 
 1. **Pixel-based one-shot** (ResNet+ArcFace trên ảnh) — đơn giản hơn OSSR-PID (dùng graph/DGCNN).
 2. **"Other"/open-set rejection** ← ĐIỂM CHÍNH, MỚI NHẤT. Cosine threshold reject symbol
@@ -255,9 +269,8 @@ User chốt: **train DigitizePID + fine-tune ISO**. Làm từng giai đoạn, ve
   (nếu max off-diagonal cosine ~1.0 → 2 symbol ISO không tách được, one-shot giữa chúng
   là tung xu; đó là tín hiệu encoder GĐ1 chưa transfer).
 
-### GĐ3 — Fine-tune với ISO template [CẦN CODE]
-- Fine-tune model GĐ1 với 39 ISO template (augment mạnh vì ít mẫu).
-- Giúp ISO prototype tách biệt hơn trong embedding space.
+### GĐ3 — Fine-tune với ISO template — ❌ BỎ 2026-11-09
+- Trái với "template ISO chỉ dùng lúc suy luận"; thay bằng prototype có stub (PLAN B9), không train.
 
 ### GĐ4 — Inference one-shot + "Other" [lõi đã có, CẦN WIRE vào fgc_infer]
 - Đã có: `PrototypeDirectory.match_views(...)` (multi-scale + voting + gate) và

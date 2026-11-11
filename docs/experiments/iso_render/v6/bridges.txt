@@ -1,0 +1,11 @@
+V6 after V5 bridges (page.bridge_gap 1.5), base_seed 0, 12 sheets
+attempts 444, kept 432, dropped: {('g1', '1'): 12}
+kept variants also kept before (content dedup, no bridges): 391; SVG identical 363, changed 28 (all with a bridge: True); new 41
+bridges per kept variant: {0: 363, 1: 51, 2: 11, 3: 7}
+size < 0.95, sheets 1,2,4,10: attempts 34%, kept 34%
+size < 0.95, other 8: attempts 31%, kept 32%
+size < 0.95, all: attempts 32%, kept 33%
+  sheet 1: attempts 22%, kept 22%
+  sheet 2: attempts 28%, kept 28%
+  sheet 4: attempts 47%, kept 47%
+  sheet 10: attempts 41%, kept 39%

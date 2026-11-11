@@ -28,6 +28,7 @@ from torchvision import transforms
 from utils.augment import SubpartWarp
 from utils.classmap import load_classmap, training_fine_classes
 from utils.paths import DataPaths
+from utils.scan_degrade import ScanDegrade
 
 _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
 
@@ -74,6 +75,11 @@ def _build_transform(cfg: DictConfig, split: str) -> transforms.Compose:
         # Per-subpart augment runs on the native crop, BEFORE Resize: it needs a clean
         # ink mask, which downscaling would blur (see utils.augment).
         ops.append(SubpartWarp.from_cfg(cfg.fgc.aug.subpart))
+    degrade = ScanDegrade.from_cfg(cfg.fgc.aug.get("degrade")) if split == "train" else None
+    if degrade is not None:
+        # Scan-like degradation (off unless fgc.aug.degrade.p > 0), also on the native crop:
+        # its limits follow the stroke width measured there (see utils.scan_degrade).
+        ops.append(degrade)
     ops.append(transforms.Resize((imgsz, imgsz)))
     if split == "train":
         aug = cfg.fgc.aug

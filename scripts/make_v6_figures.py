@@ -1,7 +1,8 @@
 """V6 evidence pictures (local only, *.png under docs/experiments/ is gitignored).
 
 Needs the variants written by make_variants.py (default data/iso_open100/variants) and its
-attempts.csv. Writes montage, duplicate pair, stroke / size crops and a Hamming histogram.
+attempts.csv. Writes montage, the closest kept pairs (by content, by picture hash), stroke /
+size crops and the nearest-distance plot (content share vs Hamming distance).
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from utils.diversity import ahash, dhash, hamming  # noqa: E402
+from utils.diversity import content_distance  # noqa: E402
 from utils.iso_mapping import load_config  # noqa: E402
 from utils.iso_templates import load_templates  # noqa: E402
 from utils.iso_variants import plan_variant, render_variant, variant_settings  # noqa: E402
@@ -81,35 +82,39 @@ def main() -> None:
         )
     grid(tiles, 3).save(args.out / "montage_sheet3.png")
 
-    # 2. a duplicate dropped, next to the kept picture it matched
-    dups = [r for r in rows if r["reason"] == "duplicate"]
-    dups.sort(key=lambda r: int(r["nearest"]))
-    for rank, r in enumerate((dups[0], dups[len(dups) // 2])):
-        i, idx = int(r["sheet"]), int(r["index"])
+    # 2. pairs of kept variants: the closest by content (fewest nodes with another symbol) and
+    # the closest by picture hash (what the old hash filter would have dropped first)
+    def kept_pair(i: int, idx: int) -> tuple[Image.Image, Image.Image, int, float]:
         sheet = load_graphml(args.src / f"{i}.graphml", Image.open(args.src / f"{i}.png").size)
         runs = pipe_runs(sheet)
-        draft = plan_variant(sheet, runs, templates, cfg, i, idx)
-        img = rasterize(render_variant(draft, sheet, runs, cfg).page.svg)
-        a, d = ahash(img, st.hash_size), dhash(img, st.hash_size)
+        mine = plan_variant(sheet, runs, templates, cfg, i, idx).choices
         best = None
         for k in (
-            x
+            int(x["index"])
             for x in rows
             if int(x["sheet"]) == i and x["status"] == "kept" and int(x["index"]) < idx
         ):
-            kim = Image.open(args.variants / f"sheet{i}" / f"v{int(k['index']):03d}.png")
-            dist = max(hamming(a, ahash(kim, st.hash_size)), hamming(d, dhash(kim, st.hash_size)))
-            if best is None or dist < best[0]:
-                best = (dist, k, kim)
-        dist, k, kim = best
+            dist = content_distance(mine, plan_variant(sheet, runs, templates, cfg, i, k).choices)
+            if best is None or dist < best[1]:
+                best = (k, dist)
+        k, dist = best
+        load = lambda j: Image.open(args.variants / f"sheet{i}" / f"v{j:03d}.png")  # noqa: E731
+        return load(k), load(idx), k, dist
+
+    later = [r for r in rows if r["status"] == "kept" and r["nearest_content"] != ""]
+    for tag, key in (("content", "nearest_content"), ("hash", "nearest_hash")):
+        r = min(later, key=lambda x: float(x[key]))
+        i, idx = int(r["sheet"]), int(r["index"])
+        kim, img, k, dist = kept_pair(i, idx)
         pair = [
-            label(small(kim, 1000), f"kept v{int(k['index']):03d}"),
+            label(small(kim, 1000), f"kept v{k:03d} (closest earlier kept variant by content)"),
             label(
-                small(Image.fromarray(img), 1000),
-                f"dropped v{idx:03d}: duplicate, distance {dist} < {st.min_distance}",
+                small(img, 1000),
+                f"kept v{idx:03d}: {dist:.0%} of nodes differ from v{k:03d}; "
+                f"hash distance to the closest kept picture {r['nearest_hash']}",
             ),
         ]
-        grid(pair, 2).save(args.out / f"duplicate_pair_{rank}_sheet{i}.png")
+        grid(pair, 2).save(args.out / f"closest_pair_{tag}_sheet{i}.png")
 
     # 3. one symbol under w = 2 / 4 and size 0.85 / 1.15 (same assignment and layout)
     sheet = load_graphml(
@@ -152,26 +157,35 @@ def main() -> None:
         crops += row
     grid(crops, len(shots)).save(args.out / "style_crops.png")
 
-    # 4. Hamming distance of every hashed candidate to its nearest kept variant
+    # 4. every drawn candidate: share of nodes differing from its closest kept variant against
+    # the Hamming distance of its picture to the closest kept picture
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    near = [(int(r["nearest"]), r["reason"] == "duplicate") for r in rows if r["nearest"] != ""]
-    fig, ax = plt.subplots(figsize=(7, 3.5))
-    top = max(n for n, _ in near)
-    bins = np.arange(0, top + 2) - 0.5
-    ax.hist(
-        [n for n, dup in near if not dup], bins=bins, label="kept / not duplicate", color="#2a6fb0"
-    )
-    ax.hist([n for n, dup in near if dup], bins=bins, label="dropped: duplicate", color="#d9822b")
-    ax.axvline(st.min_distance - 0.5, color="k", ls="--", lw=1)
-    ax.set_xlabel(f"max(Hamming ahash, dhash) to the nearest kept variant ({st.hash_size**2} bits)")
-    ax.set_ylabel("candidates")
-    ax.legend(frameon=False)
+    pts = [r for r in rows if r["nearest_content"] != "" and r["nearest_hash"] != ""]
+    dup = [r for r in rows if r["reason"] == "duplicate"]
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 3.8))
+    shares = [100 * float(r["nearest_content"]) for r in rows if r["nearest_content"] != ""]
+    ax1.hist(shares, bins=np.arange(0, max(shares) + 2.5, 2.5), color="#2a6fb0")
+    ax1.axvline(100 * st.min_node_diff, color="k", ls="--", lw=1)
+    ax1.set_xlabel("% of nodes with another symbol than the closest kept variant")
+    ax1.set_ylabel("candidates")
+    ax1.set_title(f"content: {len(dup)} dropped below {st.min_node_diff:.0%}", fontsize=10)
+    ax2.scatter(
+        [int(r["nearest_hash"]) for r in pts],
+        [100 * float(r["nearest_content"]) for r in pts],
+        s=8, color="#2a6fb0",
+    )  # fmt: skip
+    ax2.axhline(100 * st.min_node_diff, color="k", ls="--", lw=1)
+    ax2.axvline(8 - 0.5, color="#d9822b", ls=":", lw=1, label="old hash filter: < 8 bits dropped")
+    bits = st.hash_size**2
+    ax2.set_xlabel(f"max(Hamming ahash, dhash) to the closest kept picture ({bits} bits)")
+    ax2.set_ylabel("% nodes differing")
+    ax2.legend(frameon=False, fontsize=8)
     fig.tight_layout()
-    fig.savefig(args.out / "hamming_hist.png", dpi=130)
+    fig.savefig(args.out / "dedup_distances.png", dpi=130)
 
 
 if __name__ == "__main__":

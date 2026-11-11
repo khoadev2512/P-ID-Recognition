@@ -1,6 +1,6 @@
-images 826 (clean 413, degraded 413); annotations 89698
+images 864 (clean 432, degraded 432); annotations 93800
 symbols per image: mean 108.6, min 45, max 201
-other_* share: 38.2% (other_iso 9688, other_isa 21478, other_generic 3088)
+other_* share: 38.0% (other_iso 10144, other_isa 22230, other_generic 3314)
 vocabulary classes with >= 1 instance: 30 of 42
-agitators (added): 360
+agitators (added): 380
 split by sheet: {'0': 'test', '1': 'test', '2': 'test', '3': 'test', '4': 'test', '5': 'test', '6': 'test', '7': 'test', '8': 'test', '9': 'test', '10': 'test', '11': 'test'} (mode all_test)

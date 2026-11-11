@@ -19,6 +19,7 @@ a standing 2062 may carry an agitator (V5b).
 from __future__ import annotations
 
 import math
+import random
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -30,6 +31,7 @@ import numpy as np
 from utils.iso_layout import NOT_SYMBOLS
 from utils.iso_mapping import OTHER_ISO, Assignment
 from utils.iso_templates import Matrix, Template, TemplatePort, _apply, _compose
+from utils.page_text import equipment_prefix, neighbour_role, place_texts, text_settings
 from utils.pid2graph import PipeRun, Port, Sheet, _simplify, symbol_ports
 
 Point = tuple[float, float]
@@ -907,6 +909,103 @@ def _nozzle_stub(box: Box, target: Point, side: str) -> list[Point] | None:
     return [start, target]
 
 
+# what a link of no length may join with a short pipe (`_bridge_links`): a bubble is reached by
+# its stem, a tag's line is not a pipe, and a vessel or plain box beside an ISO symbol is a nozzle
+_BRIDGE_KINDS = frozenset({"iso", "arrow", "generic", "vessel"})
+
+
+def _bridge_links(
+    sheet: Sheet,
+    runs: list[PipeRun],
+    kind: Mapping[str, str],
+    drawn: list[str],
+    skip: set[int],
+) -> dict[int, tuple[str, str]]:
+    """Links of no length between two drawn symbols: run index -> (run.a, run.b).
+
+    In OPEN100 the two sit against each other (a flow arrow under a pump outlet, a flange
+    against a valve) and no pipe is drawn between them. Each is drawn inside its own box, and a
+    drawing smaller than its box (a narrow template, or one made smaller by V6's size factor)
+    leaves a gap where the graph says the two are joined; `_bridge` pipes it. `skip`: runs drawn
+    otherwise (vessel nozzles, signal lines).
+    """
+    on_page = set(drawn)
+    degenerate = _degenerate_runs(sheet, runs, kind)
+    out: dict[int, tuple[str, str]] = {}
+    for idx, run in enumerate(runs):
+        if idx in skip or run.internal or run.a == run.b:
+            continue
+        if not {run.a, run.b} <= on_page or not {kind[run.a], kind[run.b]} <= _BRIDGE_KINDS:
+            continue
+        if len({tuple(q) for q in run.points}) <= 1 or idx in degenerate:
+            out[idx] = (run.a, run.b)
+    return out
+
+
+@dataclass(frozen=True)
+class BridgeEnd:
+    """One symbol of a link `_bridge` pipes: its ink box; an anchor, the point the pipe leaves
+    from (`port`: an ISO symbol's port on the link) or passes through (an arrow's centre: it
+    lies on its pipe); and `ink(start, direction)`, the first point of its drawing on a ray
+    (an ISO symbol's `_Placed.ink_along`; None: the box edge is the drawing)."""
+
+    box: Box
+    anchor: Point | None = None
+    port: bool = False
+    ink: Callable[[Point, Point], Point | None] | None = None
+
+
+def _bridge(
+    a: BridgeEnd, b: BridgeEnd, min_gap: float
+) -> tuple[list[Point], tuple[bool, bool]] | None:
+    """The straight pipe across the gap between two drawn symbols of a link of no length, and
+    per end whether it starts at that end's port; None when they touch (the gap is at most
+    `min_gap` px), lie diagonally apart, or no single line meets both drawings.
+
+    The pipe runs along the axis across the gap. Its line is the anchor of the narrower symbol
+    (across the axis) among those inside the two boxes' common span: a small fitting's port
+    rather than a point on a long vessel wall, whose own port may not face it. Without such an
+    anchor it is the middle of the span. Each end stops at its port when the line passes
+    through it, else on its drawing.
+    """
+    ba, bb = a.box, b.box
+    gx = max(bb[0] - ba[2], ba[0] - bb[2])
+    gy = max(bb[1] - ba[3], ba[1] - bb[3])
+    if (gx > 0) == (gy > 0):
+        return None
+    u = 0 if gx > 0 else 1  # the axis of the gap; 1 - u is the one across it
+    lo, hi = max(ba[1 - u], bb[1 - u]), min(ba[3 - u], bb[3 - u])
+    if hi <= lo:
+        return None
+    inside = [e for e in (a, b) if e.anchor is not None and lo - EPS <= e.anchor[1 - u] <= hi + EPS]
+    if inside:
+        anchor = min(inside, key=lambda e: e.box[3 - u] - e.box[1 - u]).anchor
+        assert anchor is not None
+        c = anchor[1 - u]
+    else:
+        c = (lo + hi) / 2
+    forward = bb[u] >= ba[2 + u]  # a lies before b along the axis
+
+    def stop(e: BridgeEnd, facing: float, inward: int) -> tuple[float, bool] | None:
+        if e.port and e.anchor is not None and abs(e.anchor[1 - u] - c) <= 1.0:
+            return e.anchor[u], True
+        if e.ink is None:
+            return facing, False
+        start = (facing, c) if u == 0 else (c, facing)
+        hit = e.ink(start, (float(inward), 0.0) if u == 0 else (0.0, float(inward)))
+        return None if hit is None else (hit[u], False)
+
+    sa = stop(a, ba[2 + u] if forward else ba[u], -1 if forward else 1)
+    sb = stop(b, bb[u] if forward else bb[2 + u], 1 if forward else -1)
+    if sa is None or sb is None:
+        return None
+    (ea, pa), (eb, pb) = sa, sb
+    if (eb - ea) * (1 if forward else -1) <= min_gap:
+        return None
+    line = [(ea, c), (eb, c)] if u == 0 else [(c, ea), (c, eb)]
+    return line, (pa, pb)
+
+
 def _drawn_ends(
     runs: list[PipeRun], skip: set[int]
 ) -> dict[tuple[int, str], tuple[str, float, float, str, str]]:
@@ -1173,6 +1272,9 @@ class Page:
     ports: list[dict[str, Any]] = field(default_factory=list)  # id, kind, x, y: where a pipe stops
     # signal lines to a bubble: id (symbol), bubble, points, from_centre (a valve's stem)
     stems: list[dict[str, Any]] = field(default_factory=list)
+    text: str = ""  # SVG fragment of the labels (V5c, utils.page_text); empty without text
+    # one dict per label: kind, owner (node or None), text, box, vertical; not COCO objects
+    texts: list[dict[str, Any]] = field(default_factory=list)
 
     def _doc(self, body: str) -> str:
         return (
@@ -1183,11 +1285,11 @@ class Page:
 
     @property
     def svg(self) -> str:
-        return self._doc(self.pipes + self.symbols)
+        return self._doc(self.pipes + self.symbols + self.text)
 
     def layer(self, which: str) -> str:
-        """A document with only the pipes, or only the symbols (for measuring)."""
-        return self._doc({"pipes": self.pipes, "symbols": self.symbols}[which])
+        """A document with only the pipes, the symbols or the text (for measuring)."""
+        return self._doc({"pipes": self.pipes, "symbols": self.symbols, "text": self.text}[which])
 
 
 def rasterize(svg: str, dpi: int = 72) -> np.ndarray:
@@ -1206,14 +1308,22 @@ def render_page(
     assignments: Mapping[str, Assignment],
     cfg: Mapping[str, Any],
     source: Sheet,
+    touch_source: Sheet | None = None,
+    text_rng: random.Random | None = None,
 ) -> Page:
-    """Draw `sheet` (after V4) with the V3 `assignments`. `source` is the sheet before V4."""
+    """Draw `sheet` (after V4) with the V3 `assignments`. `source` is the sheet before V4: every
+    symbol is fitted to its box there. `touch_source` (default `source`) says which pairs of
+    symbols already touched, so may overlap on the page: V6 sizes the symbols through `source`,
+    and an enlarged box must not turn two symbols apart in the data into a pair that touched.
+    With `text_rng` and a `text` block in `cfg`, labels are added in blank space afterwards
+    (`utils.page_text`); everything drawn before stays as it is."""
     scale = float(cfg["layout"]["scale"])
     page_cfg = cfg["page"]
     w_px = float(page_cfg["stroke_px"])
     steps = [float(s) for s in page_cfg["shrink_steps"]]
     dots = bool(page_cfg["junction_dot"])
     nozzle_frac = float(page_cfg.get("nozzle_stub", 0.0))
+    bridge_gap = page_cfg.get("bridge_gap")  # None: links of no length are not piped
     replaced_px = page_cfg.get("replaced_size")
     disc_classes = set((cfg.get("flanges") or {}).get("classes", []))
     flange_symbol = (cfg.get("flanges") or {}).get("symbol")
@@ -1228,7 +1338,7 @@ def render_page(
         (
             "iso", "shrunk", "replaced", "vessels", "agitators", "agitators_skipped",
             "zero_length_runs", "skipped_internal_runs", "unmatched_ports", "loose_ends", "stems",
-            "flanges", "nozzles", "resized", "turned", "leaders", "bubbles_moved",
+            "flanges", "nozzles", "bridges", "resized", "turned", "leaders", "bubbles_moved",
             "bubbles_unsettled",
         ),
         0,
@@ -1346,7 +1456,7 @@ def render_page(
 
     _resolve_overlaps(
         sheet,
-        source,
+        touch_source if touch_source is not None else source,
         assignments,
         placed,
         kind,
@@ -1487,6 +1597,49 @@ def render_page(
         polylines.append(_extend(line, w_px / 2))
         port_log.append({"id": nid, "kind": "iso", "x": target[0], "y": target[1], "loose": False})
         log["nozzles"] += 1
+    # two symbols against each other (a link of no length) drawn apart: a short pipe joins them
+    if bridge_gap is not None:
+        links = _bridge_links(sheet, runs, kind, drawn, set(nozzles) | stem_runs | touching)
+        for idx, pair in links.items():
+            sides: list[BridgeEnd] = []
+            for nid in pair:
+                box = boxes[nid]
+                if kind[nid] == "iso":
+                    hits = [
+                        t
+                        for q, t, _ in _port_targets(
+                            sheet,
+                            nid,
+                            "iso",
+                            placed,
+                            ports[nid],
+                            assignments[nid],
+                            [],
+                            flanges.get(nid),
+                        )
+                        if q.run == idx
+                    ]
+                    ink = placed[nid].ink_along
+                    if nid in flanges:  # the pipe stops on the flanges around a disc
+                        fb = flanges[nid].ink_box(w_px)
+                        box = (min(box[0], fb[0]), min(box[1], fb[1]),
+                               max(box[2], fb[2]), max(box[3], fb[3]))  # fmt: skip
+                        ink = None
+                    sides.append(BridgeEnd(box, hits[0] if hits else None, bool(hits), ink))
+                elif kind[nid] == "arrow":
+                    sides.append(BridgeEnd(box, ((box[0] + box[2]) / 2, (box[1] + box[3]) / 2)))
+                else:
+                    sides.append(BridgeEnd(box))
+            bridged = _bridge(sides[0], sides[1], float(bridge_gap))
+            if bridged is None:
+                continue
+            line, at_port = bridged
+            polylines.append(_extend(_extend(line, w_px / 2)[::-1], w_px / 2))
+            for nid, end, used in zip(pair, sides, at_port, strict=True):
+                if used and end.anchor is not None:
+                    x, y = end.anchor
+                    port_log.append({"id": nid, "kind": "iso", "x": x, "y": y, "loose": False})
+            log["bridges"] += 1
 
     pipe_parts = [f'<polyline points="{_pts(pl)}"/>' for pl in polylines if len(pl) >= 2]
     pipe_parts += [f'<polyline points="{_pts(pts)}"/>' for _, pts in stems.values()]
@@ -1618,7 +1771,58 @@ def render_page(
             f'<g fill="none" stroke="black" stroke-width="{_fmt(w_px)}" '
             f'stroke-linejoin="miter">{"".join(outline)}</g>'
         )
-    return Page(sheet.width, sheet.height, pipes, symbols, annotations, log, port_log, stem_log)
+    page = Page(sheet.width, sheet.height, pipes, symbols, annotations, log, port_log, stem_log)
+    st = text_settings(cfg)
+    if text_rng is None or st is None:
+        return page
+    # --- text: only in what is blank now ---------------------------------------------------
+    ink = rasterize(page.svg) < 250
+    bubble_circles = {n: circles[n] for n in drawn if kind[n] == "bubble" and n in circles}
+    flag_boxes = {n: _node_box(sheet.nodes[n]) for n in drawn if kind[n] == "flag"}
+    equipment: dict[str, tuple[Box, str, bool]] = {}
+    for nid in drawn:
+        if kind[nid] == "vessel":
+            pre = equipment_prefix(assignments[nid].template.fine_name, vessels[nid].column)
+        elif kind[nid] == "iso":
+            pre = equipment_prefix(placed[nid].tpl.fine_name)
+        else:
+            continue
+        if pre is not None:
+            equipment[nid] = (boxes[nid], pre, kind[nid] == "vessel")
+    leader_ends = {n: tail[0] for n, (_, tail) in leaders.items() if kind.get(n) == "leader"}
+    # what each bubble's lines lead to, so that its tag fits (a control valve's bubble is FV, ...)
+    bubble_links: dict[str, list[tuple[str, str]]] = {}
+    for run in runs:
+        if run.internal or run.a == run.b:
+            continue
+        for me, other in ((run.a, run.b), (run.b, run.a)):
+            if me not in bubble_circles:
+                continue
+            ko = kind.get(other)
+            if ko == "iso" and other in placed:
+                fine = placed[other].tpl.fine_name
+            elif ko == "vessel":
+                fine = assignments[other].template.fine_name
+            else:
+                fine = None
+            bubble_links.setdefault(me, []).append((other, neighbour_role(ko, fine)))
+    # a signal line from a valve's stem may reach its bubble through other nodes (an actuator)
+    for valve, bubble in stems:
+        if bubble in bubble_circles and valve in placed:
+            role = neighbour_role("iso", placed[valve].tpl.fine_name)
+            if (valve, role) not in bubble_links.get(bubble, []):
+                bubble_links.setdefault(bubble, []).append((valve, role))
+    page.text, labels, text_log = place_texts(
+        ink, w_px, text_rng, st, bubble_circles, flag_boxes, equipment, polylines, leader_ends,
+        bubble_links,
+    )  # fmt: skip
+    page.texts = [
+        {"kind": lb.kind, "owner": lb.owner, "text": lb.text, "vertical": bool(lb.vertical),
+         "box": [round(float(v), 2) for v in lb.box]}
+        for lb in labels
+    ]  # fmt: skip
+    page.log.update(text_log)
+    return page
 
 
 def _shape_box(

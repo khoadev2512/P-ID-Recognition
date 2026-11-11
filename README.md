@@ -182,7 +182,12 @@ files — each is just the default config with a couple of fields set by hand as
   (`data.label_level=coarse`, `detector.label_level=coarse`).
 - **phase2** — programmatic synthesis with coarse+fine labels + degradation aug.
   Defaults already match it (`fgc.balanced_sampler=true`); swap in the phase-2 dataset
-  under `data/raw/synthetic/` and re-run the data-prep steps.
+  under `data/raw/synthetic/` and re-run the data-prep steps. The degradation aug is off
+  by default; it degrades train images online like the V7 test pages (no rotation, limits
+  from the measured stroke width; `src/utils/scan_degrade.py`):
+  `pid-detect-train +detector.aug.degrade.p=0.5` and `pid-fgc-train +fgc.aug.degrade.p=0.5`
+  (ranges such as `'+fgc.aug.degrade.noise_sigma=[0,6]'` override the V7 defaults). On
+  resume, pass the same override again.
 - **phase3** — real-world held-out eval (never trained on). Run
   `pid-eval eval.split=test eval.mode=det_plus_fgc` and compare against the same
   command run on the synthetic test split — real-source images are always assigned

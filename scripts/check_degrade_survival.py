@@ -7,6 +7,16 @@ cross-correlation (max over +-4 px shifts) with the clean drawing of every templ
 It passes when the best match is a template of its own class (`fine_name`); `strict` also asks
 for the very same file (two drawings of one class are allowed to be taken for each other).
 
+Whole-symbol NCC cannot test a template whose clean drawing is already within
+`MIN_CLEAN_MARGIN` of another class (`testable` 0): the shared part outweighs the detail that tells
+them apart (valve_globe vs valve_butterfly, check_valve_globe vs check_valve_swing differ by one
+bar through the middle dot, ~5% of the ink; fading the bar from full to none moves NCC by ~0.02).
+Such a template is checked on the difference region instead (`detail_*`): the core of what only
+it draws must stay darker than halfway between its clean darkness and the other's there, and the
+core of what only the other draws must stay lighter than halfway (no detail of the other class
+grows out of blur or dilation). The region and its rule come from the two templates, so nothing
+is estimated.
+
 Scenarios: every parameter at its strongest end (eroding, and dilating), and each parameter alone
 at its strongest end, to say which one breaks a template. Writes a CSV (one row per template,
 scenario, size k px/mm and stroke w) and prints the failures. Read-only on data/raw/.
@@ -34,6 +44,7 @@ from utils.page_svg import _compose, oriented_ink_box, rasterize  # noqa: E402
 PAD_PX = 14  # blank border round the largest drawing of a group
 MIN_CLEAN_MARGIN = 0.03  # a clean drawing closer than this to another class cannot be tested
 SHIFT = 4  # px the match may slide (a rotation moves a drawing by about a pixel)
+DETAIL_MIN_PX = 4  # px: a smaller piece of a difference region is anti-aliasing, not a detail
 GROUPS = {  # name -> (templates to test, templates to compare them with)
     "G1": (lambda t: t.group == "G1", lambda t: t.group == "G1"),
     "G2": (lambda t: t.group == "G2", lambda t: t.group == "G2"),
@@ -66,6 +77,40 @@ def best_match(degraded: np.ndarray, refs: dict[str, np.ndarray]) -> dict[str, f
     return out
 
 
+def _dark(img: np.ndarray) -> np.ndarray:
+    return 1.0 - img.astype(np.float64) / 255
+
+
+def detail_core(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """The middle line of what only `a` draws (two clean drawings on one canvas): pixels inked
+    in `a` where `b` is blank paper, kept per connected piece of at least `DETAIL_MIN_PX` pixels
+    at their deepest (distance to the piece's edge within half a pixel of its largest)."""
+    region = ((_dark(a) > 0.5) & (_dark(b) < 0.02)).astype(np.uint8)
+    n, labels = cv2.connectedComponents(region)
+    dist = cv2.distanceTransform(region, cv2.DIST_L2, 3)
+    core = np.zeros(region.shape, bool)
+    for i in range(1, n):
+        piece = labels == i
+        if piece.sum() >= DETAIL_MIN_PX:
+            core |= piece & (dist >= dist[piece].max() - 0.5)
+    return core
+
+
+def detail_darkness(img: np.ndarray, core: np.ndarray) -> float:
+    """How dark `img` stays on `core`: the median over its pixels of the darkest pixel within
+    1 px (a rotation moves a thin line by about a pixel); NaN for an empty core."""
+    if not core.any():
+        return float("nan")
+    near = cv2.dilate(_dark(img), np.ones((3, 3), np.uint8))
+    return float(np.median(near[core]))
+
+
+def halfway(a: np.ndarray, b: np.ndarray, core: np.ndarray) -> float:
+    """The darkness halfway between clean drawings `a` and `b` on `core`: a degraded drawing
+    darker than this there is nearer `a`'s, lighter is nearer `b`'s."""
+    return (detail_darkness(a, core) + detail_darkness(b, core)) / 2
+
+
 def scenarios(cfg: dict, w: float) -> dict[str, object]:
     out = {
         "clean": None,
@@ -96,6 +141,8 @@ def evaluate(cfg, templates, ks, ws, only=None):
             )
             refs = {t.file: draw(t, k, w, size) for t in refs_t}
             clean_margin: dict[str, float] = {}
+            # per untestable template: (other template, own core, other's core, both thresholds)
+            details: dict[str, list[tuple[str, np.ndarray, np.ndarray, float, float]]] = {}
             for scen, params in scenarios(cfg, w).items():
                 if only is not None and scen not in only:
                     continue
@@ -106,10 +153,26 @@ def evaluate(cfg, templates, ks, ws, only=None):
                         clean_margin[t.file] = base[t.file] - max(
                             (v for f, v in base.items() if fine_of[f] != t.fine_name), default=0
                         )
+                        details[t.file] = []
+                        for f, v in base.items():
+                            if fine_of[f] == t.fine_name or base[t.file] - v >= MIN_CLEAN_MARGIN:
+                                continue
+                            own, other = detail_core(img, refs[f]), detail_core(refs[f], img)
+                            mid_own = halfway(img, refs[f], own)
+                            mid_other = halfway(img, refs[f], other)
+                            details[t.file].append((f, own, other, mid_own, mid_other))
                     if params is not None:
                         img = degrade_image(img, replace(params, noise_seed=1000 * n + 7))[0]
                     score = best_match(img, refs)
                     best = max(score, key=score.get)
+                    keeps, grows, ok = [], [], True
+                    for _, own, other, mid_own, mid_other in details[t.file]:
+                        if own.any():
+                            keeps.append(detail_darkness(img, own))
+                            ok &= keeps[-1] > mid_own
+                        if other.any():
+                            grows.append(detail_darkness(img, other))
+                            ok &= grows[-1] < mid_other
                     same = {f for f in score if fine_of[f] == t.fine_name}
                     others = [v for f, v in score.items() if f not in same]
                     rows.append(
@@ -122,6 +185,10 @@ def evaluate(cfg, templates, ks, ws, only=None):
                             "clean_margin": round(clean_margin[t.file], 3),
                             "testable": int(clean_margin[t.file] >= MIN_CLEAN_MARGIN),
                             "margin": round(score[t.file] - max(others, default=0), 3),
+                            "detail_vs": "+".join(f for f, *_ in details[t.file]),
+                            "detail_own": round(min(keeps), 3) if keeps else "",
+                            "detail_other": round(max(grows), 3) if grows else "",
+                            "detail_pass": int(ok) if details[t.file] else "",
                         }
                     )  # fmt: skip
     return rows
@@ -153,8 +220,9 @@ def with_cap(d: dict, scen: str, f: float) -> dict:
 
 
 def passes(rows: list[dict]) -> bool:
-    """Every testable template is still taken for its own class."""
-    return all(r["pass"] or not r["testable"] for r in rows)
+    """Every testable template is still taken for its own class, and every other one keeps its
+    distinguishing detail without growing the other class's."""
+    return all((r["pass"] or not r["testable"]) and r["detail_pass"] != 0 for r in rows)
 
 
 def tune(cfg, templates, ks, ws, step=0.1):
@@ -205,17 +273,35 @@ def main() -> None:
         wr = csv.DictWriter(fh, fieldnames=list(rows[0]))
         wr.writeheader()
         wr.writerows(rows)
+    nan = float("nan")
     for label, sel_k in (
         (f"gate (k >= {args.gate_k})", lambda k: k >= args.gate_k),
         ("below the gate", lambda k: k < args.gate_k),
     ):
-        print(f"\n{label}\n{'scenario':<24}{'tests':>6}{'fail':>6}{'strict-fail':>12}")
+        print(
+            f"\n{label}\n{'scenario':<24}{'tests':>6}{'fail':>6}{'strict-fail':>12}"
+            f"{'detail':>8}{'detail-fail':>12}{'min own':>9}{'max other':>10}"
+        )
         for scen in dict.fromkeys(r["scenario"] for r in rows):
             sel = [r for r in rows if r["scenario"] == scen and sel_k(r["k"])]
             n_fail = sum(1 - r["pass"] for r in sel if r["testable"])
             n_strict = sum(1 - r["strict"] for r in sel)
+            det = [r for r in sel if r["detail_pass"] != ""]
+            own = [r["detail_own"] for r in det if r["detail_own"] != ""]
+            grow = [r["detail_other"] for r in det if r["detail_other"] != ""]
             if sel:
-                print(f"{scen:<24}{len(sel):>6}{n_fail:>6}{n_strict:>12}")
+                print(
+                    f"{scen:<24}{len(sel):>6}{n_fail:>6}{n_strict:>12}{len(det):>8}"
+                    f"{sum(1 - r['detail_pass'] for r in det):>12}"
+                    f"{min(own, default=nan):>9.2f}{max(grow, default=nan):>10.2f}"
+                )
+    print("\ndetail failures (a distinguishing detail faded, or the other class's grew):")
+    for r in rows:
+        if r["detail_pass"] == 0:
+            print(
+                f"  {r['scenario']:<16} k={r['k']} w={r['w']} {r['template']} ({r['fine_name']}) "
+                f"vs {r['detail_vs']}: own {r['detail_own']} other {r['detail_other']}"
+            )
     print("\nfailures of the all-maximum scenarios (class confused):")
     seen = set()
     for r in rows:

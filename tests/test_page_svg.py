@@ -20,10 +20,12 @@ from utils.iso_layout import transform_layout
 from utils.iso_mapping import Assignment, assign_symbols, load_config
 from utils.iso_templates import load_templates
 from utils.page_svg import (
+    BridgeEnd,
     Page,
     _arrow_box,
     _attach,
     _attach_end,
+    _bridge,
     _bubble_circles,
     _circle_hit,
     _fit_scale,
@@ -442,6 +444,32 @@ def test_a_valve_is_drawn_at_the_scaled_bbox_size_and_joined_to_the_pipe(templat
             pipes[y - 3 : y + 4, x - 3 : x + 4].any()
             and symbols[y - 3 : y + 4, x - 3 : x + 4].any()
         )
+
+
+@needs_templates
+def test_which_pairs_may_overlap_is_read_from_the_touch_source(templates):
+    """V6 enlarges symbols through the boxes V5 fits them to; two symbols apart in the data must
+    not count as touching because their enlarged boxes do."""
+    valve = next(t for t in templates.values() if t.fine_name == "valve_gate")
+
+    def two(ax0, ax1, bx0, bx1, y0=90, y1=110):
+        nodes = {
+            "A": _node("A", "valve", ax0, y0, ax1, y1),
+            "B": _node("B", "valve", bx0, y0, bx1, y1),
+            "bg": _node("bg", "background", 0, 0, 400, 200),
+        }
+        return Sheet("two", 400, 200, nodes, [])
+
+    data = two(100, 124, 128, 152)  # 4 px apart: more than column_tol, not touching
+    sized = two(98, 126, 126, 154, 88, 112)  # the same boxes enlarged: now they touch
+    page_px = two(100, 124, 130, 154)  # where V4 put them; the ink (x 3) overlaps
+    asg = {n: Assignment("iso", "valve_gate", valve.oriented(0)) for n in "AB"}
+
+    def fixed(log):
+        return log["shrunk"] + log["replaced"] + log["turned"]
+
+    assert fixed(render_page(page_px, [], asg, CFG, sized).log) == 0  # taken as touching
+    assert fixed(render_page(page_px, [], asg, CFG, sized, touch_source=data).log) >= 1
 
 
 @needs_templates
@@ -1407,3 +1435,70 @@ def test_a_drawn_tag_follows_its_moved_circle_and_its_pipe_stops_on_it():
     assert math.hypot(port["x"] - ax, port["y"] - ay) == pytest.approx(ar, abs=0.1)
     (pipe,) = _polylines(page.pipes)
     assert pipe[0] == pytest.approx((port["x"], port["y"] - 1.5), abs=0.1)
+
+
+def test_a_bridge_joins_two_symbols_drawn_apart_on_one_line():
+    a = BridgeEnd((0, 0, 20, 20), (10, 20), True)
+    b = BridgeEnd((5, 26, 15, 40), (10, 26), True)
+    assert _bridge(a, b, 1.5) == ([(10, 20), (10, 26)], (True, True))
+    assert _bridge(b, a, 1.5) == ([(10, 26), (10, 20)], (True, True))  # either order
+    touching = BridgeEnd((5, 21, 15, 40), (10, 21), True)
+    assert _bridge(a, touching, 1.5) is None  # 1 px apart: they touch
+    assert _bridge(a, BridgeEnd((30, 30, 40, 40)), 1.5) is None  # diagonally apart
+    # two plain boxes side by side: the middle of their common span, box edge to box edge
+    left, right = BridgeEnd((0, 0, 20, 20)), BridgeEnd((30, 4, 40, 20))
+    assert _bridge(left, right, 1.5) == ([(20, 12), (30, 12)], (False, False))
+
+
+def test_a_bridge_takes_the_line_of_the_small_symbol_and_stops_on_ink():
+    # a long vessel-like symbol whose own port (x = 150) does not face the small fitting above
+    wide = BridgeEnd((0, 30, 200, 60), (150, 30), True)
+    small = BridgeEnd((40, 10, 60, 25), (50, 25), True)
+    assert _bridge(wide, small, 1.5) == ([(50, 30), (50, 25)], (False, True))
+    # the wide symbol's drawing starts 3 px inside its box on that line
+    inked = BridgeEnd((0, 30, 200, 60), (150, 30), True, lambda start, d: (start[0], start[1] + 3))
+    assert _bridge(inked, small, 1.5) == ([(50, 33), (50, 25)], (False, True))
+    # a drawing the line misses: no bridge rather than a pipe into empty space
+    blank = BridgeEnd((0, 30, 200, 60), (150, 30), True, lambda start, d: None)
+    assert _bridge(blank, small, 1.5) is None
+
+
+def _arrow_flange_sheet() -> Sheet:
+    """A flow arrow against a fitting whose box is wider than its drawing (a link of no length,
+    as on OPEN100 sheet 10), on a pipe through both."""
+    nodes = {
+        "X0": _dot("X0", "crossing", 40, 100),
+        "c0": _dot("c0", "connector", 100, 100),
+        "A": _node("A", "arrow", 100, 92, 124, 108),
+        "F": _node("F", "general", 124, 90, 144, 110),
+        "c1": _dot("c1", "connector", 144, 100),
+        "X1": _dot("X1", "crossing", 200, 100),
+        "bg": _node("bg", "background", 0, 0, 300, 200),
+    }
+    edges = [("X0", "c0"), ("c0", "A"), ("A", "F"), ("F", "c1"), ("c1", "X1")]
+    return Sheet("arrow_flange", 300, 200, nodes, edges)
+
+
+@needs_templates
+def test_an_arrow_against_a_narrow_fitting_is_joined_by_a_short_pipe(templates):
+    arrow = next(t for t in templates.values() if t.placement == "overlay").oriented(0)
+    flange = next(t for t in templates.values() if t.fine_name == "flanged_connection")
+    o = next(o for o in flange.all_orientations() if set(o.sides) == {"L", "R"})
+    asg = {
+        "A": Assignment("arrow", "flow_direction", arrow, axis="H", forward=True),
+        "F": Assignment("iso", "flanged_connection", o),
+    }
+    on = {**CFG1, "page": {**CFG1["page"], "bridge_gap": 1.5}}
+    plain, page = _render(_arrow_flange_sheet(), asg, CFG1), _render(_arrow_flange_sheet(), asg, on)
+
+    def box(pg, nid):
+        return next(a["bbox"] for a in pg.annotations if a["id"] == nid)
+
+    assert box(plain, "F")[0] - box(plain, "A")[2] > 1.5  # the flange is narrower than its box
+    assert plain.log["bridges"] == 0 and page.log["bridges"] == 1
+    assert box(page, "A") == box(plain, "A") and box(page, "F") == box(plain, "F")  # nothing moves
+    pipes = rasterize(page.layer("pipes")) < 128
+    x0, x1 = int(box(page, "A")[2]) + 1, int(box(page, "F")[0])
+    assert pipes[100, x0:x1].all()  # the gap is piped, on the pipe's line
+    assert not (rasterize(plain.layer("pipes")) < 128)[100, x0:x1].any()
+    assert any(p["id"] == "F" for p in page.ports)  # the flange's port is checked by G1

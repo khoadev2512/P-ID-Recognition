@@ -51,7 +51,7 @@ Dữ liệu thật của OPEN100 làm 5/6 bước phải chỉnh:
 | 2 | Dịch ngẫu nhiên từng đỉnh | **Ánh xạ trục đơn điệu** 📎 (`_build_axis_mapping`): mọi điểm cùng x dịch cùng nhau, giữ thứ tự; tương tự với y | Dịch từng đỉnh làm đoạn ống thẳng thành xiên |
 | 3 | Bốc trong lớp thô + lọc cổng | Giữ, **thêm luật cho lớp không có ISO** (instrumentation → "Other", inlet/outlet, general theo kích thước) và ký hiệu có hướng | 350/1000+ ký hiệu là bong bóng ISA |
 | 4 | Định tuyến Manhattan từ cổng tới cổng | **Không định tuyến lại**: giữ polyline thật, chỉ nối/cắt đoạn cuối vào cổng ISO; vẽ **cả tờ thành một SVG** rồi raster một lần | Đường thật đã vuông góc; một SVG duy nhất bảo đảm cùng độ dày w |
-| 5 | Lọc trùng bằng WL hash + pHash | **Bỏ WL hash**; dùng aHash/dHash ảnh + chữ ký phép gán ký hiệu | Topology giữ nguyên → mọi biến thể cùng gốc có cùng WL hash, lọc WL sẽ loại hết |
+| 5 | Lọc trùng bằng WL hash + pHash | **Bỏ WL hash**; lọc theo **nội dung từng nút** (tỉ lệ nút khác < 5% → trùng) + chữ ký phép gán; aHash/dHash chỉ ghi lại (sửa 2026-11-06, xem V6) | Topology giữ nguyên → mọi biến thể cùng gốc có cùng WL hash, lọc WL sẽ loại hết; hash ảnh thô chỉ thấy bố cục (chung cả tờ), không thấy ký hiệu |
 | 6 | Làm suy giảm có giới hạn | Giữ, thêm **kiểm tra chi tiết còn sống** | Erosion/blur dễ xóa chấm/tam giác phân biệt lớp |
 | + | — | **Thêm**: xuất COCO + GraphML, **chia tập theo bản vẽ gốc**, tiêu chí nghiệm thu tự động | Chống rò rỉ giữa các biến thể cùng gốc |
 
@@ -64,7 +64,7 @@ Dữ liệu thật của OPEN100 làm 5/6 bước phải chỉnh:
 | Đọc GraphML PID2Graph | `src/pidgen/seed_parser.py` | Viết lại gọn; giữ connector/crossing |
 | Ánh xạ trục đơn điệu có jitter | `src/pidgen/perturb.py` (`_build_axis_mapping`, `_rank_remap_scene`) | Ý tưởng cho V4 (ta ánh xạ mọi tọa độ, giữ cứng ký hiệu — xem V4) |
 | Chọn kiểu theo kích thước + bậc | `src/pidgen/annotate.py` (`_general_variant`) | Luật cho lớp `general` ở V3 |
-| aHash / dHash tự viết bằng PIL | `src/pidgen/diversity.py` | Lọc trùng V6, không thêm dependency |
+| aHash / dHash tự viết bằng PIL | `src/pidgen/diversity.py` | V6 ghi lại khoảng cách ảnh, không thêm dependency. Ý lọc theo nội dung lấy từ `accept_graph` (histogram nhãn) của họ, đổi thành so từng nút |
 | Ý nghĩa connector/crossing | `scripts/preprocess/collapse_connectors.py` | Chỉ để hiểu dữ liệu — KHÔNG gộp |
 
 **Không dùng**: `renderers.py` (vẽ bằng hình cơ bản, phong cách DigitizePID, nối tâm–tâm, không
@@ -104,6 +104,7 @@ src/utils/iso_templates.py     V1  nạp template SVG + ports.csv, biến đổi
 src/utils/iso_mapping.py       V3  chọn template cho từng nút: assign_symbols(...) -> Assignment
 src/utils/iso_layout.py        V4  ánh xạ trục đơn điệu ×S: transform_layout(...) -> (Sheet, runs)
 src/utils/page_svg.py          V5  ghép cả tờ thành SVG, raster bằng PyMuPDF (đã có trong deps)
+src/utils/page_text.py         V5c chữ (tag, số hiệu ống) vào chỗ trống, lớp riêng, không vào COCO
 scripts/check_g1.py            V5  đo 3 tiêu chí tự động của G1 trên ảnh 3
 src/pipeline/render_iso.py     V5–V8  stage `pid-render-iso` (Hydra), gọi V2–V3, sinh dataset
 configs/render_iso.yaml            luật ánh xạ, w, scale, ngân sách biến thể, tham số suy giảm
@@ -920,7 +921,8 @@ có nhãn riêng, ống dừng ở mặt bích; ống vòi bình (`_nozzle_links
    tiêu chí 5 hết 2 cặp bong bóng, tiêu chí 7 0 cặp; seed 1, 2 trên 12 tờ không thêm lỗi nào do mục này.
    492 test pass. Ảnh trước/sau (17 cặp, 3 cặp mỗi ảnh): `docs/experiments/iso_render/tag_pairs/`.
    **Còn mở (có từ trước, không do mục 2):** seed 1, tờ 10: `arrow67` – `general129` hở 4.6 px (tiêu chí
-   5); tắt việc dịch vòng tròn vẫn trượt giống hệt.
+   5); tắt việc dịch vòng tròn vẫn trượt giống hệt. → **Đã sửa 2026-11-06** bằng đoạn nối khe
+   (`page.bridge_gap`, xem "Sửa sau review lần 2" ở V6).
    **Ghi chú (2026-11-04, sau review):**
    - **Cặp TE 210207A/B (tờ 7) cố ý vẽ tiếp xúc, dù bản gốc hai vòng cách nhau** (~7 px nguồn,
      21 px sau ×S). Khoảng cách ở OPEN100 là do chữ "210207A/B" tràn ra ngoài vòng; bbox PID2Graph
@@ -1078,6 +1080,53 @@ còn hiện ở 3 seed này, chưa phải là đã sửa). Agitator: seed 0/1/2 
 không tô nền; mũi tên nằm trong bbox bình (tờ 1 `general93`) vẫn vẽ trong thân; chỉ có 3 cột nên lớp `column`
 ít mẫu (V6 phải bù bằng nhiều biến thể); agitator chỉ ~6/seed và dồn về tờ 9 (6 lò phản ứng giống nhau).
 
+## V5c — Chữ trên trang (tag, số hiệu ống) 🤖 — 🟢 XONG 2026-11-08 (581 test)
+
+**Vì sao** (review V7 mục 2.5): trang của V5 không có chữ (bong bóng ISA rỗng, không số hiệu ống), trong khi
+bản vẽ thật, Dataset-P&ID (nơi Stage 1 và encoder Stage 2 được train) và SynthPID đều có. Thiếu chữ thì test
+Stage 1 dễ hơn thật (không dương giả do chữ) và crop `other_isa` của cổng "Other" là vòng tròn rỗng.
+
+**Nguyên tắc: không làm hỏng phần khác của V5.**
+- Chữ là **lớp thứ ba** (`Page.text`, `Page.layer("text")`); `pipes`, `symbols`, `annotations` giữ nguyên từng
+  byte. Chữ được đặt **sau cùng**, chỉ vào chỗ trống: raster của ống + ký hiệu làm mặt nạ, mỗi nhãn cách mực và
+  nhãn khác ≥ `margin` (≥ 1 nét); không còn chỗ thì bỏ nhãn (log `text_<loại>_skipped`). Không dời gì.
+- Chỉ vẽ khi config có khối `render_iso.text` **và** người gọi đưa `text_rng` (`render_page(..., text_rng=)`);
+  mọi lời gọi cũ (test, script khác) cho đúng kết quả cũ.
+- Chữ **không** là lớp COCO; nằm ở `texts` riêng trong JSON biến thể (loại, chủ, chuỗi, box), không lẫn
+  `annotations` nên V7/V8 không đổi.
+- Glyph là đường viền (path) từ font DejaVu Sans đi kèm matplotlib (đã có trong deps) → ảnh như nhau trên mọi
+  máy, không phụ thuộc font cài sẵn.
+
+**Nội dung** (`src/utils/page_text.py`, chuỗi tự sinh theo quy ước P&ID, một số unit cho cả trang): mã ISA trong
+bong bóng (chữ chức năng trên, số vòng dưới, cỡ vừa trong vòng tròn); số hiệu ống `2"-P-1203-A1A-H` cạnh đoạn
+thẳng dài nhất của 35% đường ống (đứng thì xoay, đọc từ dưới lên) và ở **đầu tự do của đường dẫn** (nơi OPEN100
+đặt chữ); tag thiết bị `P-`/`V-`/`C-`/`K-`/`E-` cạnh hoặc trong bình/bơm/cột; mã bản vẽ trong cờ vào/ra trang.
+Cỡ chữ (cap height) bốc một lần mỗi trang trong [13, 19] px ở scale 3.
+
+**Kiểm**: G1 thêm **tiêu chí 8** (chữ không chạm mực ống/ký hiệu, trong 1 px), đưa vào `variants.g1.drop`.
+`check_g1` 12 tờ × seed 0–1: tiêu chí 1–7 **y nguyên** 24/24 lượt, tiêu chí 8 đạt 24/24 (0 px chạm). Đặt được:
+bong bóng 626/628, cờ 190/192, thiết bị 120/126, ống 286/292, đầu đường dẫn 109/144 (đầu tự do hay sát ống
+khác). V6 chạy lại: vẫn 432 giữ; **432/432 SVG = SVG cũ + đúng một nhóm chữ**, annotation trùng; 23–95 nhãn mỗi
+trang (trung vị 52). V7: chữ còn đọc được khi mòn mạnh nhất (nhạt hơn ký hiệu vì nét chữ mảnh hơn, như bản in
+phai). V8: vẫn 93,800 annotation (chữ không vào COCO); checksum `data/canonical`, `data/raw`, `config.yaml` giữ
+nguyên. Chi phí: V6 37 s → 161 s, V7 94 s → 232 s (raster thêm để làm mặt nạ và để kiểm tiêu chí 8).
+Test: `tests/test_page_text.py` (11).
+
+**Mã bong bóng theo vòng điều khiển** (sửa cùng ngày, `loop_tags`): bong bóng nối nhau hoặc cùng nối một van là
+một vòng, chung chữ đầu (đại lượng) và số vòng, số không trùng giữa các vòng của trang. Chữ đầu theo thiết bị
+của vòng (van an toàn → P; van tay / đóng-mở → H / X; có bình → ưu tiên L, P, T). Chữ sau theo thứ bong bóng gắn
+vào: van điều khiển → `FV` / `TCV`; van an toàn → `PSV`; van của vòng đóng-mở → `HV` / `XV` (bong bóng còn lại
+`HS`, `ZSO`); trên ống, mặt bích lấy mẫu, bình → cảm biến (`FT`, `PI`, `TW`, ...); chỉ nối bong bóng → hiển thị
+(`LIC` nếu vòng có van điều khiển). Trong một vòng ưu tiên chữ chưa dùng (TT với TI, không hai TI); còn trùng
+(hai PSV) thì hậu tố A, B. Liên kết lấy từ các đoạn ống của đồ thị và từ stem van → bong bóng của V5. Chạy lại:
+pipes + symbols 432/432 y nguyên; 0 mã bong bóng lặp trên một trang; G1 24/24 lượt tiêu chí 1–7 y nguyên,
+tiêu chí 8 đạt. Ví dụ tờ 0, `valve77` (van điều khiển): trước `LSH 358`, nay `TCV 304`
+(`docs/experiments/iso_render/reviews/img/v5c_semantic_*.png`).
+
+**Giới hạn**: số hiệu ống vẫn bốc theo từng đoạn (không giữ một số dọc một đường ống, không khớp cỡ van); bơm dự
+phòng không theo cặp A/B; cờ ghi mã ngẫu nhiên; một font sans, không nghiêng; chưa có ghi chú, bảng tên. Dùng đủ
+cho mục đích: chữ là **nhiễu thật** cho Stage 1 và nội dung bong bóng hợp lý cho "Other".
+
 ## V6 — Sinh nhiều biến thể + lọc trùng 🤖 (~0.5 ngày) — 🟢 XONG 2026-11-05 (533 test)
 
 - Nguồn biến thể: phép gán ký hiệu (V3), ánh xạ trục (V4), `w ∈ [2, 4]·S/3` (S = `render_iso.layout.scale`), `gap_scale` của V4, kích thước ký hiệu ±15%.
@@ -1110,6 +1159,42 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 
 **Hạn chế**: hash 16×16 loại cả biến thể "cùng bố cục, khác ký hiệu"; chỉ 12 topology; số biến thể 26–36/tờ không đều.
 
+**Sửa sau review (2026-11-06)**: lọc trùng theo nội dung thay hash ảnh (`variants.min_node_diff: 0.05`,
+`node_choices` + `ContentDeduper`; hash chỉ ghi lại). Lý do: cả 66 bản bị loại "trùng ảnh" đều khác bản giữ
+gần nhất 15–40% số nút. Chạy lại: 503 lần thử → **428 giữ** (11/12 tờ đủ 36, tờ 10 còn 32), **0 trùng**,
+75 G1 loại; khoảng cách nội dung tới bản giữ gần nhất min 19%, trung vị 39%. 387 biến thể chung với lần chạy
+đầu trùng từng byte. V7, V8 chạy lại theo (428 ảnh suy giảm; 856 ảnh xuất). 564 test.
+Chi tiết: mục 0 của `docs/experiments/iso_render/v6/REPORT.md`.
+
+**Sửa sau review lần 2 (2026-11-06): nối khe giữa hai ký hiệu nối thẳng** (review V6 mục 2.2).
+- Vấn đề: OPEN100 có cặp ký hiệu đặt sát nhau, nối thẳng, không có ống ở giữa (mũi tên dưới đầu đẩy
+  bơm, mặt bích sát van, ký hiệu nhỏ đặt trên ký hiệu lớn). V5 vẽ mỗi ký hiệu trong hộp của nó; hình nhỏ
+  hơn hộp (template hẹp, hoặc V6 thu nhỏ) để lại khe ở chỗ đồ thị nói "nối" → tiêu chí 5 loại. Thu nhỏ
+  làm khe dễ xuất hiện nên bản cỡ nhỏ bị loại nhiều hơn (tỉ lệ loại 63–66% ở cỡ 0.85–0.95 so với 3–12%
+  ở ≥ 1.0 trên tờ 1, 2, 4, 10) → lệch phân bố cỡ (tờ 1: 21% lần thử cỡ < 0.95 → 8% bản giữ).
+- Sửa (V5, `page_svg.py`): `_bridge_links` + `_bridge`, mở rộng luật `_nozzle_stub` (vòi bình) sang
+  mọi liên kết dài 0 giữa hai ký hiệu vẽ (`iso`, `arrow`, `generic`, `vessel`; không bong bóng, không
+  đường tag, không vòi bình đã xử lý). Khe > `page.bridge_gap` (1.5 px, bằng ngưỡng tiêu chí 5) được nối
+  bằng một đoạn ống thẳng dọc trục khe, trên đường của cổng ký hiệu **hẹp hơn** nằm trong khoảng chung
+  (cổng của bình dài có thể không đối diện ký hiệu nhỏ), dừng ở cổng nếu đường đi qua cổng, không thì ở
+  mực (`ink_along`). Lệch chéo, hoặc đường không gặp mực → không nối (vẫn để G1 loại). Log `bridges`.
+  Không có `bridge_gap` trong config thì không nối (các config tay trong test giữ hành vi cũ).
+- Kiểm: 75 lần thử trước bị G1 loại → 63 nay đạt hết G1; 12 còn lại là tiêu chí 1 có từ trước (cổng van).
+  `check_g1` 12 tờ × seed 0–1: 22 lượt y nguyên (0 đoạn nối); tờ 10 seed 0, 1 (`arrow–general`, mở từ V5b)
+  nay **đạt mọi tiêu chí**. 3 test mới; 567 test pass.
+- Chạy lại V6: 444 lần thử → **432 giữ, cả 12 tờ đủ 36**; 12 G1 loại (tiêu chí 1); 0 trùng. Cỡ < 0.95:
+  tờ 1, 2, 4, 10 lần thử 34% / bản giữ 34% (trước: lệch), 8 tờ còn lại 31% / 32%. Trong 391 biến thể có
+  ở cả lần trước: 363 SVG trùng từng byte, 28 thêm đoạn nối 1–5 px (khe nhỏ tiêu chí 5 đo trên hộp nên bỏ
+  qua; xem bằng mắt: bơm–mũi tên, mũi tên–kính quan sát). V7: 432 ảnh; V8: 864 ảnh, 93,800 annotation.
+  Ảnh: `docs/experiments/iso_render/reviews/img/c5_*.png`; số: `v6/bridges.txt`.
+
+**Sửa sau review lần 3 (2026-11-08): cặp được phép chồng đọc từ hộp gốc** (review V6 mục 2.3). Hộp đã nhân
+hệ số cỡ vừa để vừa cỡ ký hiệu, vừa (sai) để biết cặp nào vốn chạm: phóng to làm 5 bản (tờ 4) có cặp cách
+3.6 px nguồn bị coi là chạm nên đĩa đè lên ống / đĩa khác mà cả V5 lẫn G1 cho qua; thu nhỏ thì ngược lại, V5
+thu nhỏ / thay hộp thừa. Sửa: `render_page(..., touch_source=)`, V6 truyền sheet gốc, `Rendered.source` = sheet
+gốc cho G1. Chạy lại: vẫn 432 giữ; 412 SVG trùng, 20 đổi (5 hết chồng, 15 bớt thu nhỏ / thay hộp). 568 test.
+Chi tiết: mục 0c của `v6/REPORT.md`.
+
 ## V7 — Làm suy giảm toàn ảnh 🤖 (~1 ngày) — 🟢 XONG 2026-11-06 (548 test)
 
 - Chép (không import) `degrade()` của `scripts/render_pid.py` (noise, blur, pixelate) + thêm dilation/erosion,
@@ -1126,16 +1211,22 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 - **Giới hạn theo `w`** (liên tục [2, 4]): đổi bề rộng nét ≤ w/2 ("kernel erosion ≤ w/2" hiểu là bề rộng nét; chờ user
   xác nhận), blur σ ≤ w/2, pixelate ≤ w/2; thêm ràng buộc đo trên nét vẽ thật: độ đậm giữa nét ≥ 0.55 (mòn w/2
   cộng blur w/2 làm nét w = 2 còn ~0.40). Đo: nét mỏng nhất vẫn 0.57–0.59, trang thật còn 0.51–0.68 độ đậm.
+- **Bổ sung sau review (2026-11-08)**: 50 tổ hợp NCC không kiểm được (`valve_globe` ↔ `valve_butterfly`,
+  `check_valve_globe` ↔ `check_valve_swing`, vài ca `valve_gate`, `valve_three_way`) nay được kiểm trên
+  **vùng khác biệt** giữa hai template (lõi chi tiết riêng còn đậm hơn mức giữa, chi tiết lớp kia không mọc ra):
+  600/600 đạt; trong cổng lõi chi tiết ≥ 0.53, chi tiết lớp kia ≤ 0.43. Xem mục 3 `v7/REPORT.md`.
 - **Kiểm chi tiết còn sống** (NCC, G1, G2, G5, 3 agitator, `flanged_connection` vs G3; k ≥ 3.5 px/mm, w = 2/3/4):
   ở mức tối đa của plan, nở / blur / pixelate làm nhầm `valve_gate`↔`valve_butterfly`, `valve_general`, `valve_needle`,
   `check_valve_general`, `valve_three_way` → hạ trần: **nở 0.4·w/2, blur 0.35·w/2, pixelate 0.5**; xoay, nghiêng,
   ánh sáng, nhiễu, JPEG không phải hạ. Sau đó 0 thất bại ở mọi kịch bản (288 phép/kịch bản). 50/384 tổ hợp có
-  cặp lớp gần đồng nhất ngay cả khi sạch (margin < 0.03 = ngưỡng ồn) nên không kết luận được (vd. `valve_globe` ↔
-  `check_valve_globe`).
+  cặp lớp gần đồng nhất ngay cả khi sạch (margin < 0.03 = ngưỡng ồn) nên NCC không kết luận được (`valve_globe` ↔
+  `valve_butterfly`, `check_valve_globe` ↔ `check_valve_swing`; nay kiểm bằng vùng khác biệt, xem dòng trên).
 - **Hình học đi theo ảnh**: affine chính xác lưu trong JSON; hộp COCO dời theo **mực** của ký hiệu (sai lệch cạnh
   ≤ 0.9 px so với ảnh xoay thật; dời 4 góc lệch tới 11.5 px ở leader, 8.3 px ở bình, 6.2 px bình cao); nút GraphML
   (bong bóng = vòng tròn đã dời), `ports`, `stems` cũng dời. 0 hộp ra ngoài trang.
-- Chạy 413 biến thể: 1.6 s/ảnh, 93 s với 8 tiến trình, **1.7 GB** (JPEG 4.2 MB/ảnh).
+- Chạy 413 biến thể: 1.6 s/ảnh, 93 s với 8 tiến trình, **1.7 GB** (JPEG 4.2 MB/ảnh). Chạy lại sau sửa lọc
+  trùng V6 (2026-11-06): 428 ảnh, 92 s; 387 ảnh chung với lần đầu trùng từng byte. Chạy lại sau đoạn nối
+  khe V5 (cùng ngày): 432 ảnh, 102 s.
 - Bố cục: `data/iso_open100/variants/…` sạch (V6) và `data/iso_open100/degraded/sheet<i>/v<NNN>.{jpg,json}` cùng tên;
   V8 chọn sạch / suy giảm / cả hai.
 
@@ -1168,6 +1259,10 @@ nằm trong `other_iso`. Dữ liệu ở `data/iso_open100/variants/sheet<i>/v<N
 - GraphML: cùng nút và cạnh với bản gốc (test), nhãn mới, toạ độ đã vẽ (ảnh suy giảm: toạ độ qua affine V7).
 - Chia tập: `all_test` mặc định (12 gốc → test) hoặc `by_source`; mọi biến thể của một gốc cùng split.
 - Kết quả: 826 ảnh (413 sạch + 413 suy giảm), 89,698 annotation, 108.6 ký hiệu/ảnh, `other_*` 38.2%.
+  Xuất lại sau sửa lọc trùng V6 (2026-11-06): **856 ảnh** (428 + 428), 92,304 annotation, 107.8 ký hiệu/ảnh,
+  `other_*` 38.1%; `data/canonical`, `data/raw` và `configs/config.yaml` giữ nguyên checksum. Xuất lại
+  sau đoạn nối khe V5: **864 ảnh** (432 + 432), 93,800 annotation, 108.6 ký hiệu/ảnh, agitator 380;
+  checksum vẫn giữ nguyên.
   Chạy `build_classes`, `build_manifest`, `coco_to_yolo` trên gốc mới (không ghi ngoài `data/iso_open100/`);
   `data/canonical` và `data/raw` giữ nguyên checksum. Chưa chạy detector/FGC/evaluation.
 - Lưu ý: `classes.yaml` của gốc này có 13 lớp thô khác DigitizePID, nên đánh giá Stage 1 cần detector train trên gốc này

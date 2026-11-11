@@ -3,6 +3,15 @@
 Commit: xem `git log` (`feat: RENDER_ISO V7 degradation`). 548 test (533 cũ + 15 mới), ruff sạch trên file đã đụng.
 Các quyết định V6 (min_distance 8, loại tiêu chí 5, đo lại tiêu chí 2 của `check_g1`) giữ nguyên.
 
+> **Chạy lại 2026-11-06** sau khi V6 đổi sang lọc trùng theo nội dung (V6 REPORT mục 0): cùng lệnh ở mục 5,
+> **428 ảnh**, 92 s, 4.2 MB/ảnh (`make_degraded.txt`, `degraded.csv` đã ghi đè). 387 ảnh có ở cả hai lần trùng
+> từng byte (JPEG), vì seed `degrade` và phép suy giảm không đổi. Các số đo bên dưới (survival, geometry,
+> tune) không phụ thuộc tập biến thể nên không chạy lại; số "413" bên dưới là của lần chạy đầu.
+> **Chạy lại lần 2** (cùng ngày) sau khi V5 nối khe giữa hai ký hiệu nối thẳng (V6 REPORT mục 0b):
+> **432 ảnh**, 102 s, 4.1 MB/ảnh; `make_degraded.txt`, `degraded.csv` đã ghi đè.
+> **Chạy lại lần 3** (2026-11-08) sau V5c (trang có chữ): 432 ảnh, 232 s. Chữ còn đọc được ở mòn mạnh nhất
+> (nhạt hơn ký hiệu vì nét chữ mảnh hơn). JSON suy giảm chưa mang `texts` (chữ không phải nhãn COCO).
+
 ## 1. Đã làm gì
 
 | File | Vai trò |
@@ -11,7 +20,7 @@ Các quyết định V6 (min_distance 8, loại tiêu chí 5, đo lại tiêu ch
 | `configs/render_iso.yaml` | khối mới `render_iso.degrade` |
 | `src/utils/iso_variants.py` | thêm giai đoạn `degrade` vào `STAGES` (seed riêng); `Rendered.sheet` (sheet sau V4). Không đổi giá trị seed/ảnh của V3/V4/V5 |
 | `scripts/make_degraded.py` | làm suy giảm cả bộ V6, ghi `data/iso_open100/degraded/` |
-| `scripts/check_degrade_survival.py` | kiểm "chi tiết còn sống" (NCC) + dò tham số tối đa (`--tune`) |
+| `scripts/check_degrade_survival.py` | kiểm "chi tiết còn sống" (NCC; vùng khác biệt cho cặp NCC không phân biệt được) + dò tham số tối đa (`--tune`) |
 | `scripts/check_degrade_geometry.py` | so hộp đã dời với hộp đo trên ảnh đã xoay |
 | `scripts/make_v7_figures.py` | ảnh bằng chứng |
 | `tests/test_iso_degrade.py` | 15 test |
@@ -63,6 +72,23 @@ Mỗi template vẽ riêng (k px/mm × w px, đặt giữa trang trắng) → su
 
 **Mẫu bị loại khỏi phép thử** (đáng nêu): ở bản **sạch**, một số cặp lớp gần như đồng nhất theo NCC (margin < 0.03 = ngưỡng ồn: nhiễu hoặc JPEG riêng chỉ làm margin đổi tối đa 0.026): 50/384 tổ hợp (template × k × w): `check_valve_swing` X8078 (12), `check_valve_globe` X2113 (12) ↔ `valve_globe` X8068 (7), `valve_butterfly` X8075_1 (9), `valve_gate` X8074 (4 — ở k ≤ 3.5, w ≥ 3), `valve_three_way` 2103 (3), `valve_three_way_globe` X8070 (3). Với các tổ hợp này không kết luận gì từ suy giảm (khác biệt giữa chúng nhỏ hơn ngưỡng ồn ngay cả khi sạch); chúng **vẫn** nằm trong CSV (`testable = 0`). Nghĩa là `valve_globe` vs `check_valve_globe` (chỉ khác một vạch nhỏ) có thể dễ nhầm với nhau trong thực tế ở mọi cỡ k — đó là giới hạn của NCC / của bản vẽ, không phải của V7.
 
+**Bổ sung sau review (2026-11-08): kiểm vùng khác biệt cho 50 tổ hợp trên.** Review V7 mục 2.1 chỉ ra các cặp
+này thật ra là `valve_globe` ↔ `valve_butterfly` (X8075_1) và `check_valve_globe` ↔ `check_valve_swing`
+(câu trên ghi nhầm cặp); hai lớp chỉ khác **một vạch đứng xuyên chấm giữa** (~5% mực), nên NCC cả ký hiệu bị
+phần chung lấn át (làm mờ vạch từ 100% về 0% chỉ đổi NCC ~0.02). Script nay kiểm riêng **vùng khác biệt**
+lấy từ hai template (`detail_core`: mực của lớp này ở chỗ lớp kia là giấy, lấy đường giữa mỗi mảnh ≥ 4 px):
+- lõi chi tiết của chính nó phải đậm hơn mức giữa hai bản sạch (gần bản sạch của mình hơn);
+- chỗ chi tiết của lớp kia phải nhạt hơn mức giữa (không "mọc" chi tiết của lớp kia).
+
+Cột mới trong `survival.csv`: `detail_vs`, `detail_own`, `detail_other`, `detail_pass` (trống khi template
+kiểm được bằng NCC). Các cột cũ trùng y lần chạy trước. Kết quả (`survival.txt`): **600/600 đạt** (50 tổ hợp ×
+12 kịch bản); trong cổng k ≥ 3.5, lõi chi tiết còn ít nhất **0.53** (`valve_butterfly`, mòn tối đa, k = 3.5,
+w = 3), chỗ chi tiết lớp kia đậm nhiều nhất **0.43** (`valve_three_way` so với `_globe`, nở tối đa, k = 3.5,
+w = 4: giữa ký hiệu sẫm lại như có chấm; ca sát ngưỡng nhất). Dưới cổng (k = 3.0) chấm của
+`valve_three_way_globe` nằm trong 1 px nét của `valve_three_way`, nên ngay bản sạch đã đo 0.71 ở đó: ngưỡng
+tính từ bản sạch nên vẫn đúng, nhưng phép đo kém nhạy ở cỡ này. Test: `test_the_detail_core_is_the_middle_of_
+what_only_one_drawing_has`, `test_whole_symbol_ncc_barely_sees_the_bar_the_detail_check_does`.
+
 Bản đồ nhiệt margin (`ncc_summary.png`): xanh = còn cách lớp khác xa; cam/đỏ nhạt = margin gần 0 từ khi sạch (cùng các cặp trên).
 
 ## 4. Hình học đi theo ảnh
@@ -112,7 +138,8 @@ Hộp ra ngoài trang: 0/413 ảnh (xoay 1° trên trang ~7000 px, lề trắng 
 - Trần dilation/blur/pixelate được đặt theo template yếu nhất ở k nhỏ; các tờ ảnh thật dùng k lớn hơn nên **có thể hơi thận trọng**. Nhiễu/JPEG/xoay/ánh sáng ở mức tôi chọn, không template nào chặn.
 - Không mô phỏng: nếp gấp, bóng cạnh sách, mực chảy, đốm, kích thước ảnh khác — chỉ là "quét sạch có hơi nhiễu".
 - Dải mòn khá yếu ở w = 2 (peak 0.58): đủ cho NCC nhưng một mạng nhận dạng thực có thể thấy khác.
-- Chưa đo tác động lên detector Stage 1 (việc của V8 trở đi); chưa có phép thử "mạng vẫn nhận ra" ngoài NCC.
+- Chưa đo tác động lên detector Stage 1 (việc của V8 trở đi); chưa có phép thử "mạng vẫn nhận ra" ngoài NCC
+  và phép đo vùng khác biệt (mục 3).
 - JPEG 4 MB/ảnh: nếu đĩa không đủ có thể chỉ lưu tham số (JSON) và sinh lại ảnh khi cần — kết quả xác định theo seed (test).
 - 3706 annotation đo hình học ở 7/12 tờ, 2 biến thể mỗi tờ; không đo mọi biến thể.
 

@@ -10,6 +10,7 @@ criteria; the fourth (a person looks at the picture) is the PNG this writes.
   6. a signal line to a tag does not cut any symbol's ink between its ends (a valve's stem, which
      starts in the middle of the valve, is left out)
   7. no two tags' circles overlap by more than a stroke
+  8. text (V5c: tag numbers, line numbers, equipment tags) touches no pipe or symbol ink
 
 Writes, under --out: sheet<i>.svg, sheet<i>.png, g1_report.txt. Read-only on data/raw/.
 """
@@ -326,7 +327,26 @@ def evaluate(
     )
     for a, b, over in tag_over[:20]:
         lines.append(f"      {a} x {b}: {over} px")
-    return lines, {1: ok1, 2: ok2, 3: ok3, 5: ok5, 6: ok6, 7: ok7}
+    hits = text_hits(page, pipes, symbols)
+    ok8 = hits == 0
+    kinds: dict[str, int] = {}
+    for t in page.texts:
+        kinds[t["kind"]] = kinds.get(t["kind"], 0) + 1
+    lines.append(
+        f"[8] text clear of pipe and symbol ink: {len(page.texts)} labels "
+        f"({', '.join(f'{k} {n}' for k, n in sorted(kinds.items())) or 'none'}), {hits} px touched"
+        f"  -> {'PASS' if ok8 else 'FAIL'}"
+    )
+    return lines, {1: ok1, 2: ok2, 3: ok3, 5: ok5, 6: ok6, 7: ok7, 8: ok8}
+
+
+def text_hits(page: Page, pipes: np.ndarray, symbols: np.ndarray) -> int:
+    """Pixels of pipe or symbol ink within 1 px of the text's ink (0 when there is no text)."""
+    if not page.text:
+        return 0
+    text = (rasterize(page.layer("text")) < 128).astype(np.uint8)
+    near = cv2.dilate(text, np.ones((3, 3), np.uint8)).astype(bool)
+    return int((near & (pipes | symbols)).sum())
 
 
 def main() -> None:
@@ -346,7 +366,10 @@ def main() -> None:
     rng = random.Random(args.seed)
     assignments = assign_symbols(sheet, runs, templates, rng, cfg)  # V3 on source px
     sheet4, runs4 = transform_layout(sheet, runs, rng, cfg)  # V4
-    page = render_page(sheet4, runs4, assignments, cfg, sheet)  # V5
+    # V5, with the text of V5c drawn from its own generator (the seed's other draws stay put)
+    page = render_page(
+        sheet4, runs4, assignments, cfg, sheet, text_rng=random.Random(f"text|{args.seed}")
+    )
 
     img = rasterize(page.svg)
     Image.fromarray(img).save(args.out / f"sheet{args.sheet}.png")

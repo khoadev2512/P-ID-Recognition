@@ -1,11 +1,20 @@
-"""Perceptual hashes and near-duplicate filtering (V6 of PLAN_ISO_RENDER_PID2GRAPH).
+"""Near-duplicate filtering (V6 of PLAN_ISO_RENDER_PID2GRAPH): by content, with picture hashes
+kept as a record.
 
-Two renderings of one source sheet share their topology, so a graph hash (WL) cannot tell them
-apart; their pictures can. `ahash` records which cells of a coarse grid are darker than the
-grid's mean, `dhash` which cells are darker than their right neighbour. Both are bit strings
-held in an int; `hamming` counts the bits where two differ. `Deduper` drops an image that is within
-`min_distance` bits of a kept one in both hashes (the two must agree, so one chance coincidence
-of the coarse average hash does not discard a picture).
+Two renderings of one source sheet share their topology and, up to V4's axis mapping, their
+layout, so neither a graph hash (WL) nor a coarse picture hash tells them apart: a 16 x 16 hash of
+a 7000 px page sees ~450 px cells, i.e. the layout, not which symbol was drawn where. What does
+tell them apart is the choice made for each node. `ContentDeduper` holds, per kept variant, one
+key per node (`{node id: choice}`, the same node ids for every variant of a sheet) and calls a
+candidate a duplicate when the share of nodes whose choice differs from a kept variant's
+(`content_distance`) is below `min_node_diff`. SynthPID compares label histograms instead
+(its variants change the graph, so their nodes do not correspond); with corresponding nodes the
+per-node share also sees two symbols swapping places, which a histogram does not.
+
+`ahash` records which cells of a coarse grid are darker than the grid's mean, `dhash` which
+cells are darker than their right neighbour. Both are bit strings held in an int; `hamming`
+counts the bits where two differ. `Deduper` measures the distance of a picture to the kept ones
+(the larger of the two Hamming distances); V6 records it and no longer drops on it.
 
 Pages are mostly white with thin ink, so the image is reduced with a box filter (each cell is
 the mean of its area, which keeps thin lines as grey) and then inverted: a cell's value is its
@@ -14,6 +23,7 @@ ink coverage.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -83,3 +93,37 @@ class Deduper:
         if not duplicate:
             self.add(a, d)
         return not duplicate, nearest
+
+
+def content_distance(a: Mapping[str, str], b: Mapping[str, str]) -> float:
+    """Share of nodes (the union of both key sets) whose choice differs; 0.0 for two empty maps.
+    A node present in only one map counts as differing."""
+    nodes = a.keys() | b.keys()
+    if not nodes:
+        return 0.0
+    return sum(a.get(n) != b.get(n) for n in nodes) / len(nodes)
+
+
+@dataclass
+class ContentDeduper:
+    """Keeps variants whose per-node choices are not near-copies of a kept one.
+
+    A candidate is a duplicate when `content_distance` to some kept variant is below
+    `min_node_diff` (0.05 = fewer than 5% of nodes differ). `distance` is the smallest distance
+    to the kept variants (None when nothing is kept yet); `add` remembers a variant (call it once
+    the candidate has passed every other filter).
+    """
+
+    min_node_diff: float
+    kept: list[dict[str, str]] = field(default_factory=list)
+
+    def distance(self, choices: Mapping[str, str]) -> float | None:
+        return min((content_distance(choices, k) for k in self.kept), default=None)
+
+    def is_duplicate(self, choices: Mapping[str, str]) -> tuple[bool, float | None]:
+        """(whether `choices` is within `min_node_diff` of a kept variant, that distance)."""
+        nearest = self.distance(choices)
+        return nearest is not None and nearest < self.min_node_diff, nearest
+
+    def add(self, choices: Mapping[str, str]) -> None:
+        self.kept.append(dict(choices))

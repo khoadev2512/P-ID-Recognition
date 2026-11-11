@@ -1,9 +1,10 @@
 """V6: many variants of each OPEN100 sheet, near-duplicates and failed pictures removed.
 
 Runs utils.iso_variants.generate_sheet on the chosen sheets (one process per sheet) with the
-`variants` block of configs/render_iso.yaml, the automatic G1 criteria of check_g1.py as the
-last filter. Kept variants go to <out>/sheet<i>/v<NNN>.{png,svg,json}; the attempt table
-(kept and dropped, with the reason) goes to <out>/manifest.csv. With --stats, summary CSVs
+`variants` block of configs/render_iso.yaml (duplicates by per-node content), the automatic G1
+criteria of check_g1.py as the last filter. Kept variants go to
+<out>/sheet<i>/v<NNN>.{png,svg,json}; the attempt table (kept and dropped, with the reason) goes
+to <out>/manifest.csv. With --stats, summary CSVs
 (per sheet, per class, per attempt) are written there. Read-only on data/raw/.
 """
 
@@ -29,7 +30,7 @@ from utils.iso_templates import load_templates  # noqa: E402
 from utils.iso_variants import Rendered, generate_sheet  # noqa: E402
 from utils.pid2graph import load_graphml, pipe_runs  # noqa: E402
 
-REASONS = ("signature", "error", "quality", "duplicate", "g1")
+REASONS = ("signature", "duplicate", "error", "quality", "g1")
 
 
 def _g1(rendered: Rendered) -> dict[int, bool]:
@@ -61,7 +62,8 @@ def write_stats(records: list[dict], walls: dict[int, float], out: Path, stats: 
                 "detail": r["detail"],
                 "stroke_px": r["stroke_px"],
                 "size_factor": r["size_factor"],
-                "nearest": "" if r["nearest"] is None else r["nearest"],
+                "nearest_content": "" if r["nearest_content"] is None else r["nearest_content"],
+                "nearest_hash": "" if r["nearest_hash"] is None else r["nearest_hash"],
                 "signature": r["signature"],
                 "g1_flags": ",".join(map(str, r.get("g1_flags", []))),
                 "sec_total": r["seconds"].get("total", ""),
@@ -119,7 +121,7 @@ def main() -> None:
     ap.add_argument("--count", type=int, help="variants kept per sheet (config: variants.count)")
     ap.add_argument("--max-attempts", type=int, help="candidates tried per sheet at most")
     ap.add_argument("--base-seed", type=int)
-    ap.add_argument("--min-distance", type=int)
+    ap.add_argument("--min-node-diff", type=float)
     ap.add_argument("--no-g1", action="store_true", help="skip the G1 criteria filter")
     ap.add_argument("--workers", type=int, default=4)
     args = ap.parse_args()
@@ -129,7 +131,7 @@ def main() -> None:
         ("count", args.count),
         ("max_attempts", args.max_attempts),
         ("base_seed", args.base_seed),
-        ("min_distance", args.min_distance),
+        ("min_node_diff", args.min_node_diff),
     ):
         if val is not None:
             cfg["variants"][key] = val

@@ -81,6 +81,16 @@ Từ GraphML OPEN100 gốc, **cùng nút (cùng thứ tự id) và cùng cạnh 
 ## 6. Số liệu (`summary.txt`, `per_class.csv`, `per_sheet.csv`)
 
 - **826 ảnh** (413 sạch + 413 suy giảm), **89,698 annotation**, 11,300 không đưa vào COCO (cờ + mũi tên dẫn, 2 bản).
+- **Xuất lại 2026-11-06** sau khi V6 đổi sang lọc trùng theo nội dung: **856 ảnh** (428 + 428), **92,304
+  annotation**, 11,880 không đưa vào COCO, 107.8 ký hiệu/ảnh, `other_*` 38.1%, agitator 356, `column` 216,
+  `valve_three_way` 78, vẫn 30/42 lớp vocab có mẫu (`summary.txt`, `per_class.csv`, `per_sheet.csv` đã ghi
+  đè). `data/canonical` (504 file) và `data/raw` + `configs/config.yaml` (365 mục) trùng checksum với
+  `*_checksums_after.txt`. Các số khác trong report này là của lần xuất đầu.
+- **Xuất lại lần 2** (cùng ngày, sau khi V5 nối khe): **864 ảnh** (432 + 432), **93,800 annotation**,
+  12,096 không đưa vào COCO, 108.6 ký hiệu/ảnh, `other_*` 38.1%, agitator 380, vẫn 30/42 lớp vocab có mẫu.
+  Checksum `data/canonical`, `data/raw`, `configs/config.yaml` vẫn trùng.
+- **Xuất lại lần 3** (2026-11-08, ảnh có chữ V5c): vẫn 864 ảnh, **93,800 annotation** (chữ không vào COCO),
+  checksum vẫn trùng.
 - Ký hiệu/ảnh: trung bình 108.6, nhỏ nhất 45, lớn nhất 201 (theo tờ: tờ 8 ~45, tờ 10 ~193).
 - **`other_*` = 38.2%** của annotation: `other_isa` 21,478 (23.9%), `other_iso` 9,688 (10.8%), `other_generic` 3,088 (3.4%). `flow_direction` 25,672 (28.6%) và `flanged_connection` 7,928 (8.8%) cũng chi phối; mỗi lớp van 1,180–1,420 (1.3–1.6%).
 - Có mẫu: 30/42 lớp vocab. **Không có mẫu**: `pump_diaphragm`, `compressor_centrifugal`, `hx_general`, `hx_straight_tube`, `hx_coil`, `tank` (→ `other_iso`), `vessel_spherical`, `motor_electric`, `pipeline`, `hose`, `piping_heated_cooled_insulated`, `open_disc` (không xuất hiện ở 413 biến thể; chưa tìm nguyên nhân). Ít mẫu: `valve_three_way` 80, `agitator_*` 110–130 (360 tổng), `column` 216.

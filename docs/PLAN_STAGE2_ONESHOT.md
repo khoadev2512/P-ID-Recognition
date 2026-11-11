@@ -9,6 +9,38 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 
 ---
 
+## Quyết định 2026-11-09 (đọc trước; thay mọi chỗ mâu thuẫn bên dưới)
+
+1. **Khung luận văn = phương án B.** Tên đề tài ("Symbol detection and fine-grained
+   classification in P&ID") không có "one-shot", nên:
+   - **Lõi (~70%) — closed-set trên DigitizePID 32 lớp**: Stage 1 P/R/mAP; Stage 2 top-1,
+     macro-F1, confusion; **mAP end-to-end so với YOLO một-stage 32 lớp fine**
+     (`detector.label_level=fine`, đã có). Encoder R1b. Code còn thiếu: B6c.
+   - **Chuyển sang ISO (~20%)**: OPEN100-ISO (render V8) chỉ làm **test**; nhãn ISO từ
+     prototype của template. Protocol P4.
+   - **Mở rộng (~10%)**: lớp ISO chưa thấy (P1 + H tự nhiên) và cổng "Other".
+   - Hệ quả: **R1b chạy trước R1a**; "Other" từ đóng góp chính xuống mục mở rộng.
+2. **Template ISO chỉ dùng lúc suy luận.** Encoder chỉ học từ crop DigitizePID. Không train
+   gì trên template ISO, cũng không trên crop OPEN100-ISO.
+3. **B7 (GĐ3, fine-tune với template ISO) BỎ** vì vi phạm mục 2. Thay bằng **B9 = cách (d)**:
+   prototype = trung bình vector của template sạch và vài bản có đoạn ống ở cổng nối. Không
+   train, nên "thêm ký hiệu = thêm 1 ảnh" vẫn đúng. **Hoãn (2026-11-10)**: B9 làm sau R4, khi
+   đã có số của prototype sạch; không nằm trên đường chính.
+4. **S/H nói trên lớp ISO, nhưng do dữ liệu train quyết định**, không chọn tự do: lớp ISO
+   không có lớp DigitizePID tương ứng thì tự động là H ("H tự nhiên"). Xem mục "Lớp ISO thuộc
+   nhóm nào" bên dưới. Lựa chọn duy nhất của ta là `h_in` / `h_out` trên DigitizePID (B5).
+5. **Không train Stage 2 trên ISO-PID2Graph**: mọi mẫu của một lớp vẽ từ cùng một template
+   (train/test vòng tròn), 12/42 lớp vocab không có mẫu nào, chỉ có 12 sơ đồ gốc.
+6. Thuật ngữ trong luận văn: **deep metric learning (ArcFace) + so khớp prototype gần nhất**,
+   không gọi là meta-learning / episodic training (ta không train theo episode).
+7. **Stage 1 trên OPEN100-ISO chấm không phân lớp** (2026-11-11, V8_REVIEW §2.1): detector
+   DigitizePID chỉ cần khoanh "ký hiệu"; nhãn ISO do Stage 2 gán. Trên bản vẽ ISO **không lọc
+   prototype theo lớp thô** của Stage 1 (B6a). Bảng ánh xạ 8 lớp thô chỉ là báo cáo phụ.
+
+Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/artifact/JWSGBLAp2XTxufZru5BcuU
+
+---
+
 ## 0. Trạng thái xuất phát
 
 | Hạng mục | Trạng thái |
@@ -23,6 +55,10 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 | `data/canonical/` local | ✅ DigitizePID gốc: 500 ảnh (400 train / 100 val), 59,498 ann, 32 class `Symbol_N` |
 | `data/derived/` local | chỉ có `yolo_coarse/` — chưa có `crops_fgc/`, `tiles/` |
 | Crop DigitizePID trên Drive (`crops_fgc.zip`) | ⚠️ **chỉ có 28/32 class** — phải cắt lại |
+| `symbol_map.csv` (2026-11-09) | ✅ 32/32 có status: **10 ISO / 11 OOV / 9 VARIANT / 2 UNSURE**; `check_b5.py` 0 lỗi, chỉ cảnh báo H rỗng |
+| OPEN100-ISO (render V8) | ✅ 864 ảnh (432 sạch + 432 suy giảm), 93,800 annotation; **30/42** lớp vocab có mẫu (`docs/experiments/iso_render/v8/`) |
+| Augment suy giảm kiểu scan (`+fgc.aug.degrade.p`, `+detector.aug.degrade.p`) | ✅ code + test, mặc định tắt (`src/utils/scan_degrade.py`) |
+| Closed-set infer / eval với `__global__.pt` | ❌ `fgc_infer` từ chối global encoder, `evaluation` lặp theo group → **B6c** |
 
 ---
 
@@ -41,9 +77,11 @@ chúng. Encoder chưa từng thấy mẫu nào → nhận đúng chỉ có thể
 
 | Protocol | Encoder | Tập test | Đo gì | Vai trò |
 |---|---|---|---|---|
-| **P1 — unseen-class one-shot** | `__global_lo__.pt` (train trên 32 − H class) | crop của H_in (giữ ra, map được ISO) + H_out (giữ ra, OOV) | one-shot acc trên H_in; "Other" với dương = H_out, âm = H_in (**cả hai đều unseen**) | **BẰNG CHỨNG CHÍNH** cho đóng góp #1, #2 |
+| **C — closed-set** (2026-11-09) | `__global__.pt` (đủ 32 class), head softmax | crop + bản vẽ DigitizePID val | top-1, macro-F1, confusion 32 lớp; mAP end-to-end so với YOLO 32 lớp fine | **Lõi luận văn** (phương án B) |
+| **P1 — unseen-class one-shot** | `__global_lo__.pt` (train trên 32 − H class) | crop của H_in (giữ ra, map được ISO) + H_out (giữ ra, OOV) | one-shot acc trên H_in; "Other" với dương = H_out, âm = H_in (**cả hai đều unseen**) | Bằng chứng chính của mục mở rộng: lớp chưa thấy, **nét vẽ khác template** |
 | P2 — seen-class alignment | `__global__.pt` (đủ 32 class) | crop các class map được ISO | template ISO (nét vector) có khớp crop raster không | Kết quả phụ, ghi rõ KHÔNG phải one-shot; P2 − P1 = cái giá của "unseen" |
 | P3 — real, unseen (nếu có) | `__global__.pt` | ASU PID_Dataset (`~/Downloads/PID_Dataset.zip`, Stage-2 test: 12 sheet thật, ~102 class) | như P1 trên bản vẽ thật | Bằng chứng mạnh nhất; chờ user quyết định giải nén + map class |
+| **P4 — OPEN100-ISO** (2026-11-09) | cả hai encoder | crop GT + bản vẽ OPEN100-ISO (sạch / suy giảm) | acc theo nhóm **S / V / H tự nhiên / H chọn**; "Other" với dương = `other_iso`; end-to-end; theo mức suy giảm | Phần "chuyển sang ISO". H ở đây **cùng nét vẽ** với template nên dễ hơn P1 — báo cáo tách riêng, không gộp với P1 |
 | Baseline | encoder chỉ-ImageNet (B4a) | như P1 | encoder chưa học P&ID | Cho thấy train DigitizePID đóng góp bao nhiêu |
 
 Quy tắc bắt buộc:
@@ -56,6 +94,29 @@ Quy tắc bắt buộc:
   `fine_classes` của checkpoint.
 - So với OSSR-PID **chỉ bằng số P1**, kèm câu nêu rõ khác biệt protocol.
 
+### Lớp ISO thuộc nhóm nào (S / V / H) — 2026-11-09
+
+Một lớp ISO là "đã thấy" với encoder E khi E đã train trên lớp DigitizePID tương ứng. Nhóm được
+**tính tự động** từ `symbol_map.csv` (cột `status`, `reg_number`) và danh sách lớp lưu trong
+checkpoint (`fine_classes`, `excluded_classes`) — không gõ tay (B6b):
+
+| Nhóm | Điều kiện (với encoder E) | Với R1b (đủ 32 lớp) |
+|---|---|---|
+| **S** — đã thấy | có lớp DigitizePID `status=ISO` cùng `reg_number`, nằm trong `fine_classes` của E | 10 lớp: `valve_gate/globe/general/ball/needle`, `open_disc`, `interchangeable_disc(_open)`, `flanged_connection`, `flow_direction` |
+| **V** — biến thể | không thuộc S; có lớp `status=VARIANT` cùng `reg_number` trong `fine_classes` của E | `valve_butterfly`, `valve_control`, `check_valve_general`, `reducer`, `hx_coil`, `piping_heated_cooled_insulated` |
+| **H chọn** | lớp `status=ISO` tương ứng nằm trong `excluded_classes` của E | rỗng (chỉ có ở R1a) |
+| **H tự nhiên** | không lớp DigitizePID nào map tới | 26 lớp còn lại của vocab 42 |
+| **Other** | ký hiệu không có trong vocab 42 | DigitizePID: 11 lớp OOV. OPEN100-ISO: `other_iso` (19 template render ngoài vocab, 10,144 instance) |
+
+Trên OPEN100-ISO chỉ 30/42 lớp có mẫu: S 9 lớp (không có `open_disc`), V 4 lớp, **H tự nhiên 17
+lớp** (8,444 instance tính cả bản sạch và suy giảm: bơm, máy nén, tháp, agitator,
+`check_valve_globe/swing`, `safety_valve_spring`, …). 11 lớp vocab không có template render (`tank`, `motor_electric`,
+`hx_*`, `open_disc`, …) vẫn có prototype và vẫn là ứng viên khi so khớp (gây nhầm), chỉ không có
+mẫu test.
+
+`other_isa` (bong bóng ISA trên OPEN100-ISO) là "Other" **đã thấy** (S26–S32 có trong train
+R1b) → báo cáo tách khỏi `other_iso`.
+
 ---
 
 ## Thứ tự: CODE HẾT TRƯỚC, RỒI MỚI CHẠY (user chốt 2026-10-14)
@@ -63,20 +124,26 @@ Quy tắc bắt buộc:
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► B6a GĐ4 ─► B6b GĐ5 ─► B7-code GĐ3 ─► B4a baseline
-B5 🧑 map symbol_map.csv + CHỌN danh sách H ──── song song suốt Phase A, ⛔ PHẢI XONG trước R1 ────►
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► B6a GĐ4 ─► B6b GĐ5 ─► B6c closed-set ─► B6d đề thi OPEN100-ISO ─► B4a baseline
+B5 🧑 CHỌN danh sách H (+ B5b 🤖 luật VARIANT trong check_b5) ── song song, ⛔ PHẢI XONG trước R1 ──►
 ```
 
 **Phase B — Chạy từng GĐ** (🧑 Colab, theo thứ tự, mỗi bước xong mới sang bước sau):
 
 ```
-(B4a baseline ImageNet) ─► R1a = train encoder LEAVE-OUT ─► R1b = train encoder ĐỦ 32 class
-  ─► R2 = prototypes + separation (cả hai encoder) ─► R3 = B7 fine-tune ISO (CHỈ nếu R2 kém)
-  ─► R4 = B8 eval P1 (+ P2, P3) + calibrate + chốt số
+(B4a baseline ImageNet) ─► R1b = train encoder ĐỦ 32 class ─► R1a = train encoder LEAVE-OUT
+  ─► R2 = prototypes (sạch) + separation (cả hai encoder)
+  ─► R4 = B8 eval C (lõi) + P1/P2/P4 (+ P3) + calibrate + chốt số
 ```
 
-R1a trước R1b vì R1a là bằng chứng chính; nếu hết quota Colab thì vẫn có P1. Crop chỉ cần
-cắt MỘT lần (`global_encoder=true` cắt đủ 32 class, kể cả class H — cần chúng để test).
+**Phase C — Sau R4, tùy chọn (hoãn 2026-11-10)**: B9 (d) code ─► R2' prototype có stub (không
+train lại, dùng encoder R1a/R1b có sẵn) ─► R4' chạy lại P1 + P4 với cùng ngưỡng → một dòng
+ablation. Không cần Colab train nên làm muộn không tốn quota.
+
+R1b trước R1a (đổi 2026-11-09): R1b phục vụ phần lõi closed-set, P2 và P4; R1a chỉ phục vụ mục
+mở rộng. Danh sách H vẫn phải chốt **trước R1b**, vì chọn H sau khi thấy số của R1b là
+cherry-picking. Crop chỉ cần cắt MỘT lần (`global_encoder=true` cắt đủ 32 class, kể cả class H
+— cần chúng để test). R3 (GĐ3) không còn: B7 đã bỏ.
 
 Vì sao thứ tự này ổn: không bước code nào cần checkpoint thật — mọi code đều test được bằng
 `_FakeEncoder` / ArcFaceModel chưa train (như `tests/test_oneshot.py` đã làm). B1 tự nhiên
@@ -87,8 +154,8 @@ nằm trước R1 nên không có nguy cơ train rồi mới thêm augment.
   bằng cách test end-to-end với ArcFaceModel chưa train trên crop thật (như
   `test_iso_prototypes.py` làm với 39 symbol ISO thật).
 - Câu hỏi khoa học lớn nhất — encoder DigitizePID có chuyển sang ISO không — chỉ trả lời ở R2.
-  Vì vậy **B7 (GĐ3) được CODE SẴN trong Phase A** dù có thể không cần chạy: nếu R2 kém thì
-  chỉ việc chạy R3, không phải quay lại code giữa Phase B.
+  Nếu R2 kém, thử B9 (d) trước (Phase C, không train lại); vẫn kém thì không còn GĐ3 để cứu
+  (B7 đã bỏ) → `docs/BACKUP_PLAN.md`.
 - **B4a** (tùy chọn, đề xuất — user chưa chốt): encoder chỉ-ImageNet làm baseline. Chạy được
   ngay đầu Phase B, trước cả R1, cho tín hiệu separation sớm + một dòng ablation
   "ImageNet-only vs train DigitizePID".
@@ -269,11 +336,11 @@ vài crop local nếu có data).
 
 ```
 prep --step crops   fgc.global_encoder=true                       # 1 lần, đủ 32 class
-# R1a — encoder cho P1 (bằng chứng chính):
+# R1b — encoder đủ 32 class: lõi closed-set (C), P2, P4, end-to-end (chạy TRƯỚC, 2026-11-09):
+fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60
+# R1a — encoder leave-out cho P1 (mục mở rộng):
 fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 \
                     'fgc.exclude_classes=[<danh sách H từ B5>]'
-# R1b — encoder đủ 32 class, cho pipeline end-to-end + P2 + P3:
-fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60
 ```
 
 Đặt tên rõ ràng khi copy về Drive: `__global_lo__.pt` (R1a) và `__global__.pt` (R1b).
@@ -300,10 +367,10 @@ Với mỗi encoder, đọc dòng log `prototype separation: mean off-diagonal c
 |---|---|---|
 | max < ~0.8 | Template ISO tách được trong space DigitizePID | Bỏ qua GĐ3 |
 | max ≥ ~0.9 | Có cặp ISO gần như trùng | 🧑 xem 2 PNG đó: thật sự giống nhau (vd. valve_general vs valve_gate) hay encoder không transfer? |
-| mean cao (≥ ~0.6) | Cả space co cụm — encoder không transfer sang ISO | Làm GĐ3 (B7) |
+| mean cao (≥ ~0.6) | Cả space co cụm — encoder không transfer sang ISO | So với bản prototype có stub (B9); vẫn kém → `docs/BACKUP_PLAN.md` (B7/GĐ3 đã bỏ) |
 
 Các ngưỡng trên là **ước lượng ban đầu**, ghi lại số thật vào HANDOFF — chính các số này
-là một bảng trong luận văn (separation trước/sau GĐ3).
+là một bảng trong luận văn (separation với prototype sạch / có stub).
 
 ---
 
@@ -348,7 +415,27 @@ giá"). Làm ngay sau khi map xong, TRƯỚC R1, TRƯỚC khi thấy bất kỳ 
   dựng override cho R1a từ `oneshot.holdout`) + HANDOFF kèm lý do chọn từng class. Push.
 - (Tùy quota Colab) 2–3 bộ H khác nhau → báo cáo trung bình ± độ lệch, chắc hơn 1 bộ.
 
-Hiện `symbol_map.csv` có 9/32 dòng DONE, 23 dòng TODO (đa số là valve và instrument).
+**Trạng thái (2026-11-09)**: `symbol_map.csv` xong 32/32 (10 ISO / 11 OOV / 9 VARIANT / 2
+UNSURE); `oneshot.holdout.h_in` / `h_out` vẫn rỗng — đây là việc còn lại của B5.
+
+**Luật mới — anh em VARIANT (2026-11-09)**: hai lớp ISO có lớp VARIANT cùng `reg_number`:
+`valve_general` (S4 ↔ S12, 2101) và `valve_ball` (S5 ↔ S2, S13, X8071). Giữ S5 ra mà S2/S13 vẫn
+train thì encoder vẫn học "van bi" qua biến thể → `valve_ball` không thật sự chưa thấy. Chọn S4
+hoặc S5 vào `h_in` thì **phải giữ ra luôn các VARIANT cùng `reg_number`** (chúng không vào tập
+test, chỉ bị bỏ khỏi train). Cần thêm một key, vd. `oneshot.holdout.h_extra`, để R1a bỏ chúng
+mà P1 không test chúng.
+
+**Ứng viên `h_in` sau mọi luật**: S1 gate, S3 globe, S10 needle; S4 general (+S12), S5 ball
+(+S2, S13); tối đa 2 trong 3 lớp blind disc S17/S18/S19. **Không chọn được**: S21 flange và S24
+flow_direction (họ một lớp; giữ ra là rút cạn họ — `check_b5.py` báo lỗi). Ứng viên `h_out`: 11
+lớp OOV (S7, S9, S15, S16, S26–S32), không rút cạn họ `instrument`.
+
+## B5b — `check_b5.py` kiểm luật VARIANT 🤖 (Phase A, nhỏ)
+
+- ERROR khi một lớp trong `h_in` có VARIANT cùng `reg_number` không nằm trong H (`h_extra`).
+- `oneshot.holdout.h_extra` (mặc định `[]`): `holdout_classes` trả thêm danh sách này; notebook
+  dựng `fgc.exclude_classes = h_in + h_out + h_extra`; P1 chỉ test `h_in` + `h_out`.
+- Test: S5 trong `h_in` thiếu S2/S13 → lỗi; có đủ → sạch; `h_extra` không vào tập test P1.
 
 Ngoài ra: `data/raw/real/` đang trống. Nếu có P&ID **thật** (scan/bản vẽ dự án) thì đó là
 tập test cross-domain mạnh hơn DigitizePID synthetic — ghi vào HANDOFF §3 khi có.
@@ -373,6 +460,10 @@ và của GT DigitizePID.
     `instrument → [agitator]`, `reducer/flange/flow_direction → [piping]`) rồi
     `subset_by_coarse(...)`. Nguồn: bảng coarse map trong HANDOFF §3.
     Coarse không có trong map → match toàn bộ directory (ghi log).
+  - **Routing là tuỳ chọn, mặc định TẮT** (2026-11-11, V8_REVIEW §2.1): cờ kiểu
+    `oneshot.route_by_coarse: false` → so với cả directory. Bắt buộc tắt cho P4 / mọi bản vẽ
+    ISO: detector DigitizePID gán bơm, tháp, agitator vào lớp thô gần nhất nó biết (vd.
+    `valve`), routing khi đó loại hẳn prototype đúng. Chỉ bật cho DigitizePID như một ablation.
   - Output: ghi **thêm** file `derived/detections_oneshot/<split>/<id>.txt` với cột tên ISO
     (string) thay vì sửa format 7 cột hiện có — giữ nguyên contract cho eval cũ.
 - `tests/test_fgc_infer_oneshot.py`: dùng `_FakeEncoder` + directory giả như `test_oneshot.py`;
@@ -406,37 +497,136 @@ Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và nh
   đơn điệu; tập OOV rỗng → bỏ qua metric "Other" có cảnh báo, không crash; **P1 với class
   test có trong checkpoint → raise**; P1 calibrate/báo cáo đúng hai split khác nhau.
 
+**Thêm 2026-11-09 — P4 (OPEN100-ISO)**:
+- Input: export V8 (`data/iso_open100/canonical/`, COCO — data root riêng, đọc bằng
+  `data_root=data/iso_open100`), crop theo box GT với cùng lề như
+  `extract_crops` (`CROP_MARGIN_FRAC`), tách `images=clean` và `images=degraded`.
+- Mỗi instance gắn nhóm **S / V / H chọn / H tự nhiên / Other** bằng một hàm duy nhất, tính từ
+  `symbol_map.csv` + `fine_classes` / `excluded_classes` của checkpoint (bảng "Lớp ISO thuộc
+  nhóm nào"). Không có danh sách gõ tay.
+- Báo cáo mỗi nhóm một dòng (top-1, top-3), không gộp; "Other" với dương = `other_iso`, âm = mọi
+  lớp vocab; `other_isa` và `other_generic` báo riêng.
+- Calibrate ngưỡng **không** dùng OPEN100-ISO (chỉ dùng ngưỡng đã chốt từ P1) — OPEN100-ISO
+  là đề thi.
+- **Quy tắc báo cáo (2026-11-11, V8_REVIEW §2.2)** — áp cho mọi số trên OPEN100-ISO (P4, Stage 1
+  không phân lớp, end-to-end):
+  - **Không bao giờ gộp ảnh sạch và suy giảm thành một số.** Export giữ `images: both`; khi chấm
+    tách theo id (ảnh suy giảm có hậu tố `_deg`). **Số chính = ảnh suy giảm**; ảnh sạch là
+    tham chiếu để đo mức giảm do nhiễu.
+  - **Báo cáo theo tờ gốc** (`iso00`…`iso11`): mỗi tờ một số (gộp 36 biến thể của tờ đó), rồi
+    trung bình ± độ lệch trên 12 tờ. 36 biến thể của một tờ không phải mẫu độc lập; mẫu độc
+    lập thật chỉ là 12 topology.
+  - Kèm số instance mỗi nhóm để người đọc biết số nào dựa trên ít mẫu.
+- End-to-end trên cả tờ (Stage 1 + Stage 2): TP khi IoU ≥ 0.5 **và** đúng nhãn ISO.
+
+**Thêm 2026-11-11 — Stage 1 không phân lớp (V8_REVIEW §2.1)**, trong `compute_detection_metrics`:
+- Tuỳ chọn kiểu `eval.class_agnostic: false` (mặc định giữ hành vi cũ). Bật → mọi box GT và mọi
+  box dự đoán thành một lớp "symbol"; P, R, mAP@50, mAP@50:95 như cũ. Tách `images=clean` /
+  `degraded`.
+- **Recall theo nhóm**: mỗi box GT mang nhóm S / V / H tự nhiên / Other (cùng hàm chia nhóm của
+  P4, đọc lớp mịn ISO trong COCO) → recall từng nhóm và từng lớp mịn. Nhóm H tự nhiên trả lời
+  "detector DigitizePID có tìm được hình chưa từng thấy không" — trần của end-to-end.
+- Bảng ánh xạ 8 lớp thô (V8_REVIEW §2.1) chỉ làm nếu cần báo cáo phụ; không chặn gì.
+- Tests: bật/tắt cho cùng số liệu khi chỉ có một lớp; dự đoán đúng box nhưng sai lớp được tính
+  TP khi bật, FP khi tắt; recall theo nhóm cộng lại khớp recall tổng.
+- Nếu recall H tự nhiên thấp: ghi thành kết quả, và là lý do để làm V9 (train Stage 1 trên bản
+  vẽ ISO sinh từ 750 sơ đồ tổng hợp, OPEN100 vẫn là test) — quyết định của user.
+
 ---
 
-## B7 — GĐ3: fine-tune với ISO template — CODE ở Phase A 🤖, CHẠY ở R3 🧑 (chỉ khi R2 kém)
+## B6c — Closed-set với `__global__.pt` 🤖 (Phase A) — lõi luận văn (2026-11-09)
 
-Fine-tune `__global__.pt` trên 39 template ISO với augment mạnh (B1 subpart + `refit_box`
-nhiều scale) — 1 ảnh/class nên mỗi epoch sinh N view/template. Nguy cơ chính: **quên**
-không gian DigitizePID → trộn batch ISO với batch DigitizePID, LR thấp (1e-4), ít epoch.
+Hiện `fgc_infer` từ chối global encoder và `evaluation.compute_fgc_metrics` lặp theo
+`fgc_groups`, nên phần lõi (protocol C) chưa chạy được với encoder dùng chung.
+- `fgc_infer`: nhánh closed-set cho `__global__.pt` — softmax trên head 32 lớp, ghi
+  `detections_fgc/` đúng format 7 cột hiện có.
+- `evaluation`: `compute_fgc_metrics` cho checkpoint global — top-1, top-3, macro-F1, confusion
+  32 lớp, theo họ coarse.
+- End-to-end mAP@50 / mAP@50:95 theo 32 lớp fine (`eval.mode=det_plus_fgc`) để đặt cạnh YOLO
+  một-stage train với `detector.label_level=fine` (code đã có, chỉ cần một lượt train Colab).
+- Phương án rẻ hơn nếu không kịp: dùng head per-group (đã chạy được) cho riêng chương lõi. Khi
+  đó encoder closed-set và encoder one-shot là hai model khác nhau — phải ghi rõ.
 
-**Code (Phase A)** — đề xuất thiết kế:
-- `src/pipeline/iso_finetune.py` + entrypoint `pid-iso-finetune` + subcommand trong
-  `run_pipeline.py`.
-- Head ArcFace mới cỡ 32 (DigitizePID) + N (ISO) class; 32 hàng đầu copy từ head cũ, N hàng
-  ISO **khởi tạo bằng prototype** của chính template đó (đã có `build_prototypes`) → bắt đầu
-  từ đúng điểm one-shot, fine-tune chỉ kéo tách thêm.
-- Mỗi batch trộn crop DigitizePID + view ISO (tỉ lệ cấu hình được); backbone LR 1e-4, head LR
-  cao hơn; vài epoch. Lưu `__global_iso__.pt` → chạy lại `pid-iso-prototypes` với ckpt này.
-- Config `oneshot.finetune.{epochs, lr_backbone, lr_head, iso_ratio, views_per_template,
-  exclude_iso}`.
-- **Chống rò rỉ khi fine-tune**:
-  - Batch DigitizePID trong fine-tune PHẢI tôn trọng `fgc.exclude_classes` — fine-tune encoder
-    leave-out bằng crop của class H là xóa sạch protocol P1.
-  - Template ISO của H_in ĐƯỢC dùng (đó chính là "1 shot"), nhưng ghi rõ trong luận văn.
-- **Giữ claim #3 trung thực** ("thêm symbol không cần train lại"): `exclude_iso` giữ 5–8 symbol
-  ISO ra khỏi fine-tune, rồi kiểm chúng vẫn nhận đúng chỉ bằng prototype. Nếu chúng tụt mạnh
-  so với symbol đã fine-tune → claim #3 chỉ đúng khi không có GĐ3, phải viết đúng như vậy.
-- Test với resnet18 chưa train + vài template giả: head mới đúng kích thước, 32 hàng đầu
-  không đổi trước bước optimizer đầu, checkpoint load lại được bằng `load_arcface_encoder`.
+---
 
-**Chạy (R3)**: chạy trên encoder leave-out trước (đó là encoder của bằng chứng chính). Kiểm
-separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_iso` không tụt. Nếu R2
-đã tốt thì không chạy, ghi lý do vào luận văn — code vẫn giữ làm phần ablation có sẵn.
+## B6d — Chuẩn bị đề thi OPEN100-ISO 🤖 (Phase A, ⛔ trước R4) — 2026-11-11
+
+Hai việc từ V8_REVIEW, quan trọng hơn sau khi OPEN100-ISO thành đề thi chính:
+
+**1. Kiểm ảnh suy giảm với config V7 hiện tại (V8_REVIEW §2.5).** Export kiểm lại ảnh sạch (vẽ
+lại rồi so box) nhưng dùng nguyên JSON và ảnh `degraded/`. V6/V7 đã được sinh lại nhiều lần
+(2026-11-07/08), nên nếu V7 chạy với config khác mà quên chạy lại, đề thi sẽ lệch mà không ai
+biết.
+- Trong export: với mỗi ảnh suy giảm, sinh lại `sample_params` từ seed lưu trong JSON và config
+  `render_iso.degrade` hiện tại, so với `params` đã lưu. Lệch → lỗi, ghi tên ảnh, không export.
+- Test: config đổi một dải → export báo lỗi; config giữ nguyên → qua.
+- Thay cho quy tắc tay "sinh lại V6/V7 thì phải export lại" (§3 câu 4): quên thì export tự bắt.
+
+**2. Vùng bỏ qua cho mũi tên dẫn và cờ (V8_REVIEW §2.6).** Export đang bỏ **12,096** box
+(`leader_arrow` và cờ inlet/outlet không có nhãn), so với 93,800 box được giữ. Khi chấm không phân
+lớp, detector DigitizePID (có lớp `flow_direction`) rất dễ bắt mũi tên dẫn, và mỗi lần bắt là một
+dương giả.
+- Export: ghi các box này vào COCO với `iscrowd: 1` (cách chuẩn của COCO cho vùng bỏ qua), lớp
+  riêng không có trong vocab. `drop_labels` đổi nghĩa thành "ghi là vùng bỏ qua".
+- `evaluation`: dự đoán khớp vùng bỏ qua (IoU ≥ 0.5, hoặc nằm phần lớn trong vùng) không tính FP,
+  cũng không tính TP; GT bỏ qua không vào mẫu số recall. Kiểm `build_manifest` / `coco_to_yolo` /
+  `extract_crops` bỏ qua `iscrowd: 1` (không thành nhãn train, không thành crop).
+- Báo cáo thêm: số dự đoán rơi vào vùng bỏ qua (cho biết detector bắt mũi tên dẫn nhiều cỡ nào).
+- Test: dự đoán trùng vùng bỏ qua → precision không đổi; GT bỏ qua không làm giảm recall; DigitizePID
+  (không có `iscrowd`) cho kết quả y như trước.
+
+---
+
+## B7 — GĐ3: fine-tune với template ISO — ❌ BỎ (2026-11-09)
+
+Train encoder trên template ISO trái với quyết định "template ISO chỉ dùng lúc suy luận", làm
+mất "thêm ký hiệu không cần train lại" (quay về giới hạn của OSSR-PID), và nếu dùng template
+của H thì H không còn là chưa thấy. Thay bằng B9. Thiết kế cũ còn trong git history (trước
+2026-11-09).
+
+---
+
+## B9 — Prototype có stub, cách (d) 🤖 — ⏸ HOÃN sang Phase C (sau R4), quyết định 2026-11-10
+
+Thiết kế giữ nguyên bên dưới. Làm khi đã có số R4 với prototype sạch; nên ưu tiên nếu P4 cho
+thấy crop OPEN100-ISO có ống nối nhận kém hơn hẳn template sạch, hoặc R2 separation kém.
+
+**Vì sao**: template ISO là hình sạch; crop từ detector dính đoạn ống ở cổng nối, mờ, lệch tâm.
+Thay vì dạy encoder (đã bỏ, B7), làm phía prototype giống crop hơn. Không train gì.
+
+**Cách làm**: mỗi template sinh `1 + K` view: bản sạch + K bản "bẩn"; prototype = trung bình
+các vector (L2-normalize sau khi cộng). Mỗi bản bẩn:
+1. **Ống ở cổng nối thật**: cạnh cổng (`L/R/T/B`) và vị trí (`u, v`) lấy từ template render
+   (`utils.iso_templates.load_templates`, khớp theo `reg_number`; ví dụ van `L,R`, tháp
+   `B,L,R,T`, agitator `T`). Độ dày ống = độ dày nét đo trên PNG
+   (`scan_degrade.stroke_width`). Độ dài ngẫu nhiên, đến mép khung crop.
+2. **Mờ / nhiễu nhẹ**: `ScanDegrade(p=1)` với dải hẹp (dùng lại, không viết mới).
+3. **Lệch tâm**: dịch nhẹ trong khung, như box detector lệch.
+
+**Code**:
+- `configs/config.yaml` `oneshot.template_views.stubs: {n_views: 0, ...}` — `0` = hành vi hiện
+  tại y nguyên (baseline).
+- `utils/oneshot.py` (phía support của `make_views`) + `pipeline/iso_prototypes.py`; ghi
+  `n_views` và seed vào `meta` của file prototype.
+- **Template không có cổng**: 11 lớp vocab không có template render (`tank`, `motor_electric`,
+  `hx_*`, `open_disc`, `pipeline`, `hose`, …) → chỉ dùng view sạch, ghi log. Riêng `open_disc`
+  (S17, ứng viên `h_in`): 🧑 quyết định trước R2 — bổ sung cạnh cổng bằng tay (bảng nhỏ) hoặc
+  để nguyên view sạch.
+- **Kiểm khớp toạ độ**: PNG prototype (`iso_symbols_clean`) và SVG render cùng nguồn BK-2020,
+  nhưng khung có thể khác → map `u, v` qua bbox mực của PNG; 🧑 duyệt một contact sheet (mỗi
+  template: sạch + 3 bản bẩn) trước khi dùng, như B1.
+- Tests: `n_views=0` cho prototype trùng bản hiện tại; ống chạm đúng cạnh cổng; cùng seed cùng
+  kết quả; template không cổng → chỉ view sạch + log.
+
+**Ablation (R2, R4)**: prototype sạch vs có stub, đo trên **cả** P1 (DigitizePID) và P4
+(OPEN100-ISO). Nếu chỉ P4 tăng: có thể chỉ khớp với cách bộ render vẽ ống — phải ghi rõ.
+
+**Gộp vào Phase C — `open_disc` 0 mẫu trên OPEN100-ISO (V8_REVIEW §2.4, 2026-11-11).** C0098
+`open_disc` (lớp S, S17, ứng viên `h_in`) nằm ở `scope: extra` trong taxonomy nên không được
+vẽ; ghi chú taxonomy: "no stubs: the pipe passes through". Cùng gốc với việc thiếu cổng nối ở
+B9, nên xử lý một lần: định nghĩa cổng cho C0098 (🧑 duyệt), đưa vào `html`, sinh lại V6 → V7 →
+V8 (export sẽ tự kiểm nhờ B6d). Đến lúc đó, nếu S17 nằm trong `h_in` thì P1 vẫn đo được trên
+DigitizePID, chỉ P4 thiếu lớp này.
 
 ---
 
@@ -454,19 +644,33 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 
 ## B8 — Chạy eval thật + chốt số 🧑🤖
 
+0. **C** (encoder đủ 32 class, closed-set, B6c): top-1 / macro-F1 / confusion trên crop val;
+   mAP end-to-end 32 lớp fine cạnh YOLO một-stage fine.
 1. **P1** (encoder leave-out): calibrate ngưỡng trên crop H từ split `train` → ghi vào
    `config.yaml` (`oneshot.other_min_cosine`) **kèm comment** nguồn gốc (run nào, tiêu chí
    false-reject bao nhiêu) → báo cáo trên crop H từ split `val` với ngưỡng đã chốt (không
    tune lại).
 2. **P2** (encoder đủ 32 class): cùng ngưỡng, báo cáo riêng, gắn nhãn "seen-class".
 3. **P3** nếu đã có ASU: cùng ngưỡng, báo cáo riêng.
-4. Baseline ImageNet (B4a) chạy P1.
-5. Bảng luận văn, tách theo protocol:
-   - Bảng chính: P1 one-shot acc + "Other" AUROC/P/R, cạnh OSSR-PID 85.78% kèm câu nêu khác
-     biệt protocol.
-   - Bảng phụ: P2, P3, baseline ImageNet, ablations (vote/mean, 1 vs 8 view, subpart on/off,
-     GĐ3 on/off + nhóm `exclude_iso`).
-6. Cập nhật HANDOFF §0 + §6 với số thật.
+4. **P4** (OPEN100-ISO, cả hai encoder): cùng ngưỡng, theo nhóm S / V / H chọn / H tự nhiên,
+   sạch vs suy giảm, cộng end-to-end.
+5. Baseline ImageNet (B4a) chạy P1 và P4.
+6. Bảng luận văn (phương án B):
+   - Chương lõi: bảng C (hai-stage vs YOLO một-stage).
+   - Chuyển sang ISO: bảng P4 theo nhóm và theo mức suy giảm; P2.
+   - Mở rộng: P1 one-shot acc + "Other" AUROC/P/R, cạnh OSSR-PID 85.78% kèm câu nêu khác biệt
+     protocol.
+   - Ablations: vote/mean, 1 vs 8 view, subpart on/off; prototype sạch vs có stub (B9, nếu
+     Phase C đã làm).
+7. Cập nhật HANDOFF §0 + §6 với số thật.
+
+**Ghi chú khi viết phần dữ liệu (V8_REVIEW, 2026-11-11)** — không sửa code:
+- §2.3: trong data root OPEN100-ISO, `source=synthetic` và file `digitizepid_splits.json` là tên
+  bắt buộc của `build_manifest` có sẵn; ảnh là bản vẽ lại (đúng nghĩa "synthetic"), không phải
+  DigitizePID.
+- §2.7: trục agitator không nhô lên khi có tag line ngay trên (hành vi V5b) → bộ test có cả hai
+  dạng agitator. Nếu recall agitator thấp bất thường, xem lại điểm này khi phân tích.
+- §3 câu 5: `by_source` không có tập `val` — chỉ cần thêm nếu làm V9.
 
 ---
 
@@ -477,19 +681,29 @@ separation (R2) tăng **và** accuracy P1 không giảm **và** nhóm `exclude_i
 - [x] B1 subpart augment `SubpartWarp` + user duyệt ảnh (2026-10-18)
 - [x] B1b `fgc.exclude_classes` + tests chống rò rỉ (2026-10-18)
 - [x] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out (2026-10-19)
-- [ ] B6a GĐ4 one-shot infer + coarse_map
-- [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3 + guard rò rỉ
-- [ ] B7-code GĐ3 fine-tune ISO (code sẵn, chạy có điều kiện; tôn trọng exclude_classes + exclude_iso)
+- [ ] B6a GĐ4 one-shot infer + coarse_map (routing mặc định tắt; tắt bắt buộc cho P4)
+- [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3/P4 + nhóm S/V/H tự động + guard rò rỉ
+      + Stage 1 không phân lớp (`eval.class_agnostic`) + recall theo nhóm
+- [ ] B6c closed-set infer + eval cho `__global__.pt` (lõi, protocol C)
+- [ ] B6d đề thi OPEN100-ISO: kiểm ảnh suy giảm với config V7 + vùng bỏ qua (`iscrowd`) cho mũi tên dẫn / cờ — ⛔ trước R4
+- [x] ~~B7-code GĐ3 fine-tune ISO~~ — bỏ 2026-11-09
 - [ ] B4a-code baseline ImageNet (tùy chọn)
-- [ ] B5 🧑 hoàn thành `symbol_map.csv` (ISO / OOV) + **chọn H_in, H_out** — ⛔ trước R1
+- [x] B5 🧑 hoàn thành `symbol_map.csv` (32/32, 2026-11-09)
+- [ ] B5 🧑 **chọn H_in, H_out** (theo luật VARIANT) — ⛔ trước R1
+- [ ] B5b 🤖 `check_b5.py` luật VARIANT + `oneshot.holdout.h_extra`
 
 **Phase B — Chạy** (🧑 Colab, đúng thứ tự)
 - [ ] (B4a) baseline ImageNet → separation "trước khi học"
-- [ ] R1a = train `__global_lo__.pt` (leave-out H), copy về Drive
 - [ ] R1b = train `__global__.pt` (đủ 32 class), copy về Drive
-- [ ] R2 = prototypes cho cả hai encoder, ghi số separation
-- [ ] R3 = B7 fine-tune ISO (chỉ nếu R2 kém; encoder leave-out trước)
-- [ ] R4 = B8: P1 (chính) + P2 + P3 + baseline, calibrate trên train-split, báo cáo trên val-split
+- [ ] YOLO một-stage 32 lớp fine (`detector.label_level=fine`) — baseline cho C
+- [ ] R1a = train `__global_lo__.pt` (leave-out H + `h_extra`), copy về Drive
+- [ ] R2 = prototypes (sạch) cho cả hai encoder, ghi số separation
+- [ ] R4 = B8: C (lõi) + P1 + P2 + P4 (+ P3) + baseline, calibrate trên train-split của P1
+
+**Phase C — Sau R4, tùy chọn** (hoãn 2026-11-10)
+- [ ] B9 prototype có stub, cách (d) (`oneshot.template_views.stubs`, mặc định tắt) + 🧑 duyệt contact sheet + quyết `open_disc`
+- [ ] R2' prototype có stub (encoder có sẵn, không train lại) → R4' P1 + P4 cùng ngưỡng
+- [ ] (tuỳ chọn) cổng cho C0098 `open_disc`, đưa vào `html`, sinh lại V6 → V8 (V8_REVIEW §2.4)
 
 ## Lưu ý vận hành
 

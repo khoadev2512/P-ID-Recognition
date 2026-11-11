@@ -1,5 +1,6 @@
-"""Unit tests for utils/diversity.py and utils/iso_variants.py (V6): hashes, dedup, sub-seeds,
-the `variants` config, the quality filter and a small end-to-end run on one OPEN100 sheet."""
+"""Unit tests for utils/diversity.py and utils/iso_variants.py (V6): hashes, content dedup,
+sub-seeds, the `variants` config, the quality filter and a small end-to-end run on one OPEN100
+sheet."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from utils.diversity import Deduper, ahash, dhash, hamming
+from utils.diversity import ContentDeduper, Deduper, ahash, content_distance, dhash, hamming
 from utils.iso_mapping import Assignment, load_config
 from utils.iso_templates import load_templates
 from utils.iso_variants import (
@@ -18,6 +19,7 @@ from utils.iso_variants import (
     assignment_signature,
     derive_seed,
     generate_sheet,
+    node_choices,
     plan_variant,
     quality_failures,
     render_variant,
@@ -83,6 +85,41 @@ def test_deduper_needs_both_hashes_close():
     assert d.is_duplicate(0b0001, 0b11111)[0]  # now a duplicate of the one just kept
 
 
+def test_content_distance_is_the_share_of_differing_nodes():
+    a = {f"n{i}": "valve_gate" for i in range(20)}
+    b = {**a, "n0": "valve_globe"}
+    assert content_distance(a, a) == 0.0 and content_distance({}, {}) == 0.0
+    assert content_distance(a, b) == content_distance(b, a) == 0.05
+    assert content_distance(a, {**a, "extra": "x"}) == 1 / 21  # a node in one map only differs
+
+
+def test_content_deduper_drops_near_copies_of_the_symbols_not_of_the_picture():
+    a = {f"n{i}": "valve_gate" for i in range(20)}
+    d = ContentDeduper(min_node_diff=0.1)
+    assert d.is_duplicate(a) == (False, None)
+    d.add(a)
+    one = {**a, "n0": "valve_globe"}  # 1 of 20 nodes: a near-copy
+    assert d.is_duplicate(one) == (True, 0.05)
+    # same nodes, same layout, a quarter of them drawn with other symbols: a variant worth keeping
+    quarter = {**a, **{f"n{i}": "check_valve_swing" for i in range(5)}}
+    assert d.is_duplicate(quarter) == (False, 0.25)
+    d.add(quarter)
+    assert d.distance({**quarter, "n19": "valve_ball"}) == 0.05  # the closest kept one counts
+
+
+def test_node_choices_see_which_symbol_not_how_it_is_drawn():
+    a = {"n1": Assignment("arrow", "flow_direction", axis="H", forward=True),
+         "n2": Assignment("arrow", "flow_direction", axis="V", forward=False)}  # fmt: skip
+    # the same symbols in other places: a label histogram sees no change
+    swapped = {"n1": a["n2"], "n2": a["n1"]}
+    assert content_distance(node_choices(a), node_choices(swapped)) == 1.0
+    # the agitator's shaft length is how a symbol is drawn, not which
+    n1 = Assignment("arrow", "flow_direction", axis="H", forward=True, clearance=0.6)
+    shaft = {**a, "n1": n1}
+    assert node_choices(shaft) == node_choices(a)
+    assert assignment_signature(shaft) != assignment_signature(a)
+
+
 def test_derive_seed_is_deterministic_and_separates_stages():
     a = derive_seed(0, 3, 5, "assign")
     assert a == derive_seed(0, 3, 5, "assign")
@@ -100,7 +137,7 @@ def test_variant_settings_reads_config_and_scales_stroke():
         "layout": {"scale": 6},
         "variants": {
             "count": 5, "max_attempts": 9, "base_seed": 7, "stroke": [2, 4],
-            "size": [0.85, 1.15], "hash_size": 8, "min_distance": 3,
+            "size": [0.85, 1.15], "hash_size": 8, "min_node_diff": 0.05,
             "quality": {"max_log": {"bubbles_unsettled": 0}},
             "g1": {"drop": [1, 2], "flag": [5]},
         },
@@ -108,6 +145,7 @@ def test_variant_settings_reads_config_and_scales_stroke():
     s = variant_settings(cfg)
     assert s.stroke == (4.0, 8.0)  # [2, 4] x scale / 3
     assert (s.count, s.max_attempts, s.base_seed, s.hash_size) == (5, 9, 7, 8)
+    assert s.min_node_diff == 0.05
     assert s.g1_drop == (1, 2) and s.g1_flag == (5,) and s.max_log == {"bubbles_unsettled": 0}
     bad = json.loads(json.dumps(cfg))
     bad["variants"]["max_attempts"] = 2
@@ -116,6 +154,10 @@ def test_variant_settings_reads_config_and_scales_stroke():
     bad = json.loads(json.dumps(cfg))
     bad["variants"]["g1"]["flag"] = [1]
     with pytest.raises(ValueError, match="both"):
+        variant_settings(bad)
+    bad = json.loads(json.dumps(cfg))
+    bad["variants"]["min_node_diff"] = 5  # a share, not a node count
+    with pytest.raises(ValueError, match="min_node_diff"):
         variant_settings(bad)
 
 
@@ -195,6 +237,10 @@ def test_render_variant_uses_its_stroke_and_leaves_cfg_alone(sheet3):
     assert thin.page.annotations[0]["id"] == thick.page.annotations[0]["id"]
     ink = [(rasterize(r.page.svg) < 128).sum() for r in (thin, thick)]
     assert ink[1] > 1.3 * ink[0]  # the same picture, drawn with a thicker pen
+    # G1 is given the data's boxes, not the enlarged ones V5 fitted the symbols to
+    draft.size_factor = 1.15
+    big = render_variant(draft, sheet, runs, cfg)
+    assert big.source is sheet
 
 
 @needs_open100
@@ -204,6 +250,11 @@ def test_generate_sheet_writes_kept_variants_and_is_reproducible(sheet3, tmp_pat
     kept = [r for r in recs if r["status"] == "kept"]
     assert len(kept) == 3 and len(recs) <= 6
     assert all(r["reason"] is None for r in kept)
+    # each kept variant differs from the earlier kept ones in at least min_node_diff of its nodes;
+    # its picture's hash distance is recorded, not filtered on
+    st = variant_settings(cfg)
+    assert all(r["nearest_content"] >= st.min_node_diff for r in kept[1:])
+    assert all(isinstance(r["nearest_hash"], int) for r in kept[1:])
     meta = json.loads((tmp_path / "sheet3" / "v000.json").read_text())
     assert meta["seeds"] == recs[0]["seeds"] and meta["annotations"]
     assert Image.open(tmp_path / "sheet3" / "v000.png").size == (meta["width"], meta["height"])
@@ -218,12 +269,14 @@ def test_generate_sheet_writes_kept_variants_and_is_reproducible(sheet3, tmp_pat
 @needs_open100
 def test_generate_sheet_drops_duplicates_and_failed_checks(sheet3):
     cfg, templates, sheet, runs = sheet3
-    # a threshold above any distance: every picture after the first is a near-duplicate
-    huge = {**cfg, "variants": {**cfg["variants"], "min_distance": 10_000, "max_attempts": 4}}
+    # a threshold no two assignments reach: every variant after the first is a near-duplicate,
+    # dropped before it is drawn
+    huge = {**cfg, "variants": {**cfg["variants"], "min_node_diff": 1.0, "max_attempts": 4}}
     recs = generate_sheet(3, sheet, runs, templates, huge, None)
     assert [r["status"] for r in recs] == ["kept", "dropped", "dropped", "dropped"]
     assert {r["reason"] for r in recs[1:]} == {"duplicate"}
-    assert all(r["nearest"] is not None for r in recs[1:])
+    assert all(0 < r["nearest_content"] < 1 for r in recs[1:])
+    assert all("render" not in r["seconds"] for r in recs[1:])
     # a G1 check that fails criterion 7 drops (7 is in g1.drop); one that fails a flagged one keeps
     fail = lambda r: {1: True, 7: False}  # noqa: E731
     recs = generate_sheet(3, sheet, runs, templates, cfg, None, fail)

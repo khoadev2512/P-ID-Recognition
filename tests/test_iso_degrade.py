@@ -30,7 +30,7 @@ from utils.iso_degrade import (
 )
 from utils.iso_mapping import load_config
 from utils.iso_templates import load_templates
-from utils.iso_variants import derive_seed, plan_variant, render_variant
+from utils.iso_variants import STAGES, derive_seed, plan_variant, render_variant
 from utils.page_svg import rasterize
 from utils.pid2graph import load_graphml, pipe_runs
 
@@ -194,7 +194,7 @@ def test_degrade_stage_leaves_the_other_stages_alone(drawn):
     cfg, draft, _ = drawn
     base = cfg["variants"]["base_seed"]
     assert draft.seeds["degrade"] == derive_seed(base, 3, 0, "degrade")
-    assert len({draft.seeds[s] for s in draft.seeds}) == 4
+    assert len({draft.seeds[s] for s in draft.seeds}) == len(STAGES)
     stored = _VARIANTS / "sheet3" / "v000.json"
     if stored.exists():  # the V6 picture of the same variant is still what its seeds give
         meta = json.loads(stored.read_text())
@@ -261,3 +261,49 @@ def test_degrade_one_writes_a_consistent_document(tmp_path):
     assert len(doc["annotations"]) == len(meta["annotations"])
     assert doc["boxes_outside_page"] == 0 and set(doc) >= {"nodes", "ports", "stems"}
     assert secs["degrade"] > 0
+
+
+def _survival():
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
+    import check_degrade_survival
+
+    return check_degrade_survival
+
+
+def _bow(bar: bool, bar_ink: int = 0) -> np.ndarray:
+    """A frame and a dot (the shared part, like a valve's two triangles) with a 3 px vertical bar
+    through the dot (valve_butterfly-like) or without (valve_globe-like)."""
+    img = np.full((60, 60), 255, np.uint8)
+    cv2.rectangle(img, (4, 8), (55, 51), 0, 3)
+    cv2.circle(img, (30, 30), 6, 0, -1)
+    if bar:
+        img[14:47, 29:32] = np.minimum(img[14:47, 29:32], bar_ink)
+    return img
+
+
+def test_the_detail_core_is_the_middle_of_what_only_one_drawing_has():
+    sv = _survival()
+    with_bar, without = _bow(True), _bow(False)
+    core = sv.detail_core(with_bar, without)
+    assert core.any() and set(np.nonzero(core)[1]) == {30}  # the bar's middle column only
+    assert not sv.detail_core(without, with_bar).any()  # nothing only the dot drawing has
+    assert sv.detail_darkness(with_bar, core) == pytest.approx(1.0)
+    assert sv.detail_darkness(without, core) == pytest.approx(0.0)
+    assert sv.halfway(with_bar, without, core) == pytest.approx(0.5)
+    # a bar faded to 70 % ink is still nearer the barred drawing; one at 30 % is not
+    assert sv.detail_darkness(_bow(True, bar_ink=77), core) > 0.5
+    assert sv.detail_darkness(_bow(True, bar_ink=179), core) < 0.5
+
+
+def test_whole_symbol_ncc_barely_sees_the_bar_the_detail_check_does():
+    sv = _survival()
+    with_bar, without = _bow(True), _bow(False)
+    refs = {"bar": with_bar, "dot": without}
+    core = sv.detail_core(with_bar, without)
+    faded = _bow(True, bar_ink=230)  # the bar all but gone
+    # whole-symbol NCC: the shared frame keeps the score up, it moves by a few hundredths
+    assert sv.best_match(with_bar, refs)["bar"] - sv.best_match(faded, refs)["bar"] < 0.1
+    # the detail: from full ink to under a tenth
+    assert sv.detail_darkness(with_bar, core) - sv.detail_darkness(faded, core) > 0.85
