@@ -19,6 +19,9 @@ ERROR (exit 1) when:
       on disk
     - an h_in class is not ISO, an h_out class is not OOV (so VARIANT/UNSURE are in
       neither)
+    - an h_in class has a VARIANT with the same reg_number that is not in h_extra (the
+      encoder would still learn the held-out symbol through its variant: S5 valve_ball
+      needs S2, S13), or an h_extra class is not such a VARIANT
     - holding H out empties a coarse family from training
 WARN when:
     - an ISO row's fine_name differs from vocab.csv's (the prototype is named by vocab)
@@ -59,7 +62,7 @@ def check(
     with vocab_csv.open(newline="", encoding="utf-8") as f:
         vocab = {r["reg_number"].strip(): r for r in csv.DictReader(f)}
     classmap = load_classmap(classes_yaml)
-    h_in, h_out = holdout_classes(OmegaConf.load(config))
+    h_in, h_out, h_extra = holdout_classes(OmegaConf.load(config))
 
     status = {name: (r.get("status") or "").strip().upper() for name, r in rows.items()}
     for name, st in status.items():
@@ -92,7 +95,7 @@ def check(
             who = sorted(k for k, v in iso_regs.items() if v == reg)
             warns.append(f"{who} all map to {reg} — one ISO symbol for {n} DigitizePID classes")
 
-    unknown = sorted(set(h_in + h_out) - set(classmap.fine_classes))
+    unknown = sorted(set(h_in + h_out + h_extra) - set(classmap.fine_classes))
     if unknown:
         errors.append(f"oneshot.holdout names unknown classes {unknown}")
     for name in h_in:
@@ -102,7 +105,30 @@ def check(
         if name in status and status[name] != "OOV":
             errors.append(f"h_out {name} has status {status[name]!r}, needs OOV")
 
-    held = set(h_in + h_out)
+    # VARIANT rule (PLAN B5b): an h_in symbol is unseen only if its variants are too.
+    reg_of = {name: (r.get("reg_number") or "").strip() for name, r in rows.items()}
+    variants: dict[str, list[str]] = {}
+    for name, st in status.items():
+        if st == "VARIANT" and reg_of[name]:
+            variants.setdefault(reg_of[name], []).append(name)
+    h_in_regs = {reg_of[n] for n in h_in if status.get(n) == "ISO" and reg_of.get(n)}
+    for name in h_in:
+        missing = sorted(set(variants.get(reg_of.get(name, ""), [])) - set(h_extra))
+        if status.get(name) == "ISO" and missing:
+            errors.append(
+                f"h_in {name} ({reg_of[name]}) has VARIANT {missing} with the same "
+                f"reg_number still in training — add them to oneshot.holdout.h_extra"
+            )
+    for name in h_extra:
+        if name in status and status[name] != "VARIANT":
+            errors.append(f"h_extra {name} has status {status[name]!r}, needs VARIANT")
+        elif name in status and reg_of[name] not in h_in_regs:
+            errors.append(
+                f"h_extra {name} ({reg_of[name] or 'no reg_number'}) is not a VARIANT of "
+                f"an h_in class — it would leave training for nothing"
+            )
+
+    held = set(h_in + h_out + h_extra)
     families: dict[str, list[str]] = {}
     for fine, coarse in classmap.fine_to_coarse.items():
         families.setdefault(coarse, []).append(fine)

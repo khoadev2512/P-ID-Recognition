@@ -170,6 +170,7 @@ uv run pid-iso-prototypes oneshot.encoder_ckpt=runs/<train-run>/fgc_checkpoints/
 # Evaluation (both metric families; ablation via eval.mode)
 uv run pid-eval          eval.mode=det_only
 uv run pid-eval          eval.mode=det_plus_fgc
+uv run pid-eval          eval.mode=fgc_only fgc.global_encoder=true fgc.ckpt_dir=<dir with __global__.pt>
 uv run pid-eval          eval.split=test         # real-world held-out (see Phases below)
 ```
 

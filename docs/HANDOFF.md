@@ -1,4 +1,4 @@
-# HANDOFF — Trạng thái dự án & hướng đi (cập nhật 2026-10-10)
+# HANDOFF — Trạng thái dự án & hướng đi (cập nhật 2026-11-12)
 
 File này để **tiếp tục ở session sau** mà không phải làm lại những gì đã thử. Đọc file này
 + `docs/RENDER_RULES.md` + `~/.claude/projects/.../memory/*.md` là nắm toàn bộ.
@@ -18,6 +18,16 @@ File này để **tiếp tục ở session sau** mà không phải làm lại nh
 > lúc suy luận**; GĐ3 (fine-tune ISO) **bỏ**, thay bằng prototype có stub (B9, cách d — hoãn sang
 sau R4, 2026-11-10); R1b chạy
 > trước R1a; S/H trên lớp ISO tính tự động từ `symbol_map.csv` + checkpoint.
+>
+> **CẬP NHẬT 2026-11-12 — xem Mục 6d**: R1b đã chạy tới epoch ≥3 rồi Colab ngắt (checkpoint
+> duy nhất = epoch 3); R2 đã chạy trên checkpoint đó. Separation đạt ngưỡng mean nhưng KHÔNG đạt
+> ngưỡng max: hai cụm template gộp nhau (van hình nơ có/không vạch đứng; hình tròn bơm/bình/máy
+> nén). Nguyên nhân cụm van đã xác nhận: đặc điểm không cộng dồn (chấm lấn át vạch). 10 lớp S tách
+> tốt (S–S max 0.389). Template thiếu lề 10% so với crop (code). Đã tách val → `val_sel`/`test`.
+> **TRỌNG SỐ LUẬN VĂN ĐỔI 2026-11-12: 70/20/10 → 40/40/20** (lõi C / chuyển sang ISO P4 / mở rộng
+> P1 + "Other") vì đề thi C đã bão hoà. Đường găng chuyển sang P4; R1a bắt buộc. Xem PLAN.
+> **P2 thu nhỏ XONG 2026-11-12** (`val_sel`, epoch 3): S 7/10 lớp đúng, V gần 0, lề template không
+> bản nào thắng. Số liệu + 4 vấn đề chờ user: PLAN "Vấn đề mở 2026-11-12" điểm 1, 4, 5, 6.
 
 ---
 
@@ -41,10 +51,17 @@ voting + "Other" gate) ĐÃ CODE XONG. User ĐÃ CHỐT: **1 encoder TOÀN CỤC
 (`fgc.global_encoder=true`) — đã code xuyên 3 stage. Chưa chạy pytest (máy thiếu
 uv/torch). Việc tiếp theo: **train GĐ1 trên Colab** với global encoder.
 
+**TRẠNG THÁI 2026-11-12**: R1b chạy dở (epoch 3 là checkpoint duy nhất), R2 xong trên
+checkpoint đó. Việc tiếp theo và kết quả: **Mục 6d**.
+
 ---
 
 ## 1. ĐÓNG GÓP THESIS (đã chốt với user: cả 3 trục, nhấn mạnh #2)
 
+> **2026-11-12 — trọng số đổi lần nữa: 40/40/20** (lõi closed-set / chuyển sang ISO / mở rộng),
+> vì DigitizePID đã bão hoà (R1b val_acc 0.9999). Chi tiết + hệ quả: PLAN "Quyết định 2026-11-12
+> — trọng số".
+>
 > **2026-11-09 — trọng số đổi (phương án B)**: lõi luận văn là **closed-set fine-grained** trên
 > DigitizePID 32 lớp, hai-stage so với YOLO một-stage (khớp tên đề tài). Ba trục dưới đây chuyển
 > thành phần "chuyển sang ISO" (#3) và "mở rộng" (#1, #2). So với OSSR-PID: kế thừa khung
@@ -170,7 +187,8 @@ test_extract_iso_symbols, test_render_pid(_replace), test_visualize_detections.
 - **`data/raw/digitize_pid_yolo/`** (1.3G) — DigitizePID: ảnh JPG 7168×4561 + YOLO label,
   400 train/100 val, 32 class (0-indexed, cân bằng ~1700/class). **DÙNG ĐỂ TRAIN** (hướng one-shot).
   Nguồn HF `hamzas/digitize-pid-yolo`.
-- **`data/raw/iso_symbols_clean/`** (39 PNG) — ISO symbol library (cắt từ ISO_10628-2 PDF).
+- **`data/raw/iso_symbols_clean/`** (39 PNG; **2026-11-12: 42 PNG `<reg_number>.png` + `symbols.csv`**,
+  khớp 42 dòng vocab.csv, không lớp nào thiếu file) — ISO symbol library (cắt từ ISO_10628-2 PDF).
   User đã crop tay ~20 cái lỗi → ~36/39 đẹp. **DÙNG LÀM TEMPLATE REFERENCE** (one-shot).
   THEO GIT (un-ignored trong .gitignore).
 - **`data/raw/iso_symbols/vocab.csv`** — 39 symbol: reg_number, coarse, fine_name (tên nghĩa:
@@ -184,6 +202,11 @@ test_extract_iso_symbols, test_render_pid(_replace), test_visualize_detections.
   `data/derived/` chỉ có `yolo_coarse/`. `data/raw/real/` và `synthetic/` trống.
   `bg_patches/` (28M) là đồ của hướng render đã bỏ, xóa được.
 - Ảnh/data KHÔNG theo git (.gitignore `data/*`), trừ iso_symbols_clean + vocab.
+- **Split DigitizePID (kiểm 2026-11-12)**: `data/canonical/digitizepid_splits.json` = {id ảnh →
+  "train"/"val"}, chia THEO ẢNH 400/100, không rò rỉ (kiểm theo tiền tố id trong tên crop
+  `<id ảnh>_<thứ tự>.png`). KHÔNG có test → tách 100 ảnh val thành `val_sel` 50 / `test` 50,
+  seed 20261112, file `data/canonical/digitizepid_val_test.json` (đã lưu Drive, **CẦN commit**).
+  Mọi lớp ≥142 crop ở mỗi nửa (Symbol_21 ~550). Crop toàn cục: 47,658 train / 11,840 val.
 - **Colab**: data lên Google Drive, code qua git. Fix I/O: copy tiles/crops Drive→/content
   local trước train (Drive đọc 27k file chậm → cháy quota). Xem notebooks/train_stage1_colab.ipynb.
 
@@ -304,7 +327,7 @@ fitting KHÔNG có encoder per-group nào tương ứng.
 |---|---|
 | `pid-prep-crops` | cắt crop cho MỌI symbol, không chỉ class thuộc fgc_group. Class không có crop = thiếu hẳn khỏi embedding space. **Lưu ý: DigitizePID phải chạy LẠI prep-crops**, vì lần trước chỉ cắt 28/32 class (thiếu reducer/flange/flow_direction/safety_valve). |
 | `pid-fgc-train` | train 1 head duy nhất, size = toàn bộ fine vocab → checkpoint `__global__.pt` |
-| `pid-fgc-infer` | TỪ CHỐI (raise NotImplementedError có hướng dẫn) — stage này load 1 ckpt/group và route theo coarse; đối ứng của nó là one-shot GĐ4 |
+| `pid-fgc-infer` | ~~TỪ CHỐI (NotImplementedError)~~ → 2026-11-13: closed-set với `__global__.pt` (B6c); `++fgc.oneshot=true` = one-shot với prototype ISO (B6a, `pipeline/oneshot_infer.py`) |
 
 **Code**: `utils/classmap.py` thêm sentinel `GLOBAL_GROUP="__global__"`, và
 `fine_of_group(GLOBAL_GROUP)` trả về TOÀN BỘ fine vocab → nhờ vậy dataset, train loop
@@ -377,6 +400,155 @@ bình ± độ lệch trên hai bộ):
 
 ---
 
+## 6d. KẾT QUẢ R1b (dở) + R2 TRÊN EPOCH 3 — 2026-11-11/12
+
+### R1b — closed-set bão hoà ngay từ epoch 1
+```
+epoch 1  train_loss=1.5901 train_acc=0.8576 val_loss=0.0015 val_acc=0.9997  (best, saved)
+epoch 2  train_loss=0.0457 train_acc=0.9947 val_loss=0.0048 val_acc=0.9997
+epoch 3  train_loss=0.0449 train_acc=0.9949 val_loss=0.0004 val_acc=0.9999  (best, saved)
+```
+Colab ngắt sau đó. `runs/r1b/2026-11-11_13-17-16/fgc_checkpoints/__global__.pt` = **epoch 3**.
+- **Không phải lỗi**: đã loại rò rỉ (split theo ảnh, giao nhau 0). DigitizePID tổng hợp + cân bằng →
+  closed-set quá dễ. Đề thi C chỉ còn là mốc ("closed-set đã bão hoà"), không phải bằng chứng.
+- **Hệ quả cho code**: chọn checkpoint theo `val_acc` đã chết từ epoch 3 (không thể vượt 0.9999).
+  ✅ **Đã quyết + sửa 2026-11-13** (PLAN "Quyết định 2026-11-13 — chọn checkpoint"): R1a và R1b so
+  ở **cùng epoch 3**; không resume R1b; `fgc_train` ghi `.last.pt` mỗi epoch và `.ep<N>.pt` theo
+  `++fgc.save_epochs`; R1a train 5 epoch.
+- Đã copy sang `runs/encoders/__global__.pt` và `__global_ep3__.pt` (bản giữ lại, vì
+  `__global__.pt` sẽ bị ghi đè sau resume).
+- ~~**Bẫy notebook**: `finalize()` định nghĩa trong ô 5b~~ → ✅ 2026-11-13: định nghĩa ở cell 4b
+  riêng, lấy checkpoint epoch `CMP_EPOCH` của run.
+
+### R2 — prototype separation (epoch 3, 1 view, imgsz 128, chưa (d))
+`mean off-diagonal cos=0.245, max=0.989 (pump_general vs vessel_spherical)`
+- 861 cặp: >0.95: 7 · >0.9: 12 · >0.85: 17 · >0.8: 22.
+- Trung bình trong nhóm thấp: valve 0.282 (36 cặp), vessel 0.241, heat_exchanger 0.212,
+  blind_disc 0.256, piping 0.286 → phần lớn không gian dùng được.
+- **B4: mean ĐẠT (< 0.6), max KHÔNG ĐẠT (> 0.8).** Lỗi dồn vào HAI CỤM:
+
+**Cụm 1 — hình tròn (toàn H tự nhiên):** pump_general, vessel_spherical, compressor_vacuum,
+pump_diaphragm (đôi một 0.959–0.989), viewing_glass (~0.88 với cả 4); thêm pump_centrifugal —
+compressor_centrifugal 0.939. Encoder thấy "hình tròn", bỏ qua đường bên trong.
+Rủi ro thêm: bong bóng ISA (h_out, phải ra "Other") cũng là hình tròn → dễ khớp nhầm cụm này.
+
+**Cụm 2 — van hình nơ (có lớp S: valve_globe ← S3):** valve_globe — valve_butterfly **0.981**; check_valve_globe —
+check_valve_swing 0.921; check_valve_swing với globe/butterfly 0.90–0.91. Mỗi cặp khác nhau đúng
+ở **vạch đứng mảnh xuyên chấm tròn**.
+
+### Nhóm S/V/H của các cặp sát nhau (R1b, đối chiếu `symbol_map.csv`; S/V/H = 10/6/26)
+| Cặp | cos | Nhóm |
+|---|---|---|
+| valve_globe — valve_butterfly | 0.981 | S — V (S6 = VARIANT) |
+| check_valve_globe — check_valve_swing | 0.921 | H — H (cả hai có mẫu trên OPEN100-ISO) |
+| check_valve_general — breather_valve | 0.918 | V — H |
+| valve_globe / butterfly — check_valve_swing | 0.90–0.91 | S/V — H |
+| valve_general — check_valve_general | 0.857 | S — V |
+| cụm tròn (bơm, máy nén, bình cầu, kính quan sát) | 0.88–0.989 | H — H |
+
+**Không có cặp S–S nào sát: S–S gần nhất 0.389** (valve_general — valve_needle). Lỗi dồn vào V/H,
+tức phần "chuyển sang ISO" và "mở rộng", không phải lõi. Theo B4 (max ≥ 0.9 → xem PNG): đã xem,
+các cặp KHÔNG giống nhau với mắt người → giới hạn chuyển giao của encoder.
+
+### Chẩn đoán cụm van — ĐÃ XÁC NHẬN 2026-11-12: đặc điểm không cộng dồn
+| Cặp | khác nhau ở | cos |
+|---|---|---|
+| valve_gate — valve_general | vạch (không chấm) | **0.133** |
+| valve_globe — valve_general | chấm | 0.262 |
+| valve_globe — valve_gate | chấm + vạch | 0.122 |
+| valve_globe — valve_butterfly | vạch, khi ĐÃ có chấm | **0.981** |
+- DigitizePID có "nơ + vạch" (S1 gate) và "nơ + chấm" (S3 globe) nhưng không lớp nào có cả hai →
+  encoder học vạch và chấm riêng lẻ, không học rằng vạch vẫn có nghĩa khi có chấm. Cặp
+  check_valve_globe/swing cùng khuôn (khác nhau ở vạch, cả hai có chấm).
+- Phát hiện cho luận văn: encoder chỉ chuyển được đặc điểm từng mang tính phân biệt trong dữ liệu
+  train, và các đặc điểm đó KHÔNG cộng dồn thành tổ hợp chưa thấy.
+- ĐÃ LOẠI: tiền xử lý (ở 128 px chi tiết còn rõ); giả thuyết "vạch = ống" (S1/S4 tách 0.133 →
+  encoder có nhìn vạch); rò rỉ; mất cân bằng (`balanced_sampler: true` + dữ liệu cân bằng).
+- (d) không giải quyết cụm van. Cụm tròn: nhiều khả năng cùng cơ chế, chưa kiểm riêng.
+- `build_eval_transform` = `Resize((128,128))` ép vuông, không giữ tỉ lệ — áp như nhau cho crop và
+  template nên không gây lệch.
+
+### Lề template ≠ lề crop (code, 2026-11-12)
+- `iso_prototypes.py` KHÔNG thêm lề: template nhúng sát bbox vector (ký hiệu chiếm 100% khung),
+  crop từ B1c = box + 10% mỗi bên (~83%). Query view 1.25 còn nới thêm.
+- `template_views.scales=[1.2]` (= +10% mỗi bên theo `refit_box`, khớp `CROP_MARGIN_FRAC`):
+  separation mean 0.240, max 0.990 (valve_globe vs valve_butterfly) — gần như y hệt scale 1.0.
+  → lề KHÔNG đổi separation; chọn 1.0 hay 1.2 phải dựa vào P2 thu nhỏ trên `val_sel`.
+- File: `runs/encoders/iso_prototypes.pt` (scale 1.0), `iso_prototypes_m12.pt` (scale 1.2).
+- Nếu 1.2 tốt hơn: đổi mặc định = quyết định mới, sửa quyết định thiết kế GĐ2 số 1 (Mục 2).
+
+### Khung luận văn — ĐÃ QUYẾT 2026-11-12: 40/40/20
+Đề thi C bão hoà (Stage 2 0.9999, Stage 1 coarse mAP50 0.995) → user đổi trọng số từ 70/20/10 sang
+**40 lõi C / 40 chuyển sang ISO (P4, P2) / 20 mở rộng (P1, "Other")**. C vẫn báo cáo, nói rõ đã bão
+hoà, thêm mAP50:95. Còn mở: có chấm C trên ảnh DigitizePID suy giảm không. Hệ quả: đường găng =
+B6a/B6b/B6d (P4); R1a bắt buộc; chia B nên chạy nếu còn quota; phân tích cụm (Mục này) thành một
+mục chính của luận văn; B4a nên làm.
+
+### Ánh xạ S6 — ĐÃ CÓ, KHÔNG CẦN DUYỆT LẠI
+S6 = **VARIANT** của valve_butterfly trong `symbol_map.csv` (user xếp từ trước, xác nhận lại
+2026-11-12 sau khi xem crop). Bản trước của mục này ghi "cần duyệt" là do AI chưa đọc
+`symbol_map.csv`. Chia A và cách đếm S/V/H không đổi.
+Bài học: tiêu chí ISO vs VARIANT nên gồm cả "các chi tiết phân biệt lớp ISO này với lớp ISO lân
+cận có mặt trong hình DigitizePID" — dùng khi rà lại các lớp khác nếu cần.
+
+### P2 thu nhỏ — XONG 2026-11-12 (chi tiết: PLAN "Vấn đề mở 2026-11-12")
+Script `p2_mini.py` (đặt ở `/content/`, chạy với `--max-per-class 50`; CSV ở `runs/p2_mini_q50/`).
+- Nhóm S: **7/10 lớp đúng** (scale 1.0). Sai: S3 → valve_butterfly (cụm van), S24 → `pipeline`
+  (★ đường thẳng hút crop có ống), S21 → agitator (glyph khác template, own_cos 0.29).
+- Nhóm V: **8/9 lớp VARIANT sai** (chỉ S22 hx_coil đúng). ArcFace train S2/S13 tách khỏi S5, S12
+  tách khỏi S4 → đẩy VARIANT ra xa ★ của chính nó. Có lỗi tự tin tới 0.93 → τ không chặn được.
+- Lề template: macro S 0.70 (1.0) vs 0.67 (1.2); 1.2 sửa một phần S3 nhưng làm hỏng S10.
+- Mỗi lớp ≈ một điểm dữ liệu (50 crop cùng một dự đoán) → báo cáo THEO LỚP; không cần chạy đủ crop.
+
+### Chờ user quyết (PLAN "Vấn đề mở 2026-11-12")
+- Điểm 4: bỏ ★ `pipeline` (và template thuần đường kẻ) khỏi thư mục prototype?
+- Điểm 5: S21 giữ ISO hay đổi VARIANT? (xem crop cạnh template mặt bích, như đã làm với S6)
+- Điểm 6: có train bằng nhãn theo nghĩa ISO (gộp S2, S13 → S5; S12 → S4) không? Chưa làm.
+- Có chấm C trên ảnh DigitizePID suy giảm không; có làm P3 (ASU) không.
+
+### Việc tiếp theo (thứ tự)
+1. Commit HANDOFF + PLAN mới, hai file split (`digitizepid_splits.json`, `digitizepid_val_test.json`)
+   và `p2_mini.py` (đề xuất `scripts/`).
+2. Thử prototype trung bình hai scale: `'oneshot.template_views.scales=[1.0,1.2]'` →
+   `iso_prototypes_m10_12.pt`; chạy lại `p2_mini.py` với 3 file, `--max-per-class 50`. Chốt lề.
+3. User quyết điểm 4, 5 ở trên (đổi `symbol_map.csv` / thư mục prototype nếu cần) → chạy lại R2 +
+   P2 thu nhỏ để có số nền mới.
+4. ✅ B5b (2026-11-13): `check_b5.py` kiểm luật VARIANT, h_extra, không rút cạn họ; chia A 0 lỗi.
+5. ✅ Quyết 2026-11-13: R1b dùng epoch 3, không resume; R1a so ở cùng epoch 3 (`fgc_train` +
+   notebook đã sửa).
+6. Train R1a (chia A): **sẵn sàng** sau khi push code (notebook mới cần `holdout_classes` 3 danh
+   sách + `fgc.save_epochs`). Runbook §5d.
+7. Code đường găng P4: B6a, B6b (P2/P4, AUROC/OSCR, đường quét τ, chọn τ trên `val_sel`), B6d.
+   ✅ B6c (2026-11-13): `evaluate eval.mode=fgc_only` cho `__global__.pt`, YOLO fine chấm bằng
+   `det_only detector.label_level=fine`; còn lọc crop theo `test` (PLAN B6c "Chưa làm").
+   ✅ B6a (2026-11-13): `++fgc.oneshot=true` → `derived/detections_oneshot/` (điểm chưa cắt ngưỡng
+   cho B6b). Còn: B6b, B6d.
+8. (Nếu rẻ) B4a: separation encoder chỉ-ImageNet.
+9. Chưa đụng `test` cho tới khi chốt checkpoint, τ, lề template, (d).
+
+Đã xong: tách val; S6 = VARIANT (có sẵn); loại giả thuyết "vạch = ống"; R2; P2 thu nhỏ.
+
+### Dự đoán đã ghi trước khi có số (để đối chiếu)
+- val_acc 0.95–0.99 → thực tế 0.9999 (dễ hơn dự đoán).
+- mean separation 0.5–0.7 → thực tế 0.245 (tốt hơn nhiều).
+- cặp gần nhất trong họ van > 0.85 → đúng 0.981, nhưng cặp gần nhất toàn cục là hình tròn (sai).
+
+**Dự đoán cho P1 / R1a (ghi 2026-11-13, trước khi train R1a):**
+- Lớp `h_in` mà R1b đã sai trên `val_sel` (S3 → valve_butterfly) vẫn sai ở R1a: không mang thông
+  tin về khả năng nhận lớp chưa thấy. P1 đọc theo **từng lớp, so cặp R1b ↔ R1a**; bằng chứng là
+  các lớp đúng ở R1b mà sai ở R1a. Không đổi H vì kết quả này (H đã chốt).
+- `h_out` S27 (`isa_bubble_ro`, hình tròn) khớp nhầm cụm template tròn (pump/vessel/compressor)
+  với cosine cao → cổng "Other" khó chặn. S30 (`isa_square_sta`, hình vuông) ít rủi ro hơn.
+- `h_extra` không thi, nhưng loại S2/S13/S12 khỏi train có thể làm S5/S4 (`h_in`) khớp ★ ISO dễ
+  hơn ở R1a so với R1b (không còn lớp anh em bị ArcFace đẩy ra xa — vấn đề mở 6).
+
+### Stage 1 — ĐÃ CHỐT trong PLAN (Quyết định 2026-11-09 mục 10)
+Giữ detector 8 lớp coarse + `agnostic_merge` lúc suy luận (B6e); detector 1 lớp là ablation (giả
+thuyết OLN). Bản trước của mục này ghi "chưa chốt" là do AI chưa đọc PLAN. Vẫn đo recall Stage 1
+theo S/V/H trên OPEN100-ISO.
+
+---
+
 ## 7. MÔI TRƯỜNG / LƯU Ý VẬN HÀNH
 
 - `uv run pytest` / `uv run ruff check src/ tests/ scripts/` — phải xanh trước khi commit.
@@ -389,5 +561,9 @@ bình ± độ lệch trên hai bộ):
 - Repo ĐÃ là git (user tự quản lý branch/commit). ĐỪNG `git init`/`rm -rf .git` (đã có lần nhầm).
 - Colab: ảnh/checkpoint trên Drive; code qua git; copy tiles/crops → /content local trước train.
 - `fgc.route.other_min_cosine=0.35` là PLACEHOLDER — PHẢI calibrate trên val thật.
+  **2026-11-12**: `oneshot.other_min_cosine` chọn trên `val_sel` theo quy tắc A (τ@TPR95) và B
+  (bỏ-prototype + crop OOV còn train làm "lạ"); KHÔNG chọn trên `test` hay OPEN100-ISO.
+- Kiểm tra chỉ đọc file (split, separation, xem template) chạy được trên runtime CPU; đổi
+  runtime = reset phiên → chạy lại mục 1–3 notebook (crop có sẵn zip trên Drive, chỉ giải nén).
 - Ngôn ngữ làm việc: tiếng Việt. User là tác giả luận văn, có chuyên môn P&ID (nhận diện symbol
   giỏi hơn AI — luôn để user duyệt symbol, đừng tự đoán valve loại nào).

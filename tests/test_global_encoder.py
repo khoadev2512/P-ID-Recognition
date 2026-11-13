@@ -9,7 +9,7 @@ reach three stages consistently:
 
   pid-prep-crops   extract crops for EVERY symbol, not only fgc_group ones
   pid-fgc-train    train one head (GLOBAL_GROUP) over the whole fine vocabulary
-  pid-fgc-infer    refuse, with a message pointing at the one-shot path
+  pid-fgc-infer    load __global__.pt (closed-set, PLAN B6c)
 
 These tests pin the wiring, not the training: a class silently missing from the crop
 tree, or a group loop that still iterates fgc_groups, would both yield an encoder whose
@@ -218,15 +218,16 @@ def test_wanted_anns_on_an_image_with_no_symbols(tmp_path):
 # ------------------------------------------------------------------ #
 
 
-def test_fgc_infer_refuses_a_global_encoder_and_names_the_alternative(tmp_path):
-    """Without this guard the stage would fail on a missing valve.pt, which says
-    nothing about the real cause."""
+def test_fgc_infer_takes_a_global_encoder_and_asks_for_its_checkpoint(tmp_path):
+    """Closed-set inference with __global__.pt (PLAN B6c; tests/test_closed_set_global.py).
+    A ckpt_dir without it is reported by name, not as a missing valve.pt."""
     pipeline = _pipeline(FGCInferPipeline, tmp_path, global_encoder=True)
-    with pytest.raises(NotImplementedError) as excinfo:
+    with pytest.raises(ValueError, match="fgc.ckpt_dir"):
         pipeline.validate()
-    message = str(excinfo.value)
-    assert "pid-iso-prototypes" in message
-    assert "global_encoder=false" in message
+    (tmp_path / "ckpt").mkdir()
+    pipeline.cfg.fgc.ckpt_dir = str(tmp_path / "ckpt")
+    with pytest.raises(FileNotFoundError, match="__global__.pt"):
+        pipeline.validate()
 
 
 def test_fgc_infer_still_reports_a_missing_ckpt_dir_in_the_default_mode(tmp_path):

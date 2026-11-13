@@ -38,7 +38,11 @@ from PIL import Image
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_eval_transform
-from utils.model import checkpoint_excluded_classes, load_arcface_encoder
+from utils.model import (
+    checkpoint_excluded_classes,
+    checkpoint_sha256,
+    load_arcface_encoder,
+)
 from utils.oneshot import ViewSpec, build_prototypes
 
 logger = logging.getLogger(__name__)
@@ -224,6 +228,7 @@ class IsoPrototypePipeline(BasePipeline):
                 "backbone": str(cfg.fgc.backbone),
                 "embed_dim": int(cfg.fgc.arcface.embed_dim),
                 "imgsz": int(cfg.fgc.imgsz),
+                "encoder_sha256": checkpoint_sha256(ckpt),
                 "encoder_train_classes": train_classes,
                 # Leave-classes-out encoders (protocol P1) must be told apart from
                 # full-vocabulary ones by the file alone, not by its name on Drive.

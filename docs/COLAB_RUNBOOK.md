@@ -115,9 +115,9 @@ Cạm bẫy:
   bước prototypes phải trỏ `oneshot.symbols_dir` và `oneshot.vocab_csv` vào repo đã clone.
 - **Resume R1a phải dùng cùng danh sách H.** Nếu khác, code dừng: head cùng kích thước nhưng
   cột sẽ mang nghĩa của class khác.
-- **Checkpoint chỉ ghi khi `val_acc` tăng.** Phiên resume nào không tăng `val_acc` thì không ghi
-  checkpoint mới, nên phiên sau resume lại từ epoch tốt nhất cũ và mất các epoch đã chạy. Vì vậy
-  nên chạy hết 60 epoch trong một phiên nếu kịp: một epoch khoảng 59k crop.
+- **Checkpoint (2026-11-13)**: `__global__.last.pt` mỗi epoch (resume tiếp từ đó, mất tối đa một
+  epoch); `__global__.ep<N>.pt` ở các epoch trong `++fgc.save_epochs`; `__global__.pt` = best
+  `val_acc`, **không dùng để so** (val_acc bão hoà từ epoch 1). R1a/R1b so ở epoch 3 (`CMP_EPOCH`).
 - **`evaluate` chưa dùng được với encoder toàn cục.** Nó lặp theo `fgc_groups` nên bỏ qua im lặng.
   Phần đánh giá one-shot là B6b.
 
@@ -143,10 +143,11 @@ R1b = encoder đủ 32 lớp, phần lõi luận văn; chạy **trước** R1a. 
 | 2 | Code + deps | **sửa `REPO_URL`** thành repo của bạn; clone + cài deps | dòng `git log` cuối là commit mới nhất |
 | 3 | Crop toàn cục | phiên đầu: copy ảnh, cắt crop định dạng mới, zip `crops_fgc_ctx.zip` lên Drive; phiên sau: chỉ giải nén | `train` và `val` đều 32 lớp, có `_boxes.csv`; ~47.7k crop train, ~11.8k val |
 | 4 | Danh sách H + `AUG` + `LOADER` | đọc `oneshot.holdout` (R1b không dùng H nhưng cần `AUG`, `LOADER`) | in H_in 6, H_out 4, h_extra 3; `AUG`, `LOADER` |
-| **6** | **R1b train** | 60 epoch, batch 128, `$AUG $LOADER` | log `[fgc/__global__] 32 fine classes`; loss giảm |
+| **6** | **R1b train** | (2026-11-12: 60 epoch; nay `EPOCHS`=5 + `"$SAVE"`) batch 128, `$AUG $LOADER` | log `[fgc/__global__] 32 fine classes`; loss giảm |
 | 6a | Resume R1b | chỉ khi Colab ngắt giữa chừng; tự lấy run mới nhất, cùng `AUG` | in "resume từ ..." |
 | 6b | Finalize | kiểm checkpoint đủ 32 lớp, không lớp nào bị loại → copy `runs/encoders/__global__.pt` | in số lớp, epoch, `val_acc` |
 | 7 | R2 (tuỳ chọn) | prototype ISO cho `__global__.pt` (bỏ qua `_lo` chưa có) | dòng `prototype separation: mean …, max …` |
+| 8 | Eval C (2026-11-13) | `evaluate eval.mode=fgc_only` trên crop val, không cần detector | in top-1, top-3, macro-F1, tỉ lệ nhảy họ, 5 lớp F1 thấp nhất; `runs/eval_c/<ts>/metrics.json` |
 
 **3. Cái gì là bình thường**
 - Phiên đầu, mục 3 mất thêm thời gian copy ~1.2 GB ảnh và cắt ~59.5k crop. Zip crop khoảng 1 GB
@@ -155,7 +156,7 @@ R1b = encoder đủ 32 lớp, phần lõi luận văn; chạy **trước** R1a. 
   epoch **chưa đo trên Colab** (local: ~1.2 ms nạp một crop) — ghi lại thời gian epoch đầu để
   ước lượng có kịp 60 epoch trong một phiên không.
 - `val_acc` closed-set 32 lớp nên cao (plan B3: > 0.95). Thấp hơn nhiều là dấu hiệu lỗi dữ liệu.
-- Checkpoint chỉ ghi khi `val_acc` tăng (xem cạm bẫy ở §5b).
+- Checkpoint: xem §5b (`.last.pt`, `.ep<N>.pt`; 2026-11-13).
 
 **4. Không làm**
 - Không xem kết quả từng lớp rồi sửa `oneshot.holdout`: H đã chốt (HANDOFF §6c).
@@ -163,7 +164,32 @@ R1b = encoder đủ 32 lớp, phần lõi luận văn; chạy **trước** R1a. 
 - Không dùng zip crop cũ (`crops_fgc.zip`, `crops_fgc_global.zip`).
 
 **5. Gửi lại sau khi chạy**: `val_acc` cuối + epoch tốt nhất, thời gian một epoch, đường dẫn
-`runs/encoders/__global__.pt`, dòng `prototype separation` nếu đã chạy mục 7, và lỗi nếu có.
+`runs/encoders/__global__.pt`, dòng `prototype separation` nếu đã chạy mục 7, dòng tóm tắt của
+mục 8 + `metrics.json` + `confusion___global__.png`, và lỗi nếu có.
+
+## 5d. Chạy R1a — từng bước (2026-11-13)
+
+R1b **đã xong** (2026-11-12, epoch 3 → `runs/encoders/__global__.pt`). R1a = encoder không thấy
+`h_in + h_out + h_extra` (13 lớp), cho protocol P1. Quy tắc checkpoint chốt trước: **so ở epoch 3**
+(PLAN "Quyết định 2026-11-13 — chọn checkpoint").
+
+**Trước khi mở Colab**: push nhánh (notebook cần `holdout_classes` 3 danh sách + `fgc.save_epochs`).
+
+| Mục | Cell | Việc | Kiểm |
+|---|---|---|---|
+| 1–3 | GPU, code, crop | như §5c (crop: chỉ giải nén zip) | dòng `git log` là commit mới nhất; 32 lớp ở cả hai split |
+| 4 | H + `AUG` + epoch | đọc `oneshot.holdout`; đặt `CMP_EPOCH=3`, `EPOCHS=5`, `SAVE` | H_in 6, H_out 4, h_extra 3; "R1a train trên 19/32 class" |
+| 4b | `finalize` | chỉ định nghĩa hàm | không in gì |
+| **5** | **R1a train** | 5 epoch, `$AUG $LOADER "$SAVE"`, `fgc.exclude_classes=$EXCLUDE` | log `holding out 13 classes`, `19 fine classes`; `epoch 3 -> saved …ep3.pt` |
+| 5a | Resume R1a | chỉ khi Colab ngắt; tự lấy phiên mới nhất, train tiếp từ `.last.pt` | in "resume từ …"; log `resuming from …last.pt` |
+| 5b | Finalize | lấy `__global__.ep3.pt`, kiểm không rò rỉ → `runs/encoders/__global_lo__.pt` | in 19 class, **epoch 3** |
+| 7 | R2 | prototype cho cả `__global_lo__.pt` và `__global__.pt` | hai dòng `prototype separation` |
+
+**Không làm**: không đổi `CMP_EPOCH` sau khi thấy số; không lấy `__global__.pt` (best `val_acc`) của
+R1a; không xem số P1 rồi sửa H.
+
+**Gửi lại**: log 5 epoch (loss, `val_acc`, thời gian/epoch), dòng in của 5b, hai dòng `prototype
+separation` của mục 7, lỗi nếu có.
 
 ## 6. Infer + eval (sau khi train xong)
 
@@ -175,6 +201,26 @@ FGC=/content/drive/MyDrive/pid/runs/<ts>/fgc_checkpoints
 !uv run python src/run_pipeline.py fgc    --infer fgc.metric_learning=true fgc.ckpt_dir=$FGC
 !uv run python src/run_pipeline.py evaluate eval.mode=det_plus_fgc
 ```
+
+Encoder toàn cục (closed-set, protocol C; PLAN B6c, 2026-11-13):
+
+```python
+ENC=/content/drive/MyDrive/pid/runs/encoders            # chứa __global__.pt (mục 6b notebook)
+GLOBAL="fgc.global_encoder=true fgc.metric_learning=true fgc.ckpt_dir=$ENC"
+
+# Chỉ Stage 2, trên crop GT (không cần detector):
+!uv run python src/run_pipeline.py evaluate eval.mode=fgc_only eval.split=val $GLOBAL
+# End-to-end, mAP 32 lớp fine (detector coarse → __global__.pt):
+!uv run python src/run_pipeline.py detect --infer detector.ckpt=$BEST eval.split=val
+!uv run python src/run_pipeline.py fgc --infer eval.split=val $GLOBAL   # ++fgc.route.by_coarse=true: ablation
+!uv run python src/run_pipeline.py evaluate eval.mode=det_plus_fgc eval.split=val $GLOBAL
+# Baseline YOLO một-stage 32 lớp fine:
+!uv run python src/run_pipeline.py detect --infer detector.ckpt=$BEST_FINE detector.label_level=fine eval.split=val
+!uv run python src/run_pipeline.py evaluate eval.mode=det_only detector.label_level=fine eval.split=val
+```
+
+Hai lượt `detect --infer` ghi cùng `derived/detections/<split>/`: chấm xong detector này rồi mới
+chạy detector kia. `eval.split=val` vì DigitizePID không có split `test`.
 
 ## Lưu ý / cạm bẫy
 

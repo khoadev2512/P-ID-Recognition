@@ -249,6 +249,7 @@ def test_fgc_infer_classifies_the_box_with_the_margin():
     seen = {}
     pipe = FGCInferPipeline.__new__(FGCInferPipeline)
     pipe.cfg = OmegaConf.create({"fgc": {"route": {"min_score": 0.25}}})
+    pipe._global = False
 
     class _Map:
         def needs_fgc(self, coarse):

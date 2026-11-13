@@ -259,17 +259,27 @@ def test_resume_with_the_same_exclusion_continues(tmp_path):
 from utils.oneshot import holdout_classes  # noqa: E402
 
 
-def _holdout_cfg(h_in, h_out):
-    return OmegaConf.create({"oneshot": {"holdout": {"h_in": h_in, "h_out": h_out}}})
+def _holdout_cfg(h_in, h_out, h_extra=None):
+    node = {"h_in": h_in, "h_out": h_out, "h_extra": h_extra}
+    return OmegaConf.create({"oneshot": {"holdout": node}})
 
 
 def test_holdout_lists_are_read_in_order():
-    assert holdout_classes(_holdout_cfg(["b", "a"], ["c"])) == (["b", "a"], ["c"])
+    held = holdout_classes(_holdout_cfg(["b", "a"], ["c"], ["d"]))
+    assert held == (["b", "a"], ["c"], ["d"])
+    assert held.tested == ["b", "a", "c"]  # P1 test set: never h_extra
+    assert held.excluded == ["b", "a", "c", "d"]  # R1a's fgc.exclude_classes
 
 
 def test_holdout_absent_or_null_is_empty():
-    assert holdout_classes(OmegaConf.create({"oneshot": {}})) == ([], [])
-    assert holdout_classes(_holdout_cfg(None, None)) == ([], [])
+    assert holdout_classes(OmegaConf.create({"oneshot": {}})) == ([], [], [])
+    assert holdout_classes(_holdout_cfg(None, None)) == ([], [], [])
+
+
+@pytest.mark.parametrize("h_in, h_out", [(["a", "x"], ["c"]), (["a"], ["c", "x"])])
+def test_h_extra_is_never_also_tested(h_in, h_out):
+    with pytest.raises(ValueError, match="h_extra"):
+        holdout_classes(_holdout_cfg(h_in, h_out, ["x"]))
 
 
 def test_a_class_cannot_be_both_in_vocab_and_out_of_vocab():
@@ -288,5 +298,59 @@ def test_the_shipped_config_holdout_is_valid():
     from pathlib import Path
 
     cfg = OmegaConf.load(Path(__file__).resolve().parents[1] / "configs" / "config.yaml")
-    h_in, h_out = holdout_classes(cfg)
-    assert isinstance(h_in, list) and isinstance(h_out, list)
+    h_in, h_out, h_extra = holdout_classes(cfg)
+    assert all(isinstance(x, list) for x in (h_in, h_out, h_extra))
+
+
+# ------------------------------------------------------------------ #
+# Fixed-epoch checkpoints (PLAN 2026-11-13): val_acc saturates, so R1a and R1b are
+# compared at an epoch fixed in advance, not at "best val_acc".
+# ------------------------------------------------------------------ #
+
+
+def test_save_epochs_writes_one_checkpoint_per_listed_epoch_and_last(tmp_path):
+    _write_crops(tmp_path)
+    cfg = _cfg(tmp_path, _HELD_OUT)
+    cfg.fgc.epochs = 3
+    cfg.fgc.save_epochs = [1, 3, 7]  # 7 > epochs: warned, never written
+    FGCTrainPipeline(cfg).run()
+    ckpt_dir = tmp_path / "runs" / "fgc_checkpoints"
+
+    names = sorted(p.name for p in ckpt_dir.glob("*.pt"))
+    assert names == sorted(
+        [
+            f"{GLOBAL_GROUP}.pt",
+            f"{GLOBAL_GROUP}.last.pt",
+            f"{GLOBAL_GROUP}.ep1.pt",
+            f"{GLOBAL_GROUP}.ep3.pt",
+        ]
+    )
+    for name, epoch in ((f"{GLOBAL_GROUP}.ep1.pt", 0), (f"{GLOBAL_GROUP}.ep3.pt", 2)):
+        state = torch.load(ckpt_dir / name, map_location="cpu", weights_only=False)
+        assert state["epoch"] == epoch
+        assert state["excluded_classes"] == _HELD_OUT
+        assert "class_centers" in state
+    last = torch.load(ckpt_dir / f"{GLOBAL_GROUP}.last.pt", map_location="cpu", weights_only=False)
+    assert last["epoch"] == 2
+    assert last["best_val_acc"] >= last["val_acc"]
+
+    # An epoch checkpoint loads like any encoder (B4a prototypes, P1 eval).
+    encoder, fine_classes = load_arcface_encoder(cfg, ckpt_dir / f"{GLOBAL_GROUP}.ep3.pt")
+    assert fine_classes == [name for name in _FINE if name not in _HELD_OUT]
+
+
+def test_resume_continues_from_last_not_from_best(tmp_path):
+    _write_crops(tmp_path)
+    cfg = _cfg(tmp_path, _HELD_OUT)
+    cfg.fgc.epochs = 2
+    FGCTrainPipeline(cfg).run()
+    first = tmp_path / "runs" / "fgc_checkpoints"
+
+    cfg2 = _cfg(tmp_path, _HELD_OUT)
+    cfg2.run_dir = str(tmp_path / "runs2")
+    cfg2.fgc.resume_from = str(first)
+    cfg2.fgc.epochs = 3
+    cfg2.fgc.save_epochs = [3]
+    FGCTrainPipeline(cfg2).run()
+    ep3 = tmp_path / "runs2" / "fgc_checkpoints" / f"{GLOBAL_GROUP}.ep3.pt"
+    assert torch.load(ep3, map_location="cpu", weights_only=False)["epoch"] == 2

@@ -127,6 +127,16 @@ class FGCTrainPipeline(BasePipeline):
         best_val_acc = -1.0
         ckpt_path = ckpt_root / f"{group}.pt"
         epochs = int(cfg.fgc.epochs)
+        # 1-based epochs that get their own checkpoint whatever val_acc does.
+        save_epochs = {int(e) for e in (cfg.fgc.get("save_epochs", None) or [])}
+        if any(e > epochs for e in save_epochs):
+            logger.warning(
+                "[fgc/%s] fgc.save_epochs=%s has epochs beyond fgc.epochs=%d; those are "
+                "never saved.",
+                group,
+                sorted(save_epochs),
+                epochs,
+            )
 
         # Interrupted-training resume (Colab split sessions): reload this group's model +
         # optimizer + epoch from an earlier run so training continues mid-schedule rather
@@ -175,24 +185,36 @@ class FGCTrainPipeline(BasePipeline):
                 val_acc,
             )
 
+            checkpoint = {
+                "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "epoch": epoch,
+                "val_acc": val_acc,
+                "best_val_acc": max(best_val_acc, val_acc),
+                "fine_classes": fine_classes,
+                # Leave-classes-out provenance: which of this group's classes the
+                # encoder never saw. The unseen-class eval (protocol P1) checks its
+                # test classes against fine_classes; this records the intent.
+                "excluded_classes": held_out,
+            }
+            # ArcFace: persist the L2-normalized class centers so fgc_infer can run
+            # the "Other" reject gate without re-deriving them (and so a checkpoint
+            # is self-describing about whether it supports the gate at all).
+            if isinstance(model, ArcFaceModel):
+                checkpoint["class_centers"] = model.class_centers().cpu()
+
+            # <group>.last.pt every epoch: a Colab disconnect loses at most one epoch,
+            # and _maybe_resume continues from it.
+            torch.save(checkpoint, ckpt_root / f"{group}.last.pt")
+            # <group>.ep<N>.pt at the epochs fixed in advance: on DigitizePID val_acc
+            # saturates at epoch 1, so best-by-val_acc picks an arbitrary epoch. R1a
+            # and R1b are compared at the same fixed epoch (PLAN 2026-11-13).
+            if epoch + 1 in save_epochs:
+                ep_path = ckpt_root / f"{group}.ep{epoch + 1}.pt"
+                torch.save(checkpoint, ep_path)
+                logger.info("[fgc/%s] epoch %d -> saved %s", group, epoch + 1, ep_path)
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
-                checkpoint = {
-                    "model": model.state_dict(),
-                    "optimizer": optimizer.state_dict(),
-                    "epoch": epoch,
-                    "val_acc": val_acc,
-                    "fine_classes": fine_classes,
-                    # Leave-classes-out provenance: which of this group's classes the
-                    # encoder never saw. The unseen-class eval (protocol P1) checks its
-                    # test classes against fine_classes; this records the intent.
-                    "excluded_classes": held_out,
-                }
-                # ArcFace: persist the L2-normalized class centers so fgc_infer can run
-                # the "Other" reject gate without re-deriving them (and so a checkpoint
-                # is self-describing about whether it supports the gate at all).
-                if isinstance(model, ArcFaceModel):
-                    checkpoint["class_centers"] = model.class_centers().cpu()
                 torch.save(checkpoint, ckpt_path)
                 logger.info("[fgc/%s] new best val_acc=%.4f -> saved %s", group, val_acc, ckpt_path)
 
@@ -209,7 +231,7 @@ class FGCTrainPipeline(BasePipeline):
         best_val_acc: float,
         fine_classes: list[str] | None = None,
     ) -> tuple[int, float]:
-        """Load an earlier <group>.pt from cfg.fgc.resume_from, if set and present.
+        """Load an earlier <group>.last.pt (else <group>.pt) from cfg.fgc.resume_from.
 
         Restores model + optimizer state so the LR/momentum picks up where it left off,
         and returns (start_epoch, best_val_acc) so the loop continues from the next epoch
@@ -220,7 +242,12 @@ class FGCTrainPipeline(BasePipeline):
         if resume_from is None:
             return 0, best_val_acc
 
-        ckpt_path = Path(str(resume_from)) / f"{group}.pt"
+        # <group>.last.pt (every epoch) is newer than <group>.pt (best only); runs
+        # from before it existed have only the latter.
+        resume_dir = Path(str(resume_from))
+        ckpt_path = resume_dir / f"{group}.last.pt"
+        if not ckpt_path.exists():
+            ckpt_path = resume_dir / f"{group}.pt"
         if not ckpt_path.exists():
             logger.info(
                 "[fgc/%s] fgc.resume_from set but no %s; training this group from scratch.",
@@ -245,7 +272,7 @@ class FGCTrainPipeline(BasePipeline):
             optimizer.load_state_dict(state["optimizer"])
         # Checkpoints store the 0-based epoch they were saved at; resume on the next one.
         start_epoch = int(state.get("epoch", -1)) + 1
-        prev_best = float(state.get("val_acc", best_val_acc))
+        prev_best = float(state.get("best_val_acc", state.get("val_acc", best_val_acc)))
         logger.info(
             "[fgc/%s] resuming from %s (epoch=%d, val_acc=%.4f).",
             group,

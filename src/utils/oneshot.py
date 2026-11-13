@@ -45,7 +45,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import torch
 import torch.nn.functional as F
@@ -296,6 +296,24 @@ class PrototypeDirectory:
             meta={**self.meta, "subset_of": sorted(wanted)},
         )
 
+    def without(self, names: list[str] | set[str]) -> PrototypeDirectory:
+        """A directory with the named prototypes removed (e.g. line-only templates that
+        would absorb any crop containing a pipe). An unknown name is an error: a typo
+        would otherwise leave the prototype in while looking like an exclusion."""
+        drop = set(names)
+        unknown = drop - set(self.names)
+        if unknown:
+            raise ValueError(f"unknown prototype name(s) {sorted(unknown)}; have {self.names}")
+        keep = [i for i, n in enumerate(self.names) if n not in drop]
+        if not keep:
+            raise ValueError("excluding these prototypes would leave the directory empty")
+        return PrototypeDirectory(
+            names=[self.names[i] for i in keep],
+            embeddings=self.embeddings[keep].clone(),
+            coarse=[self.coarse[i] for i in keep] if self.coarse else [],
+            meta={**self.meta, "excluded": sorted(drop)},
+        )
+
     def cosines(self, embedding: torch.Tensor) -> torch.Tensor:
         """cos to every prototype. (D,) -> (N,); (V, D) -> (V, N). Inputs are
         renormalized defensively so a caller passing raw embeddings still gets cosines."""
@@ -473,24 +491,45 @@ def build_prototypes(
 # ------------------------------------------------------------------ #
 
 
-def holdout_classes(cfg) -> tuple[list[str], list[str]]:
-    """(h_in, h_out) from cfg.oneshot.holdout — the unseen-class lists of protocol P1.
+class Holdout(NamedTuple):
+    """The B5 lists. `h_in` + `h_out` are the P1 test classes (`tested`); `h_extra` are
+    VARIANT classes of an `h_in` symbol, left out of training but never tested (`excluded`
+    is what fgc.exclude_classes gets for R1a)."""
+
+    h_in: list[str]
+    h_out: list[str]
+    h_extra: list[str]
+
+    @property
+    def tested(self) -> list[str]:
+        return self.h_in + self.h_out
+
+    @property
+    def excluded(self) -> list[str]:
+        return self.h_in + self.h_out + self.h_extra
+
+
+def holdout_classes(cfg) -> Holdout:
+    """(h_in, h_out, h_extra) from cfg.oneshot.holdout — the unseen-class lists of P1.
 
     The single source for both the leave-out training run (fgc.exclude_classes is
-    h_in + h_out) and the P1 evaluation, so the two can never disagree about which
-    classes the encoder did not see. A class in both lists is an error: it cannot be
-    an ISO symbol to recognize and an out-of-vocabulary symbol to reject at once.
-    Names are checked against classes.yaml where they are used
-    (utils.classmap.training_fine_classes), not here, since that needs the classmap.
+    `excluded` = h_in + h_out + h_extra) and the P1 evaluation (`tested` = h_in + h_out),
+    so the two can never disagree about which classes the encoder did not see. A class in
+    two lists is an error: it cannot be an ISO symbol to recognize and an out-of-vocabulary
+    symbol to reject at once, and an h_extra class is never tested. Names are checked
+    against classes.yaml where they are used (utils.classmap.training_fine_classes), and
+    the VARIANT rule for h_extra in scripts/check_b5.py, since both need more than cfg.
     """
     node = cfg.oneshot.get("holdout", None) or {}
-    h_in = list(node.get("h_in", None) or [])
-    h_out = list(node.get("h_out", None) or [])
-    for name, lst in (("h_in", h_in), ("h_out", h_out)):
+    lists = {k: list(node.get(k, None) or []) for k in ("h_in", "h_out", "h_extra")}
+    for name, lst in lists.items():
         dupes = sorted({c for c in lst if lst.count(c) > 1})
         if dupes:
             raise ValueError(f"oneshot.holdout.{name} lists {dupes} more than once")
-    both = sorted(set(h_in) & set(h_out))
-    if both:
-        raise ValueError(f"oneshot.holdout: {both} in both h_in and h_out")
-    return h_in, h_out
+    names = list(lists)
+    for i, a in enumerate(names):
+        for b in names[i + 1 :]:
+            both = sorted(set(lists[a]) & set(lists[b]))
+            if both:
+                raise ValueError(f"oneshot.holdout: {both} in both {a} and {b}")
+    return Holdout(**lists)

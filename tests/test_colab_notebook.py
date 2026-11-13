@@ -81,6 +81,32 @@ def test_prototypes_step_is_wired(code_cells):
     assert "oneshot.symbols_dir=$REPO_DATA/iso_symbols_clean" in code
 
 
-def test_group_wise_evaluation_stays_disabled_until_b6b(code_cells):
-    """evaluation.py iterates fgc_groups and would silently skip a global encoder."""
-    assert "run_pipeline.py evaluate" not in _active(code_cells)
+def test_evaluation_scores_the_global_head_closed_set(code_cells):
+    """Protocol C (B6c): without fgc.global_encoder=true evaluation looks for per-group
+    <group>.pt and skips the global encoder; fgc_only needs no detector output."""
+    evals = [c for c in code_cells if "run_pipeline.py evaluate" in _active([c])]
+    assert evals and all(
+        "fgc.global_encoder=true" in _active([c]) and "eval.mode=fgc_only" in _active([c])
+        for c in evals
+    )
+
+
+def test_both_encoders_train_to_the_same_fixed_epochs(code_cells):
+    """val_acc saturates at epoch 1 (R1b, 2026-11-12), so best-by-val_acc would pick an
+    arbitrary epoch: R1a and R1b are compared at one epoch fixed in advance (PLAN
+    2026-11-13), saved by ++fgc.save_epochs whatever val_acc does."""
+    code = _active(code_cells)
+    assert "fgc.epochs=60" not in code
+    train = [c for c in code_cells if "fgc --train" in _active([c])]
+    assert all("fgc.epochs=$EPOCHS" in _active([c]) and '"$SAVE"' in _active([c]) for c in train)
+    assert "CMP_EPOCH = 3" in code and "++fgc.save_epochs=[3," in code
+
+
+def test_finalize_is_defined_apart_from_its_calls(code_cells):
+    """It used to be defined in R1a's 5b cell, which also called it: with R1b run first
+    and no R1a yet, that cell raised and 6b then hit NameError."""
+    (definition,) = [c for c in code_cells if "def finalize(" in c]
+    assert "finalize('" not in _active([definition])
+    calls = [c for c in code_cells if "finalize('" in _active([c])]
+    assert len(calls) == 2 and all("def finalize(" not in c for c in calls)
+    assert "__global__.ep{epoch}.pt" in definition and "st['epoch'] + 1 == epoch" in definition

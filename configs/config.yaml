@@ -155,10 +155,11 @@ fgc:
   # Routing: only fine-classify confident detections in an fgc group (see pipeline.fgc_infer).
   route:
     min_score: 0.25
-    # "Other" reject gate — only active when metric_learning=true. A routed crop whose
-    # cosine similarity to its nearest class center is below this is labelled Other
-    # (out-of-vocabulary), fine_id=-2. Calibrate on a val split once real data exists;
-    # 0.35 is a placeholder, NOT a tuned value.
+    # "Other" reject gate — only active when metric_learning=true, and for per-group heads
+    # only (the global encoder's Other is the one-shot gate, oneshot.other_min_cosine). A
+    # routed crop whose cosine similarity to its nearest class center is below this is
+    # labelled Other (out-of-vocabulary), fine_id=-2. Calibrate on a val split once real
+    # data exists; 0.35 is a placeholder, NOT a tuned value.
     other_min_cosine: 0.35
 
   # Directory of trained per-group checkpoints (one <group>.pt per fgc_group) to load
@@ -244,13 +245,13 @@ oneshot:
   # Unseen-class protocol P1 (docs/PLAN_STAGE2_ONESHOT.md): DigitizePID classes held out
   # of the leave-out encoder (R1a). h_in = held out AND mapped to an ISO symbol (one-shot
   # accuracy); h_out = held out AND out-of-vocabulary (the "Other" positives). The ONE
-  # place the lists live: R1a trains with fgc.exclude_classes = h_in + h_out built from
-  # here (utils.oneshot.holdout_classes), and the P1 eval reads the same lists. Fill at
+  # place the lists live: R1a trains with fgc.exclude_classes = h_in + h_out + h_extra built
+  # from here (utils.oneshot.holdout_classes), and the P1 eval reads the same lists. Fill at
   # B5, BEFORE any training and before seeing any result; never edit after.
   # Chốt 2026-11-11, trước mọi lượt train Stage 2 ("chia A", lý do: HANDOFF §6c / PLAN B5).
   # h_extra = VARIANT của cùng ký hiệu ISO với một lớp h_in: bị bỏ khỏi train, KHÔNG thi.
-  # Notebook Colab dựng R1a với fgc.exclude_classes = h_in + h_out + h_extra (2026-11-11);
-  # check_b5.py chưa kiểm luật VARIANT (B5b), chia A đã kiểm tay.
+  # Notebook Colab dựng R1a với fgc.exclude_classes = h_in + h_out + h_extra (2026-11-11).
+  # scripts/check_b5.py kiểm luật VARIANT (B5b, 2026-11-13): chia A 0 lỗi.
   holdout:
     h_in: [Symbol_3, Symbol_10, Symbol_5, Symbol_4, Symbol_18, Symbol_19]
     h_out: [Symbol_9, Symbol_15, Symbol_27, Symbol_30]
@@ -259,7 +260,10 @@ oneshot:
 # Evaluation protocol (report §2.2.3, Table 1).
 eval:
   # mode selects the ablation configuration compared in §4.2.1.
-  mode: det_plus_fgc    # det_only | det_plus_fgc
+  # det_only: Stage 1 alone, GT at detector.label_level (fine = one-stage 32-class baseline).
+  # det_plus_fgc: end-to-end fine labels + FGC metrics. fgc_only: FGC metrics on GT crops,
+  # no detector output needed (with fgc.global_encoder=true: __global__.pt, protocol C).
+  mode: det_plus_fgc    # det_only | det_plus_fgc | fgc_only
 
   # Detection metrics.
   iou_thrs: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]  # mAP@50:95

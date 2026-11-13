@@ -139,16 +139,23 @@ def excluded_classes(cfg: DictConfig) -> list[str]:
     return list(cfg.fgc.get("exclude_classes", None) or [])
 
 
-def build_dataset(cfg: DictConfig, split: str, group: str) -> Dataset:
+def build_dataset(
+    cfg: DictConfig, split: str, group: str, fine_classes: list[str] | None = None
+) -> Dataset:
     """ImageFolder-equivalent restricted to `group`'s TRAINING fine classes, with
     GROUP-LOCAL label indices (0..n-1, in classmap.training_fine_classes order) -- NOT
     global fine ids, since each group gets its own classifier head sized to only its
     own fine classes. Held-out classes (cfg.fgc.exclude_classes) are absent from every
     split here: this dataset feeds a head that has no column for them.
+
+    `fine_classes` overrides that list with a trained checkpoint's own column order
+    (evaluation of `__global__.pt`), so labels follow the head that is evaluated, not
+    whatever fgc.exclude_classes the eval command happens to carry.
     """
     paths = DataPaths(root=Path(str(cfg.data_root)))
-    classmap = load_classmap(paths.classes_yaml)
-    fine_classes = training_fine_classes(classmap, group, excluded_classes(cfg))
+    if fine_classes is None:
+        classmap = load_classmap(paths.classes_yaml)
+        fine_classes = training_fine_classes(classmap, group, excluded_classes(cfg))
     root = paths.crops_fgc / split
     transform = _build_transform(cfg, split)
     jitter = BoxJitter.from_cfg(cfg.fgc.aug.get("box_jitter")) if split == "train" else None

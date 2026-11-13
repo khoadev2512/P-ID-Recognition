@@ -20,6 +20,7 @@ The classification decision at inference stays softmax-argmax over the head's lo
 
 from __future__ import annotations
 
+import hashlib
 import math
 from pathlib import Path
 
@@ -200,6 +201,17 @@ def checkpoint_excluded_classes(ckpt_path: str | Path) -> list[str]:
     """
     state = torch.load(Path(ckpt_path), map_location="cpu", weights_only=False)
     return list(state.get("excluded_classes", []))
+
+
+def checkpoint_sha256(ckpt_path: str | Path) -> str:
+    """Hex sha256 of a checkpoint file: the only identity that tells two runs with the
+    same classes (R1b and its resumed continuation) apart. Recorded in a prototype
+    directory's meta so inference can refuse an encoder the prototypes were not built with."""
+    digest = hashlib.sha256()
+    with Path(ckpt_path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class FocalLoss(nn.Module):

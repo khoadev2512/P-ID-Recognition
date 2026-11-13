@@ -11,11 +11,12 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 
 ## Quyết định 2026-11-09 (đọc trước; thay mọi chỗ mâu thuẫn bên dưới)
 
-1. **Khung luận văn = phương án B.** Tên đề tài ("Symbol detection and fine-grained
+1. **Khung luận văn = phương án B.** *(Trọng số đổi 2026-11-12 → 40/40/20, xem "Quyết định
+   2026-11-12 — trọng số" bên dưới; phần còn lại của mục này giữ nguyên.)* Tên đề tài ("Symbol detection and fine-grained
    classification in P&ID") không có "one-shot", nên:
    - **Lõi (~70%) — closed-set trên DigitizePID 32 lớp**: Stage 1 P/R/mAP; Stage 2 top-1,
      macro-F1, confusion; **mAP end-to-end so với YOLO một-stage 32 lớp fine**
-     (`detector.label_level=fine`, đã có). Encoder R1b. Code còn thiếu: B6c.
+     (`detector.label_level=fine`, đã có). Encoder R1b. B6c ✅ 2026-11-13.
    - **Chuyển sang ISO (~20%)**: OPEN100-ISO (render V8) chỉ làm **test**; nhãn ISO từ
      prototype của template. Protocol P4.
    - **Mở rộng (~10%)**: lớp ISO chưa thấy (P1 + H tự nhiên) và cổng "Other".
@@ -52,7 +53,147 @@ Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất b
 
 Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/artifact/JWSGBLAp2XTxufZru5BcuU
 
+### Quyết định 2026-11-12 — trọng số luận văn 70/20/10 → 40/40/20
+
+| Phần | Trước | Nay | Đề thi |
+|---|---|---|---|
+| Lõi: closed-set DigitizePID 32 lớp, hai-stage vs YOLO một-stage | 70% | **40%** | C |
+| Chuyển sang ISO: OPEN100-ISO, nhãn ISO từ prototype | 20% | **40%** | P4 (S/V/H tự nhiên), P2 |
+| Mở rộng: lớp chưa thấy + cổng "Other" | 10% | **20%** | P1, P4 (H chọn), AUROC/OSCR |
+
+**Lý do.** R1b cho val_acc 0.9999 từ epoch 3 và Stage 1 coarse mAP50 0.995: DigitizePID đã bão
+hoà, đề thi C gần như không còn khoảng phân biệt. Các kết quả có nội dung (separation, cụm van
+"đặc điểm không cộng dồn", nhóm V/H) nằm ở phần chuyển sang ISO và mở rộng.
+
+**Hệ quả.**
+- C vẫn giữ (tên đề tài là detection + fine-grained classification), nhưng báo cáo trung thực là
+  đã bão hoà; thêm mAP50:95 và, nếu kịp, C trên ảnh DigitizePID suy giảm (`scan_degrade`, seed
+  cố định). B6c được phép dùng phương án rẻ (head per-group) nếu thiếu thời gian, ghi rõ.
+- **Đường găng chuyển sang P4**: B6a (one-shot inference), B6b (P2/P4 + AUROC/OSCR + đường quét τ),
+  B6d (đề thi OPEN100-ISO). Đường quét τ trên P4 là hình bắt buộc của chương chính.
+- **R1a bắt buộc** (P1 nay là 20%), chạy sau P2 thu nhỏ. Chia B (đã đăng ký trước) đáng chạy nếu còn
+  quota: với 20% trọng số, độ lệch giữa hai cách chia là câu hội đồng sẽ hỏi.
+- **Phân tích lỗi chuyển giao thành một mục chính**: separation S/V/H, hai cụm, bảng gate/general/
+  globe/butterfly (đặc điểm không cộng dồn), đối chiếu với nhóm V/H trên P4.
+- **B4a (encoder chỉ-ImageNet)** tăng giá trị: cho biết train DigitizePID làm chuyển giao tốt lên
+  hay tệ đi, đặc biệt ở cụm van. Nên làm nếu rẻ.
+- **B9 (d)** vẫn sau R4, nhưng là ablation thuộc phần chính (40%), không còn là phần phụ.
+- Lề template (Vấn đề mở 1) ảnh hưởng trực tiếp P4 → quyết bằng P2 thu nhỏ trước R4.
+
+### Quyết định 2026-11-12 — tách val thành `val_sel` / `test`
+
+**Bối cảnh.** DigitizePID chỉ có train/val, chia theo ảnh 400/100
+(`digitizepid_splits.json`, ánh xạ id ảnh → "train"/"val"). Đã kiểm: không ảnh nào
+có crop ở cả hai bên (id ảnh lấy từ tiền tố tên crop `<id ảnh>_<thứ tự>.png`).
+Không có tập test, nên 100 ảnh val đang phải gánh cả chọn mô hình lẫn thi.
+
+**Quyết định.** Tách 100 ảnh val thành hai nửa theo ảnh, không đụng 400 ảnh train:
+
+| Tập | Số ảnh | Dùng cho |
+|---|---|---|
+| `val_sel` | 50 | chọn checkpoint, chọn τ (“Other”), chọn siêu tham số (d) |
+| `test` | 50 | chỉ đề thi C, P1, P2; chạm **một lần**, khi checkpoint, τ, (d) đã chốt |
+
+- Seed 20261112; file `digitizepid_val_test.json` (`{"val_sel": [...], "test": [...]}`).
+- sha256: `digitizepid_splits.json` = `4dc786cf3f0d7eda7278f4f6a7e3816384a1988fe4c69729eab7d5a94c223d73`; `digitizepid_val_test.json` = `6a9f226487e6022f4cac7144235d13167f26fce98b1a851f76cc63fb62f75d3d`.
+- Kiểm cân bằng: mọi lớp ≥142 crop ở mỗi nửa (Symbol_21 ~550). Không cần đổi seed.
+- OPEN100-ISO không đổi vai trò: chỉ thi (P4), không chọn gì trên đó.
+
+**Ghi nhận về R1b epoch 3.** Checkpoint `__global_ep3__.pt` được chọn theo `val_acc`
+trên cả 100 ảnh val (trước khi tách). `val_acc` đã 0.9997 từ epoch 1 nên việc chọn này
+gần như không mang thông tin; chấp nhận dùng epoch 3 để chẩn đoán trên `val_sel`. Nếu
+cuối cùng dùng nó làm encoder chính thức, ghi rõ điều này khi báo cáo.
+
+**Việc kéo theo (chưa làm).**
+- Commit hai file split vào repo (vị trí: `configs/splits/` hoặc ngoại lệ `.gitignore`
+  cho `data/canonical/`); notebook đọc split từ repo thay vì từ Drive.
+- ~~`fgc_train`: tính `val_acc` chỉ trên `val_sel`; lưu `last.pt` mỗi epoch và checkpoint
+  mốc 10/20/40/60.~~ → thay bằng quyết định 2026-11-13 bên dưới (epoch cố định; `val_acc` không
+  còn dùng để chọn nên không cần tính trên `val_sel`).
+- Đánh giá (B6b): thêm khóa config trỏ tới file; P2/P1/C đọc `test`, các bước chọn đọc
+  `val_sel`. Không bước nào được đọc `test` trước khi chốt.
+
+### Quyết định 2026-11-13 — chọn checkpoint theo epoch cố định (chốt TRƯỚC khi train R1a)
+
+**Vấn đề.** `val_acc` bão hoà từ epoch 1 (0.9997 → 0.9999), nên "lưu khi `val_acc` tăng" chọn
+epoch gần như ngẫu nhiên, và R1a (19 lớp) sẽ bão hoà ở epoch khác R1b. P1 so cùng một lớp giữa R1b
+(đã thấy) và R1a (chưa thấy), nên hai encoder phải được lấy theo cùng một quy tắc, chốt trước khi
+có số (như H).
+
+**Quyết định (user đồng ý 2026-11-13).**
+- R1a và R1b so ở **cùng epoch 3** (`CMP_EPOCH` trong notebook). R1b đã có epoch 3
+  (`encoders/__global__.pt`), không train lại. R1a train `fgc.epochs=5`, gọn trong một phiên.
+- Không resume R1b (vấn đề mở 3 → đóng): thêm epoch không sửa được lỗi chuyển giao, vì đó là giới
+  hạn dữ liệu ("đặc điểm không cộng dồn").
+- Không chọn checkpoint bằng `val_acc`, cũng không bằng P2 thu nhỏ (chọn theo P2 rồi báo P2 là
+  dùng cùng một dữ liệu hai lần). Epoch 5 chỉ để kiểm độ nhạy: báo kèm nếu kết luận đổi giữa 3 và 5.
+- Lượt train sau (chia B, nhãn theo nghĩa ISO) dùng cùng quy tắc.
+
+**Code (2026-11-13).**
+- `fgc_train`: ghi `<group>.last.pt` mỗi epoch (có `best_val_acc`); ghi `<group>.ep<N>.pt` ở mỗi
+  epoch trong `++fgc.save_epochs` (key mới qua `++`, chưa vào `config.yaml`; mặc định không ghi),
+  bất kể `val_acc`; cảnh báo nếu N > `fgc.epochs`. `<group>.pt` (best `val_acc`) giữ như cũ.
+  `_maybe_resume` ưu tiên `.last.pt`, không có thì `<group>.pt` (run cũ).
+- Notebook: `CMP_EPOCH = 3`, `EPOCHS = 5`, `SAVE = '++fgc.save_epochs=[3,5]'` ở mục 4, cho cả 4
+  lệnh train. `finalize` tách sang cell riêng (4b, chỉ định nghĩa), nhận tên run (`'r1a'`/`'r1b'`),
+  tìm checkpoint epoch `CMP_EPOCH` trong mọi phiên của run (`.ep3.pt`, hoặc `__global__.pt` của
+  run cũ nếu đúng epoch 3). Sửa luôn bẫy `IndexError`/`NameError` khi R1b chạy trước R1a.
+- Test: `test_exclude_classes.py` (+2), `test_resume.py` (+1), `test_colab_notebook.py` (+2).
+
 ---
+
+### Vấn đề mở 2026-11-12 (từ R1b + R2, chờ quyết)
+
+1. **Lề template ≠ lề crop.** `iso_prototypes` nhúng template sát bbox vector; mọi crop từ B1c là
+   box + 10% mỗi bên (`CROP_MARGIN_FRAC`). Ứng viên: `oneshot.template_views.scales=[1.2]`
+   (`iso_prototypes_m12.pt`). Separation không đổi (0.240 / 0.990) → quyết bằng P2 thu nhỏ trên
+   `val_sel`, so hai bản prototype. Đây là câu hỏi nhất quán hình học, không phải ablation; nếu
+   chọn 1.2 thì sửa quyết định thiết kế GĐ2 số 1 (HANDOFF §2) và ghi lý do.
+   **P2 thu nhỏ (2026-11-12): không bản nào thắng hẳn** — macro S 0.70 (1.0) vs 0.67 (1.2); 1.2
+   sửa một phần S3 (0% → 66%) nhưng làm hỏng S10 (own_cos 0.68 → 0.22). Prototype một ảnh rất
+   nhạy với cách đóng khung → thử tiếp `template_views.scales=[1.0, 1.2]` (trung bình, cơ chế có
+   sẵn) trước khi chốt.
+2. ~~**Đề thi C đã bão hoà**~~ → **đã quyết 2026-11-12**: trọng số 40/40/20 (mục "Quyết định
+   2026-11-12 — trọng số"). Còn mở: có làm C trên ảnh DigitizePID suy giảm hay không.
+3. ~~**Có resume R1b hay không**~~ → **đã quyết 2026-11-13**: không resume; R1a và R1b so ở
+   epoch 3 (mục "Quyết định 2026-11-13 — chọn checkpoint").
+4. **★ `pipeline` hút crop có ống.** P2 thu nhỏ: 100% crop S24 (flow_direction) ra `pipeline`
+   (cos 0.88 > own 0.83 ở scale 1.0; 0.965 > 0.637 ở 1.2). Mọi crop mũi tên đều kèm đoạn ống, ★
+   `pipeline` chỉ là một đường thẳng. 🧑 Quyết: nếu Stage 1 không bao giờ khoanh "đường ống" như một
+   ký hiệu thì bỏ `pipeline` (và các template thuần đường kẻ tương tự) khỏi thư mục prototype; ảnh
+   hưởng cả P4.
+5. **Trạng thái của S21 (flanged_connection).** P2 thu nhỏ: own_cos chỉ 0.27–0.29 (ngang lớp
+   VARIANT), 100% ra `agitator_general`. 🧑 Xem crop S21 cạnh template mặt bích (như đã làm với S6):
+   có thật là cùng hình vẽ không, hay nên là VARIANT. Đổi trạng thái → chạy lại `check_b5.py`, đếm
+   lại S/V/H.
+6. **ArcFace đẩy VARIANT ra xa ★ của chính nó.** P2 thu nhỏ: 8/9 lớp VARIANT sai, own_cos
+   0.07–0.25 (chỉ S22 hx_coil đúng, 0.95). Với S2, S13 (van bi) và S12 (van chung): R1b train
+   chúng là lớp RIÊNG với S5 / S4, tức chủ động tách hai cách vẽ của cùng một ký hiệu — mâu thuẫn
+   trực tiếp với kỳ vọng "VARIANT khớp ★ ISO". Các VARIANT không có lớp anh em (S6, S8, S14, S20,
+   S23) đơn giản là vẽ khác xa template. Một số lỗi rất tự tin (S8 → reducer 0.93, S23 →
+   hx_straight_tube 0.83) → τ không chặn được. Lựa chọn (chưa làm): train bằng nhãn theo nghĩa ISO
+   (gộp S2, S13 → S5; S12 → S4) — đổi lại C không còn đúng 32 lớp. Là kết quả chính của phần chuyển
+   giao (40%), ghi vào luận văn dù chọn hướng nào.
+
+#### Kết quả P2 thu nhỏ (2026-11-12) — R1b epoch 3, `val_sel`, 50 crop/lớp, không τ
+Script `p2_mini.py` (đúng đường code repo: `view` box+10% → `query_views` 8 view →
+`build_eval_transform` → `match_views`). CSV: `runs/p2_mini_q50/`.
+
+| | scale 1.0 | scale 1.2 |
+|---|---|---|
+| Macro S (10 lớp; vote / mean / best) | 0.70 / 0.70 / 0.70 | 0.68 / 0.70 / 0.67 |
+| Macro V (9 lớp VARIANT) | 0.11 | 0.22 (S13 đúng do may, own 0.25) |
+| S3 → valve_butterfly (best) | 100% | 34% |
+| Lớp S sai | S3, S21, S24 | S10, S21, S24 (S3 đúng 66%) |
+
+- **Mỗi lớp ≈ một điểm dữ liệu**: trong một lớp, cả 50 crop cùng một dự đoán, own_cos dao động
+  < 0.03 (DigitizePID tổng hợp, cùng một glyph). P2 trên DigitizePID thực chất đo "glyph
+  DigitizePID có gần template ISO không" với ~10 điểm (S). Báo cáo THEO LỚP; không trình bày như
+  độ chính xác trên hàng nghìn crop. Chạy đủ crop không đổi kết luận.
+- vote ≈ mean ≈ best → view xoay không gây nhiễu; luật bỏ phiếu không phải vấn đề lúc này.
+- Ba lỗi S có ba nguyên nhân: S3 (cụm van, "đặc điểm không cộng dồn"), S24 (★ `pipeline`, vấn
+  đề mở 4), S21 (glyph khác template, vấn đề mở 5).
+- Gợi ý cho τ: lớp S đúng có own_cos 0.54–0.99; VARIANT hầu hết < 0.3 nhưng có lỗi tự tin tới 0.93.
 
 ## 0. Trạng thái xuất phát
 
@@ -62,7 +203,7 @@ Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/ar
 | GĐ2 one-shot core (`utils/oneshot.py`, `pid-iso-prototypes`) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
 | `fgc.global_encoder` (prep-crops / train / infer guard) | ✅ code xong, ✅ pytest xanh (B0, 2026-10-18) |
 | Per-subpart augment (OSSR-PID #2) | ✅ `SubpartWarp` (B1, 2026-10-18), user đã duyệt ảnh |
-| GĐ4 one-shot inference | ❌ chưa code |
+| GĐ4 one-shot inference | ✅ B6a 2026-11-13 (`pipeline/oneshot_infer.py`, `fgc.oneshot=true`) |
 | GĐ5 eval one-shot + "Other" | ❌ chưa code |
 | Leave-classes-out (`fgc.exclude_classes`) — protocol chính để chứng minh one-shot | ✅ code + test (B1b, 2026-10-18); danh sách H vẫn chờ B5 |
 | `data/canonical/` local | ✅ DigitizePID gốc: 500 ảnh (400 train / 100 val), 59,498 ann, 32 class `Symbol_N` |
@@ -71,7 +212,8 @@ Minh hoạ (sơ đồ): artifact "Hai hướng Stage 2" — https://claude.ai/ar
 | `symbol_map.csv` (2026-11-09) | ✅ 32/32 có status: **10 ISO / 11 OOV / 9 VARIANT / 2 UNSURE**; `check_b5.py` 0 lỗi, chỉ cảnh báo H rỗng |
 | OPEN100-ISO (render V8) | ✅ 864 ảnh (432 sạch + 432 suy giảm), 93,800 annotation; **30/42** lớp vocab có mẫu (`docs/experiments/iso_render/v8/`) |
 | Augment suy giảm kiểu scan (`+fgc.aug.degrade.p`, `+detector.aug.degrade.p`) | ✅ code + test, mặc định tắt (`src/utils/scan_degrade.py`) |
-| Closed-set infer / eval với `__global__.pt` | ❌ `fgc_infer` từ chối global encoder, `evaluation` lặp theo group → **B6c** |
+| Closed-set infer / eval với `__global__.pt` | ✅ B6c 2026-11-13: `fgc_infer` dùng `__global__.pt`, `evaluate eval.mode=fgc_only`, YOLO fine chấm bằng `det_only detector.label_level=fine` |
+| Luật VARIANT trong `check_b5.py` | ✅ B5b 2026-11-13; `holdout_classes` trả `(h_in, h_out, h_extra)` |
 | Crop có ngữ cảnh + box jitter (B1c) | ✅ 2026-11-11 (`utils/crop_box.py`); sửa luôn lệch train/suy luận: `fgc_infer` trước cắt box trần, train có lề 10% |
 ---
 
@@ -90,7 +232,7 @@ chúng. Encoder chưa từng thấy mẫu nào → nhận đúng chỉ có thể
 
 | Protocol | Encoder | Tập test | Đo gì | Vai trò |
 |---|---|---|---|---|
-| **C — closed-set** (2026-11-09) | `__global__.pt` (đủ 32 class), head softmax | crop + bản vẽ DigitizePID val | top-1, macro-F1, confusion 32 lớp; mAP end-to-end so với YOLO 32 lớp fine | **Lõi luận văn** (phương án B) |
+| **C — closed-set** (2026-11-09) | `__global__.pt` (đủ 32 class), head softmax | crop + bản vẽ DigitizePID `test` (50 ảnh, 2026-11-12) | top-1, macro-F1, confusion 32 lớp; mAP end-to-end so với YOLO 32 lớp fine | **Lõi luận văn** (phương án B) |
 | **P1 — unseen-class one-shot** | `__global_lo__.pt` (train trên 32 − H class) | crop của H_in (giữ ra, map được ISO) + H_out (giữ ra, OOV) | one-shot acc trên H_in; "Other" với dương = H_out, âm = H_in (**cả hai đều unseen**) | Bằng chứng chính của mục mở rộng: lớp chưa thấy, **nét vẽ khác template** |
 | P2 — seen-class alignment | `__global__.pt` (đủ 32 class) | crop các class map được ISO | template ISO (nét vector) có khớp crop raster không | Kết quả phụ, ghi rõ KHÔNG phải one-shot; P2 − P1 = cái giá của "unseen" |
 | P3 — real, unseen (nếu có) | `__global__.pt` | ASU PID_Dataset (`~/Downloads/PID_Dataset.zip`, Stage-2 test: 12 sheet thật, ~102 class) | như P1 trên bản vẽ thật | Bằng chứng mạnh nhất; chờ user quyết định giải nén + map class |
@@ -102,7 +244,7 @@ Quy tắc bắt buộc:
   vào config + HANDOFF — chọn sau khi thấy số là cherry-picking.
 - **Ngưỡng "Other" (τ) không bao giờ nhìn lớp H hay OPEN100-ISO** (thay 2026-11-11; trước:
   calibrate trên crop H của split `train` — dùng mẫu "lạ" để chỉnh ngưỡng, số lạc quan). τ chỉ
-  chọn trên split `val` DigitizePID (đã chia theo ảnh), crop của các lớp **đã thấy**, theo quy
+  chọn trên `val_sel` DigitizePID (50 ảnh, quyết định 2026-11-12), crop của các lớp **đã thấy**, theo quy
   tắc cố định — xem B8 "Ngưỡng Other". So sánh giữa các phiên bản bằng AUROC / OSCR (không phụ
   thuộc ngưỡng).
 - **Chặn rò rỉ bằng code** (B1b, B6b): eval P1 phải từ chối chạy nếu một class test nằm trong
@@ -139,7 +281,7 @@ R1b) → báo cáo tách khỏi `other_iso`.
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► B5b ─► B6a GĐ4 ─► B6b GĐ5 ─► B6c closed-set
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► (B5b ✅) ─► (B6c ✅) ─► (B6a ✅) ─► B6b GĐ5
   ─► B6d đề thi OPEN100-ISO ─► B6e Stage 1 agnostic_merge ─► B4a baseline
 B5 🧑 CHỌN danh sách H (+ B5b 🤖 luật VARIANT trong check_b5) ── song song, ⛔ PHẢI XONG trước R1 ──►
 ```
@@ -346,8 +488,8 @@ cố định 10% nên encoder chưa từng thấy crop lệch. Khi làm thì l�
   ở cả 2 split → R1a 29 class (H ví dụ 3 class) → resume cùng H ok, khác H bị chặn → R1b
   32 class → finalize đúng, phát hiện rò rỉ khi kỳ vọng sai → prototypes ×2, meta ghi
   `encoder_excluded_classes`.
-- Lưu ý (có sẵn từ trước, chưa sửa): checkpoint chỉ ghi khi val_acc tăng → resume có thể
-  lặp lại epoch. Ghi trong runbook.
+- ~~Lưu ý (có sẵn từ trước, chưa sửa): checkpoint chỉ ghi khi val_acc tăng → resume có thể
+  lặp lại epoch.~~ → sửa 2026-11-13: `.last.pt` mỗi epoch, `.ep<N>.pt` theo `save_epochs`.
 
 **Kế hoạch gốc** (giữ để đối chiếu):
 
@@ -387,6 +529,8 @@ fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=
 fgc --train         fgc.global_encoder=true fgc.metric_learning=true fgc.epochs=60 $AUG \
                     'fgc.exclude_classes=[<danh sách H từ B5>]'
 ```
+**2026-11-13**: thay `fgc.epochs=60` bằng `fgc.epochs=5 '++fgc.save_epochs=[3,5]'`, lấy
+`__global__.ep3.pt` cho cả hai (mục "Quyết định 2026-11-13 — chọn checkpoint").
 
 Đặt tên rõ ràng khi copy về Drive: `__global_lo__.pt` (R1a) và `__global__.pt` (R1b).
 
@@ -416,6 +560,17 @@ Với mỗi encoder, đọc dòng log `prototype separation: mean off-diagonal c
 
 Các ngưỡng trên là **ước lượng ban đầu**, ghi lại số thật vào HANDOFF — chính các số này
 là một bảng trong luận văn (separation với prototype sạch / có stub).
+
+**Kết quả R2 đầu tiên (2026-11-12, R1b epoch 3, prototype sạch, 1 view)** — chi tiết HANDOFF §6d:
+- mean 0.245, max 0.989 (pump_general vs vessel_spherical); 12/861 cặp > 0.9. Mean ĐẠT, max KHÔNG.
+- **S–S gần nhất 0.389**: không cặp S–S nào sát. Mọi cặp > 0.85 đều dính lớp V hoặc H.
+- Hai cụm: van "chấm + vạch" (globe/butterfly 0.981, check_valve_globe/swing 0.921) và hình tròn
+  (bơm, máy nén, bình cầu, kính quan sát; toàn H tự nhiên).
+- Đã xem PNG theo hàng "max ≥ 0.9": các cặp KHÔNG giống nhau với mắt người → encoder không chuyển
+  được. Nguyên nhân cụm van đã xác nhận: đặc điểm không cộng dồn (gate/general 0.133 nhưng
+  globe/butterfly 0.981 — DigitizePID không có lớp nào mang cả chấm lẫn vạch). Không phải tiền
+  xử lý.
+- Lề template: scale 1.2 (khớp lề crop) cho mean 0.240, max 0.990 → separation không nhạy với lề.
 
 ---
 
@@ -486,7 +641,17 @@ mà P1 không test chúng.
 flow_direction (họ một lớp; giữ ra là rút cạn họ — `check_b5.py` báo lỗi). Ứng viên `h_out`: 11
 lớp OOV (S7, S9, S15, S16, S26–S32), không rút cạn họ `instrument`.
 
-## B5b — `check_b5.py` kiểm luật VARIANT 🤖 (Phase A, nhỏ)
+## B5b — `check_b5.py` kiểm luật VARIANT 🤖 (Phase A, nhỏ) — ✅ 2026-11-13
+
+**Đã làm.** `utils.oneshot.holdout_classes` trả `Holdout(h_in, h_out, h_extra)` (`.tested` =
+`h_in + h_out` cho P1, `.excluded` = cả ba cho R1a); một lớp nằm ở hai list là lỗi. `check_b5.py`
+báo ERROR khi một lớp `h_in` có VARIANT cùng `reg_number` chưa nằm trong `h_extra`, khi một lớp
+`h_extra` không phải VARIANT của một lớp `h_in`, và tính `h_extra` vào luật "rút cạn họ". Notebook
+đọc `h_extra` qua `holdout_classes`. Chia A: 0 lỗi; bỏ S12 khỏi `h_extra` → lỗi đúng chỗ.
+`tests/test_check_b5.py` có test chạy trên `symbol_map.csv` + `config.yaml` thật. Nếu vấn đề mở 5
+đổi S21 sang VARIANT thì chạy lại `check_b5.py`.
+
+Nội dung gốc:
 
 - ERROR khi một lớp trong `h_in` có VARIANT cùng `reg_number` không nằm trong H (`h_extra`).
 - `oneshot.holdout.h_extra` (mặc định `[]`): `holdout_classes` trả thêm danh sách này; notebook
@@ -501,7 +666,35 @@ tập test cross-domain mạnh hơn DigitizePID synthetic — ghi vào HANDOFF �
 
 ---
 
-## B6a — GĐ4: one-shot inference 🤖 (Phase A)
+## B6a — GĐ4: one-shot inference 🤖 (Phase A) — ✅ 2026-11-13
+
+**Đã làm** (`src/pipeline/oneshot_infer.py`, `tests/test_fgc_infer_oneshot.py`, 18 test):
+- `pid-fgc-infer ++fgc.oneshot=true oneshot.encoder_ckpt=<enc> oneshot.prototypes=<dir>`: mỗi
+  crop (`cut`, box + 10%) → `query_views` → embed → `match_views` với prototype ISO. Box dưới
+  `fgc.route.min_score` hoặc crop rỗng → `__unrefined__`.
+- Ra file MỚI `derived/detections_oneshot/<split>/<id>.txt`, 10 cột:
+  `label best_name cx cy w h det_score best_cos second_cos coarse_id`. `label` = quyết định ở
+  `oneshot.other_min_cosine` (chỉ để đọc nhanh); `best_name`, `best_cos`, `second_cos` **chưa cắt
+  ngưỡng** → B6b quét τ / AUROC / OSCR / ablation margin top-1–top-2 không cần chạy lại suy luận.
+  Đọc bằng `read_oneshot_detections`. Dòng `__unrefined__` có cosine `nan`: B6b phải bỏ, không
+  tính là "bị loại".
+- Nghĩa của `best_cos`: `aggregate=mean` → cosine của vector trung bình các view (quét τ trên nó
+  tái tạo đúng `label`). `aggregate=vote` → trung bình cosine của các view thắng; quét τ trên nó
+  chỉ **xấp xỉ** phiếu bầu có cắt ngưỡng (đúng khi các view đồng ý; P2 thu nhỏ: vote ≈ mean).
+  → Đề xuất B6b chốt `aggregate=mean` cho đường quét τ, hoặc ghi rõ xấp xỉ.
+- **Chặn encoder ≠ prototype**: `pid-iso-prototypes` giờ ghi thêm `encoder_sha256`; lúc suy luận so
+  lớp train, lớp bị loại, backbone, embed_dim, imgsz và sha256 với encoder đang nạp → lệch là lỗi.
+  File prototype cũ (chưa có sha256) vẫn nạp được, vẫn so các trường còn lại. Lưu ý: resume /
+  lưu lại checkpoint đổi sha256 → phải dựng lại prototype.
+- `oneshot.exclude_prototypes` (mặc định `[]`): bỏ template khỏi thư mục trước khi so (cho vấn đề
+  mở 4 — chưa quyết bỏ gì). `oneshot.route_by_coarse` (mặc định tắt) + `oneshot.coarse_map`
+  (bắt buộc khi bật); lớp Stage 1 không có trong map, hoặc map tới toàn template đã bị bỏ → so cả
+  thư mục, log một lần.
+- Khoá mới đọc bằng `.get` (dùng `++` được); **chưa ghi vào `config.yaml`**, chờ duyệt:
+  `fgc.oneshot: false`, `oneshot.exclude_prototypes: []`, `oneshot.route_by_coarse: false`,
+  `oneshot.coarse_map: null`.
+
+Nội dung gốc:
 
 **Quyết định vocab (đề xuất)**: ở chế độ one-shot, **prototype directory chính là vocab của
 Stage 2**. Không sinh `classes.yaml` mới — `classes.yaml` vẫn là vocab của Stage 1 (8 coarse)
@@ -549,10 +742,10 @@ Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và nh
   không phụ thuộc ngưỡng; precision / recall / F1 tại τ đã chọn (B8).
 - **Đường quét τ** 0.0→1.0: accuracy lớp biết (sau reject) vs tỉ lệ loại lớp lạ → PNG. Bắt
   buộc với P4. Đây là hình báo cáo, **không** phải chỗ chọn τ.
-- **Chọn τ** (`oneshot.other_min_cosine`, thay placeholder 0.35): hàm riêng, chỉ đọc split
-  `val` DigitizePID, lớp đã thấy — quy tắc A và B ở B8. Test: hàm chọn τ từ chối khi nhận crop
+- **Chọn τ** (`oneshot.other_min_cosine`, thay placeholder 0.35): hàm riêng, chỉ đọc
+  `val_sel` DigitizePID, lớp đã thấy — quy tắc A và B ở B8. Test: hàm chọn τ từ chối khi nhận crop
   của lớp H hay ảnh OPEN100-ISO.
-- **Box sai của detector**: box dự đoán có IoU < 0.3 với mọi GT trên split `val` DigitizePID →
+- **Box sai của detector**: box dự đoán có IoU < 0.3 với mọi GT trên `val_sel` DigitizePID →
   tỉ lệ bị τ loại (cần detector chạy trên val).
 - Ablation sẵn có qua config, không cần code thêm: `aggregate=vote|mean`,
   `query_views` 1 view vs 8 view, `fgc.aug.subpart.p` 0 vs 0.5 (cần 2 lượt train).
@@ -600,7 +793,33 @@ Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và nh
 
 ---
 
-## B6c — Closed-set với `__global__.pt` 🤖 (Phase A) — lõi luận văn (2026-11-09)
+## B6c — Closed-set với `__global__.pt` 🤖 (Phase A) — lõi luận văn (2026-11-09) — ✅ 2026-11-13
+
+**Đã làm** (`tests/test_closed_set_global.py`):
+- `fgc_infer` với `fgc.global_encoder=true`: nạp `<fgc.ckpt_dir>/__global__.pt`, cột lấy từ
+  `fine_classes` của checkpoint. Mọi box có score ≥ `fgc.route.min_score` đều được phân lớp,
+  kể cả họ 1:1 (flange, flow_direction…), không nhìn lớp thô. `++fgc.route.by_coarse=true` giới
+  hạn softmax trong họ của Stage 1 (ablation "routing theo coarse có giúp không"). **Không có
+  cổng Other** ở nhánh này: Other của encoder toàn cục là việc của B6a, ngưỡng theo B8.
+- `evaluate eval.mode=fgc_only` (mới): chấm head trên crop GT, không cần detector. Ra top-1/top-3,
+  macro-F1, rare macro-F1, P/R/F1 từng lớp, confusion đầy đủ (JSON + PNG), theo họ coarse
+  (accuracy, `cross_family` = tỉ lệ đoán sang họ khác), `other_gate` (cosine max, tham khảo).
+- `det_only` chấm GT theo `detector.label_level`: YOLO 32 lớp fine giờ chấm được theo lớp fine.
+  `detect_infer` ghi id fine cho detector fine và kiểm tên lớp trong checkpoint khớp
+  `classes.yaml` (trước đó map id fine qua 8 tên coarse: sai tên hoặc IndexError).
+- mAP bỏ dự đoán không có nhãn vocab (`-1` chưa tinh chỉnh, `-2` Other). Trước đó mỗi sentinel
+  thành một "lớp" AP 0, kéo mAP xuống. mAP50:95 đã có sẵn (`eval.iou_thrs`).
+- `fgc_infer` từ chối file detection của detector fine (`detector.label_level=fine`).
+- Notebook mục 8: chạy C ngay sau R1b.
+
+**Chưa làm**:
+- Chấm trên `test` thay vì cả `val`: `fgc_only` hiện đọc `crops_fgc/val` (100 ảnh). Số C chính
+  thức phải trên 50 ảnh `test` (mục "Tách val") → cần lọc crop theo id ảnh từ
+  `digitizepid_val_test.json` (tên crop `<id ảnh>_<n>.png`), đi cùng việc commit hai file split.
+  Với C đã bão hoà, số trên cả `val` dùng tạm để chẩn đoán được.
+- C trên crop DigitizePID suy giảm (`scan_degrade`, seed cố định) — "nếu kịp".
+
+Nội dung gốc:
 
 Hiện `fgc_infer` từ chối global encoder và `evaluation.compute_fgc_metrics` lặp theo
 `fgc_groups`, nên phần lõi (protocol C) chưa chạy được với encoder dùng chung.
@@ -770,7 +989,7 @@ dữ liệu test thì mọi số P1 mất giá trị. Ba lớp:
    OSCR, đường accuracy-biết / tỉ lệ loại-lạ. Mọi so sánh giữa phiên bản (R1a, R1b, prototype
    sạch / có stub) dựa trên AUROC và OSCR. AUROC cao mà OSCR thấp = tách biết / lạ tốt nhưng gọi
    tên sai trong nhóm biết.
-2. **Chọn τ trên split `val` DigitizePID (chia theo ảnh có sẵn, 100 ảnh), theo quy tắc cố định**.
+2. **Chọn τ trên `val_sel` DigitizePID (50 ảnh, theo ảnh; quyết định 2026-11-12), theo quy tắc cố định**.
    Chỉ nhìn crop của các lớp **đã thấy có prototype** (status ISO, còn trong train của encoder
    đó). Không nhìn `h_in`, `h_out`, OPEN100-ISO. Báo cả hai quy tắc:
    - **Quy tắc A — τ@TPR95**: τ sao cho 95% crop val của lớp biết được chấp nhận. Chuẩn open-set,
@@ -778,6 +997,9 @@ dữ liệu test thì mọi số P1 mất giá trị. Ba lớp:
    - **Quy tắc B — bỏ prototype**: với crop val lớp c, bỏ ★ của chính c, tính max-cosine tới các
      ★ còn lại → crop đó thành "lạ" mà không train thêm; τ tại điểm Youden (hoặc EER) giữa
      "biết" và "lạ giả lập". Lạ giả lập dễ hơn lạ thật → τ hơi lạc quan; ghi rõ.
+     **Độ nhạy (2026-11-12)**: khi hai ★ gần trùng (vd. valve_globe/valve_butterfly 0.98), bỏ ★
+     của S3 thì crop S3 khớp ★ butterfly gần như trọn → "lạ giả lập" trông như "biết", τ Youden
+     bị đẩy lên. Báo thêm τ quy tắc B khi loại các cặp ★ có cos > 0.95.
    - Mỗi encoder chọn τ riêng, cùng quy tắc. Ghi τ vào `config.yaml` kèm comment (run, quy tắc).
    - **Hạn chế đã biết**: với R1a (chia A), lớp đã thấy có prototype chỉ còn **S1, S17, S21,
      S24** (4 lớp) → τ của R1a ước lượng trên ít lớp; ghi số crop dùng để chọn τ.
@@ -826,18 +1048,18 @@ của detector; nếu lọt nhiều, thêm lề top-1/top-2.
 - [x] B1 subpart augment `SubpartWarp` + user duyệt ảnh (2026-10-18)
 - [x] B1b `fgc.exclude_classes` + tests chống rò rỉ (2026-10-18)
 - [x] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out (2026-10-19)
-- [ ] B6a GĐ4 one-shot infer + coarse_map (routing mặc định tắt; tắt bắt buộc cho P4)
+- [x] B6a GĐ4 one-shot infer + coarse_map (routing mặc định tắt; tắt bắt buộc cho P4) (2026-11-13)
 - [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3/P4 + nhóm S/V/H tự động + guard rò rỉ
       + Stage 1 không phân lớp (`eval.class_agnostic`) + recall theo nhóm
-- [ ] B6c closed-set infer + eval cho `__global__.pt` (lõi, protocol C)
+- [x] B6c closed-set infer + eval cho `__global__.pt` (lõi, protocol C) (2026-11-13; còn lọc theo `test`)
 - [ ] B6d đề thi OPEN100-ISO: kiểm ảnh suy giảm với config V7 + vùng bỏ qua (`iscrowd`) cho mũi tên dẫn / cờ — ⛔ trước R4
 - [ ] B6e Stage 1 `agnostic_merge` (+ tuỳ chọn `label_level=agnostic`) — ⛔ trước R4
 - [x] B1c crop có ngữ cảnh + box jitter + sửa lề crop lúc suy luận + notebook `AUG` (2026-11-11)
 - [x] ~~B7-code GĐ3 fine-tune ISO~~ — bỏ 2026-11-09
 - [ ] B4a-code baseline ImageNet (tùy chọn)
 - [x] B5 🧑 hoàn thành `symbol_map.csv` (32/32, 2026-11-09)
-- [ ] B5 🧑 **chọn H_in, H_out** (theo luật VARIANT) — ⛔ trước R1
-- [ ] B5b 🤖 `check_b5.py` luật VARIANT + `oneshot.holdout.h_extra`
+- [x] B5 🧑 **chọn H_in, H_out** (theo luật VARIANT) — chia A, 2026-11-11
+- [x] B5b 🤖 `check_b5.py` luật VARIANT + `oneshot.holdout.h_extra` (2026-11-13)
 
 **Phase B — Chạy** (🧑 Colab, đúng thứ tự)
 - [ ] (B4a) baseline ImageNet → separation "trước khi học"

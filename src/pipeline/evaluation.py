@@ -4,6 +4,19 @@ Reproduces the two-family protocol (Table 1) and supports the ablation interface
 §4.2.1: evaluate detector-only vs. detector+FGC, and coarse-trained vs. fine-trained
 detector, on the same inputs. Also drives the Phase-3 synthetic-vs-real comparison
 by running the same protocol on split=test (real) and the synthetic test set.
+
+eval.mode:
+    det_only      detection metrics on derived/detections (Stage 1 alone). The GT label
+                  level follows detector.label_level, so a one-stage YOLO trained on the
+                  32 fine classes (detector.label_level=fine) is scored per fine class:
+                  the baseline of the closed-set chapter (protocol C).
+    det_plus_fgc  end-to-end on derived/detections_fgc (fine labels), plus the FGC metrics.
+    fgc_only      the FGC metrics alone, on ground-truth crops: needs no detector output,
+                  so a freshly trained `__global__.pt` can be scored on its own.
+
+With fgc.global_encoder=true the FGC metrics are those of the single head in
+`<fgc.ckpt_dir>/__global__.pt` (protocol C, docs/PLAN_STAGE2_ONESHOT.md B6c): top-k,
+macro-F1, per-class P/R/F1, the full confusion matrix and a per-family breakdown.
 """
 
 from __future__ import annotations
@@ -23,6 +36,8 @@ from utils.cli import CONFIG_DIR
 from utils.types import BBox
 
 logger = logging.getLogger(__name__)
+
+MODES = ("det_only", "det_plus_fgc", "fgc_only")
 
 
 def _stem(file_name: str) -> str:
@@ -70,8 +85,12 @@ class EvaluationPipeline(BasePipeline):
             )
 
         mode = str(self.cfg.eval.mode)
-        if mode not in ("det_only", "det_plus_fgc"):
-            raise ValueError(f"cfg.eval.mode must be 'det_only' or 'det_plus_fgc', got {mode!r}")
+        if mode not in MODES:
+            raise ValueError(f"cfg.eval.mode must be one of {MODES}, got {mode!r}")
+        if mode == "fgc_only":
+            if self.cfg.fgc.get("ckpt_dir", None) is None:
+                raise ValueError("eval.mode=fgc_only needs fgc.ckpt_dir (the checkpoints to score)")
+            return True
 
         det_dir = self._predictions_dir()
         infer_cmd = "pid-detect-infer" if mode == "det_only" else "pid-fgc-infer"
@@ -145,7 +164,7 @@ class EvaluationPipeline(BasePipeline):
             x, y, w, h = ann["bbox"]
             xyxy = (float(x), float(y), float(x + w), float(y + h))
 
-            if mode == "det_only":
+            if mode == "det_only" and self._detector_level() == "coarse":
                 class_id = self.classmap.coarse_id(category["supercategory"])
             else:
                 class_id = self.classmap.fine_id(category["name"])
@@ -154,6 +173,13 @@ class EvaluationPipeline(BasePipeline):
 
         return gts
 
+    def _detector_level(self) -> str:
+        """Label set of the Stage-1 detector whose files det_only scores."""
+        level = str(self.cfg.get("detector", {}).get("label_level", "coarse"))
+        if level not in ("coarse", "fine"):
+            raise ValueError(f"detector.label_level must be 'coarse' or 'fine', got {level!r}")
+        return level
+
     def _load_preds(
         self, eval_ids: set[str], image_id_to_wh
     ) -> list[tuple[str, int, float, tuple[float, float, float, float]]]:
@@ -161,6 +187,7 @@ class EvaluationPipeline(BasePipeline):
         score_thr = float(self.cfg.eval.score_thr)
 
         preds: list[tuple[str, int, float, tuple[float, float, float, float]]] = []
+        n_unlabelled = 0
         for image_id in eval_ids:
             txt_path = det_dir / f"{image_id}.txt"
             if not txt_path.exists():
@@ -181,9 +208,22 @@ class EvaluationPipeline(BasePipeline):
                     cx, cy, w, h, score = (float(v) for v in parts[1:6])
                     if score < score_thr:
                         continue
+                    if class_id < 0:
+                        # OTHER_FINE_ID / UNREFINED_FINE_ID: the box got no vocabulary
+                        # label, so it predicts no class. Kept, each would be scored as a
+                        # class of its own with AP 0 and drag the mean down.
+                        n_unlabelled += 1
+                        continue
                     xyxy = bbox_utils.yolo_to_xyxy(BBox(x=cx, y=cy, w=w, h=h), width, height)
                     preds.append((image_id, class_id, score, xyxy))
 
+        if n_unlabelled:
+            logger.info(
+                "%d predictions (score>=%.2f) carry no vocabulary label (Other / un-refined) "
+                "and are left out of mAP.",
+                n_unlabelled,
+                score_thr,
+            )
         return preds
 
     def compute_detection_metrics(self) -> dict:
@@ -231,16 +271,11 @@ class EvaluationPipeline(BasePipeline):
             logger.info("cfg.fgc.ckpt_dir is None; skipping FGC metrics.")
             return None
         ckpt_dir = Path(str(ckpt_dir))
-
-        import torch
-        from torch.utils.data import DataLoader
+        if bool(self.cfg.fgc.get("global_encoder", False)):
+            return self._global_fgc_metrics(ckpt_dir)
 
         from utils.classmap import training_fine_classes
-        from utils.dataset import build_dataset, excluded_classes
-        from utils.model import build_model
-
-        split = str(self.cfg.eval.split)
-        ks = tuple(int(k) for k in self.cfg.eval.topk)
+        from utils.dataset import excluded_classes
 
         group_metrics: dict[str, dict] = {}
         pooled_y_true: list[str] = []
@@ -254,49 +289,11 @@ class EvaluationPipeline(BasePipeline):
 
             # Same list the head was trained on (held-out classes removed), so names
             # line up with the checkpoint's columns.
-            fine_names = training_fine_classes(
-                self.classmap, group, excluded_classes(self.cfg)
-            )
-            num_fine = len(fine_names)
-
-            dataset = build_dataset(self.cfg, split, group)
-            loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
-
-            model = build_model(self.cfg, group, num_fine)
-            # pipeline.fgc_train saves {"model": state_dict, "optimizer": ..., "epoch": ..., ...},
-            # not a bare state_dict -- match pipeline.fgc_infer's loading convention.
-            checkpoint = torch.load(ckpt_path, map_location="cpu")
-            model.load_state_dict(checkpoint["model"])
-            model.eval()
-
-            # ArcFace model(batch_x) with no target returns scaled cosine — order-
-            # preserving, so argmax/top-k below are unaffected. For an ArcFace model we
-            # also collect the max cosine-to-center per crop to measure how often the
-            # "Other" gate would (wrongly) reject a KNOWN crop — the false-reject rate,
-            # the signal for calibrating fgc.route.other_min_cosine.
-            from utils.model import ArcFaceModel
-
-            is_arcface = isinstance(model, ArcFaceModel)
-            all_logits: list[np.ndarray] = []
-            all_labels: list[int] = []
-            all_max_cosine: list[float] = []
-            with torch.no_grad():
-                for batch_x, batch_y in loader:
-                    logits = model(batch_x)
-                    all_logits.append(logits.cpu().numpy())
-                    all_labels.extend(int(v) for v in batch_y.tolist())
-                    if is_arcface:
-                        cosine = model.head.cosine(model.embed(batch_x))
-                        all_max_cosine.extend(
-                            float(v) for v in cosine.max(dim=1).values.cpu().tolist()
-                        )
-
-            if not all_labels:
-                logger.warning("No crops found for group=%s split=%s; skipping.", group, split)
+            fine_names = training_fine_classes(self.classmap, group, excluded_classes(self.cfg))
+            scored = self._score_crops(ckpt_path, group, fine_names)
+            if scored is None:
                 continue
-
-            logits_arr = np.concatenate(all_logits, axis=0)
-            y_true_local = all_labels
+            _, logits_arr, y_true_local, max_cosine = scored
             y_pred_local = logits_arr.argmax(axis=1).tolist()
 
             y_true_names = [fine_names[i] for i in y_true_local]
@@ -304,24 +301,15 @@ class EvaluationPipeline(BasePipeline):
 
             confusion = fgc_metrics.within_group_confusion(y_true_names, y_pred_names, fine_names)
             accuracy = fgc_metrics.within_group_accuracy(confusion)
-            topk = fgc_metrics.topk_accuracy(logits_arr, y_true_local, ks=ks)
+            topk = fgc_metrics.topk_accuracy(logits_arr, y_true_local, ks=self._ks())
 
             group_metrics[group] = {
                 "within_group_accuracy": accuracy,
                 "n_samples": len(y_true_local),
                 **topk,
             }
-            if is_arcface:
-                # All these crops ARE in-vocabulary (GT), so any that fall below the
-                # threshold are false rejects. Report the rate so the threshold can be
-                # tuned to trade false-reject against unknown-symbol recall.
-                thr = float(self.cfg.fgc.route.get("other_min_cosine", 0.0))
-                cos_arr = np.asarray(all_max_cosine)
-                group_metrics[group]["other_gate"] = {
-                    "threshold": thr,
-                    "false_reject_rate": float((cos_arr < thr).mean()),
-                    "mean_max_cosine": float(cos_arr.mean()),
-                }
+            if max_cosine is not None:
+                group_metrics[group]["other_gate"] = self._other_gate(max_cosine)
 
             self._plot_confusion(group, confusion, fine_names)
 
@@ -332,14 +320,136 @@ class EvaluationPipeline(BasePipeline):
 
         return {"groups": group_metrics, "rare_macro_f1": rare}
 
+    def _global_fgc_metrics(self, ckpt_dir: Path) -> dict | None:
+        """Protocol C: the single head of `__global__.pt` over its whole vocabulary.
+
+        The checkpoint's own `fine_classes` give the column order (and which classes it
+        was trained on), so R1b is scored on its 32 classes and a leave-out checkpoint on
+        the classes it saw, whatever fgc.exclude_classes the command carries.
+        """
+        from utils.classmap import GLOBAL_GROUP
+
+        ckpt_path = ckpt_dir / f"{GLOBAL_GROUP}.pt"
+        if not ckpt_path.exists():
+            raise FileNotFoundError(
+                f"fgc.global_encoder=true but {ckpt_path} does not exist; point "
+                "fgc.ckpt_dir at the folder holding __global__.pt"
+            )
+        scored = self._score_crops(ckpt_path, GLOBAL_GROUP, None)
+        if scored is None:
+            return None
+        names, logits_arr, y_true_local, max_cosine = scored
+        y_true = [names[i] for i in y_true_local]
+        y_pred = [names[i] for i in logits_arr.argmax(axis=1).tolist()]
+        confusion = fgc_metrics.within_group_confusion(y_true, y_pred, names)
+        families = fgc_metrics.family_breakdown(y_true, y_pred, self.classmap.fine_to_coarse)
+        cross = sum(f["cross_family"] * f["n_samples"] for f in families.values()) / len(y_true)
+        result = {
+            "encoder": GLOBAL_GROUP,
+            "checkpoint": str(ckpt_path),
+            "n_classes": len(names),
+            "n_samples": len(y_true),
+            **fgc_metrics.topk_accuracy(logits_arr, y_true_local, ks=self._ks()),
+            "macro_f1": fgc_metrics.macro_f1(y_true, y_pred, names),
+            "rare_macro_f1": fgc_metrics.rare_macro_f1(y_true, y_pred, self.classmap.rare_fine),
+            "cross_family_error_rate": cross,
+            "families": families,
+            "per_class": fgc_metrics.per_class_prf(y_true, y_pred, names),
+            "confusion": {"labels": names, "matrix": confusion},
+        }
+        if max_cosine is not None:
+            result["other_gate"] = self._other_gate(max_cosine)
+        self._plot_confusion(GLOBAL_GROUP, confusion, names)
+        logger.info(
+            "[fgc/%s] %d crops, %d classes: top1=%.4f macro_f1=%.4f cross_family=%.4f",
+            GLOBAL_GROUP,
+            len(y_true),
+            len(names),
+            result["top1"],
+            result["macro_f1"],
+            cross,
+        )
+        return result
+
+    def _ks(self) -> tuple[int, ...]:
+        return tuple(int(k) for k in self.cfg.eval.topk)
+
+    def _other_gate(self, max_cosine: list[float]) -> dict:
+        # All these crops ARE in-vocabulary (GT), so any that fall below the threshold
+        # are false rejects. Report the rate so the threshold can be tuned to trade
+        # false-reject against unknown-symbol recall.
+        thr = float(self.cfg.fgc.route.get("other_min_cosine", 0.0))
+        cos_arr = np.asarray(max_cosine)
+        return {
+            "threshold": thr,
+            "false_reject_rate": float((cos_arr < thr).mean()),
+            "mean_max_cosine": float(cos_arr.mean()),
+        }
+
+    def _score_crops(
+        self, ckpt_path: Path, group: str, fine_names: list[str] | None
+    ) -> tuple[list[str], np.ndarray, list[int], list[float] | None] | None:
+        """Run one checkpoint over the eval split's GT crops: (column names, logits
+        (N, C), labels, max cosine to a class center per crop — ArcFace only). None when
+        there are no crops. `fine_names` None takes the columns from the checkpoint."""
+        import torch
+        from torch.utils.data import DataLoader
+
+        from utils.dataset import build_dataset
+        from utils.model import ArcFaceModel, build_model
+
+        split = str(self.cfg.eval.split)
+        # pipeline.fgc_train saves {"model": state_dict, "optimizer": ..., "epoch": ..., ...},
+        # not a bare state_dict -- match pipeline.fgc_infer's loading convention.
+        checkpoint = torch.load(ckpt_path, map_location="cpu")
+        if fine_names is None:
+            fine_names = list(checkpoint["fine_classes"])
+
+        dataset = build_dataset(self.cfg, split, group, fine_classes=fine_names)
+        loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
+
+        model = build_model(self.cfg, group, len(fine_names))
+        model.load_state_dict(checkpoint["model"])
+        model.eval()
+
+        # ArcFace model(batch_x) with no target returns scaled cosine — order-
+        # preserving, so argmax/top-k are unaffected. For an ArcFace model we also
+        # collect the max cosine-to-center per crop to measure how often the "Other"
+        # gate would (wrongly) reject a KNOWN crop — the false-reject rate, the signal
+        # for calibrating fgc.route.other_min_cosine.
+        is_arcface = isinstance(model, ArcFaceModel)
+        all_logits: list[np.ndarray] = []
+        all_labels: list[int] = []
+        all_max_cosine: list[float] = []
+        with torch.no_grad():
+            for batch_x, batch_y in loader:
+                logits = model(batch_x)
+                all_logits.append(logits.cpu().numpy())
+                all_labels.extend(int(v) for v in batch_y.tolist())
+                if is_arcface:
+                    cosine = model.head.cosine(model.embed(batch_x))
+                    all_max_cosine.extend(float(v) for v in cosine.max(dim=1).values.cpu().tolist())
+
+        if not all_labels:
+            logger.warning("No crops found for group=%s split=%s; skipping.", group, split)
+            return None
+        return (
+            fine_names,
+            np.concatenate(all_logits, axis=0),
+            all_labels,
+            all_max_cosine if is_arcface else None,
+        )
+
     def _plot_confusion(self, group: str, confusion: np.ndarray, labels: list[str]) -> None:
-        """Minimal confusion-matrix PNG per group, saved next to metrics.json."""
+        """Minimal confusion-matrix PNG per group (or the global head), saved next to
+        metrics.json."""
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        fig, ax = plt.subplots(figsize=(max(4, len(labels) * 0.8), max(4, len(labels) * 0.8)))
+        side = max(4, len(labels) * (0.8 if len(labels) <= 12 else 0.45))
+        fig, ax = plt.subplots(figsize=(side, side))
         im = ax.imshow(confusion, cmap="Blues")
         ax.set_xticks(range(len(labels)))
         ax.set_yticks(range(len(labels)))
@@ -347,7 +457,8 @@ class EvaluationPipeline(BasePipeline):
         ax.set_yticklabels(labels)
         ax.set_xlabel("Predicted")
         ax.set_ylabel("True")
-        ax.set_title(f"Within-group confusion: {group}")
+        global_head = group.startswith("__")
+        ax.set_title("Global confusion" if global_head else f"Within-group confusion: {group}")
         fig.colorbar(im, ax=ax)
         fig.tight_layout()
 
@@ -362,10 +473,14 @@ class EvaluationPipeline(BasePipeline):
     def run(self) -> None:
         self.validate()
 
-        metrics: dict = {"mode": str(self.cfg.eval.mode), "split": str(self.cfg.eval.split)}
-        metrics["detection"] = self.compute_detection_metrics()
+        mode = str(self.cfg.eval.mode)
+        metrics: dict = {"mode": mode, "split": str(self.cfg.eval.split)}
+        if mode != "fgc_only":
+            metrics["detection"] = self.compute_detection_metrics()
+            if mode == "det_only":
+                metrics["detection"]["label_level"] = self._detector_level()
 
-        if str(self.cfg.eval.mode) == "det_plus_fgc":
+        if mode in ("det_plus_fgc", "fgc_only"):
             fgc_result = self.compute_fgc_metrics()
             if fgc_result is not None:
                 metrics["fgc"] = fgc_result

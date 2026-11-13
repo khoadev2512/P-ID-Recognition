@@ -26,7 +26,7 @@ fgc_groups: [valve, instrument]
 """
 
 
-def _setup(tmp_path, statuses: dict[int, tuple[str, str]], h_in, h_out):
+def _setup(tmp_path, statuses: dict[int, tuple[str, str]], h_in, h_out, h_extra=()):
     (tmp_path / "classes.yaml").write_text(_CLASSES)
     lines = ["symbol_n,status,reg_number"] + [f"{n},{s},{r}" for n, (s, r) in statuses.items()]
     (tmp_path / "symbol_map.csv").write_text("\n".join(lines) + "\n")
@@ -38,6 +38,7 @@ def _setup(tmp_path, statuses: dict[int, tuple[str, str]], h_in, h_out):
     fmt = lambda xs: "[" + ", ".join(xs) + "]"  # noqa: E731
     (tmp_path / "config.yaml").write_text(
         f"oneshot:\n  holdout:\n    h_in: {fmt(h_in)}\n    h_out: {fmt(h_out)}\n"
+        f"    h_extra: {fmt(h_extra)}\n"
     )
     return check_b5.check(
         tmp_path / "symbol_map.csv",
@@ -99,9 +100,64 @@ def test_variant_needs_a_template_but_is_kept_out_of_h(tmp_path):
     """S2 case: a ball valve drawn differently from ISO X8071 — same reg_number as the
     ISO row, no duplicate warning, and never a P1 test class."""
     rows = {**_OK, 3: ("VARIANT", "A1")}
-    errors, warns = _setup(tmp_path, rows, ["Symbol_1"], ["Symbol_4"])
+    errors, warns = _setup(tmp_path, rows, ["Symbol_2"], ["Symbol_4"])
     assert errors == [] and not any("one ISO symbol" in w for w in warns)
     errors, _ = _setup(tmp_path, rows, ["Symbol_3"], ["Symbol_4"])
     assert any("h_in Symbol_3" in e and "VARIANT" in e for e in errors)
     errors, _ = _setup(tmp_path, {**_OK, 3: ("VARIANT", "")}, ["Symbol_1"], ["Symbol_4"])
     assert any("VARIANT but reg_number is empty" in e for e in errors)
+
+
+# VARIANT rule (PLAN B5b): S5 valve_ball in h_in needs S2 / S13 (same X8071) in h_extra.
+_WITH_VARIANT = {**_OK, 3: ("VARIANT", "A1")}  # Symbol_3 draws Symbol_1's symbol differently
+
+
+def test_h_in_with_its_variant_still_in_training_is_an_error(tmp_path):
+    errors, _ = _setup(tmp_path, _WITH_VARIANT, ["Symbol_1"], ["Symbol_4"])
+    assert any("h_in Symbol_1" in e and "Symbol_3" in e and "h_extra" in e for e in errors)
+
+
+def test_h_in_with_its_variant_in_h_extra_is_clean(tmp_path):
+    errors, _ = _setup(tmp_path, _WITH_VARIANT, ["Symbol_1"], ["Symbol_4"], ["Symbol_3"])
+    assert errors == []
+
+
+def test_a_variant_of_a_class_not_held_out_needs_nothing(tmp_path):
+    """The rule follows h_in: Symbol_2 (B2) is held out, Symbol_3 varies A1 — unrelated."""
+    errors, _ = _setup(tmp_path, _WITH_VARIANT, ["Symbol_2"], ["Symbol_4"])
+    assert errors == []
+
+
+@pytest.mark.parametrize(
+    "rows, h_extra, needle",
+    [
+        (_WITH_VARIANT, ["Symbol_5"], "needs VARIANT"),  # an OOV class
+        ({**_OK, 3: ("VARIANT", "B2")}, ["Symbol_3"], "not a VARIANT of an h_in class"),
+    ],
+)
+def test_h_extra_must_be_a_variant_of_an_h_in_class(tmp_path, rows, h_extra, needle):
+    errors, _ = _setup(tmp_path, rows, ["Symbol_1"], ["Symbol_4"], h_extra)
+    assert any(needle in e for e in errors)
+
+
+def test_h_extra_counts_towards_emptying_a_family(tmp_path):
+    rows = {**_OK, 6: ("VARIANT", "A1")}  # flange's only class is a variant of Symbol_1
+    errors, _ = _setup(tmp_path, rows, ["Symbol_1"], ["Symbol_4"], ["Symbol_6"])
+    assert any("'flange'" in e for e in errors)
+
+
+def test_the_shipped_lists_pass(tmp_path):
+    """configs/config.yaml + docs/symbol_mapping/symbol_map.csv as committed: no error, so
+    R1a on Colab never starts from a list that breaks a B5 rule."""
+    root = Path(__file__).resolve().parents[1]
+    vocab = root / "data/raw/iso_symbols/vocab.csv"
+    if not vocab.exists():
+        pytest.skip("ISO vocab not present")
+    errors, _ = check_b5.check(
+        root / "docs/symbol_mapping/symbol_map.csv",
+        vocab,
+        root / "data/raw/iso_symbols_clean",
+        root / "data/canonical/classes.yaml",
+        root / "configs/config.yaml",
+    )
+    assert errors == []

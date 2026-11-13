@@ -15,6 +15,11 @@ ensemble_boxes.weighted_boxes_fusion instead.
 Output is the coarse symbol inventory consumed by pipeline.fgc_infer / pipeline.evaluation:
 one 6-column YOLO-format txt (class_id cx cy w h score) per image under
 derived/detections/<split>/<image_id>.txt.
+
+detector.label_level=fine (the one-stage 32-class baseline of the closed-set chapter): the
+same files hold FINE ids (classes.yaml fine: order), scored with eval.mode=det_only. The
+checkpoint's own class names must equal the label set named by detector.label_level, so a
+coarse model is never read as a fine one or the other way round.
 """
 
 from __future__ import annotations
@@ -40,19 +45,27 @@ logger = logging.getLogger(__name__)
 
 
 def _write_detections_txt(
-    path: Path, detections: list[Detection], classmap: ClassMap, image_w: int, image_h: int
+    path: Path,
+    detections: list[Detection],
+    classmap: ClassMap,
+    image_w: int,
+    image_h: int,
+    fine: bool = False,
 ) -> None:
     """Write detections as 6-column YOLO rows: class_id cx cy w h score (normalized box).
 
     bbox_utils.write_yolo_txt only handles the 5-column (no-score) form used for ground
     truth, so this local helper covers the extra trailing confidence column detections
-    need.
+    need. `fine`: write `det.fine_class`'s fine id instead of the coarse id.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w") as f:
         for det in detections:
             yolo_box = xyxy_to_yolo(det.bbox.to_xyxy(), image_w, image_h)
-            class_id = classmap.coarse_id(det.coarse_class)
+            if fine:
+                class_id = classmap.fine_id(det.fine_class)
+            else:
+                class_id = classmap.coarse_id(det.coarse_class)
             f.write(
                 f"{class_id} {yolo_box.x:.6f} {yolo_box.y:.6f} "
                 f"{yolo_box.w:.6f} {yolo_box.h:.6f} {det.score:.6f}\n"
@@ -83,6 +96,38 @@ class DetectInferPipeline(BasePipeline):
         split = str(self.cfg.eval.split)
         subset = manifest[manifest["split"] == split]
         return [str(i) for i in subset["id"].tolist()]
+
+    def _label_level(self) -> str:
+        level = str(self.cfg.detector.get("label_level", "coarse"))
+        if level not in ("coarse", "fine"):
+            raise ValueError(f"detector.label_level must be 'coarse' or 'fine', got {level!r}")
+        return level
+
+    def _check_model_names(self, model: YOLO) -> None:
+        """The checkpoint's class names (from the data.yaml it was trained on) must be the
+        label set of detector.label_level, in classes.yaml order: the label id is read
+        as an index into that list."""
+        level = self._label_level()
+        want = self.classmap.coarse_classes if level == "coarse" else self.classmap.fine_classes
+        names = model.names
+        have = [names[i] for i in range(len(names))] if isinstance(names, dict) else list(names)
+        if have != list(want):
+            raise ValueError(
+                f"detector.ckpt classes {have[:4]}... ({len(have)}) are not the "
+                f"detector.label_level={level} classes of classes.yaml {list(want)[:4]}... "
+                f"({len(want)}); set detector.label_level to match the checkpoint"
+            )
+
+    def _detection(self, box: BBox, label: int, score: float) -> Detection:
+        if self._label_level() == "fine":
+            fine = self.classmap.fine_classes[label]
+            return Detection(
+                bbox=box,
+                coarse_class=self.classmap.fine_to_coarse[fine],
+                score=score,
+                fine_class=fine,
+            )
+        return Detection(bbox=box, coarse_class=self.classmap.coarse_classes[label], score=score)
 
     def _detect_image(self, model: YOLO, image, image_w: int, image_h: int) -> list[Detection]:
         """Slice `image` with SAHI, run YOLO per tile, fuse tile detections with WBF."""
@@ -149,12 +194,10 @@ class DetectInferPipeline(BasePipeline):
             merged_boxes, merged_scores, merged_labels, strict=True
         ):
             detections.append(
-                Detection(
-                    bbox=BBox.from_xyxy(
-                        bx1 * image_w, by1 * image_h, bx2 * image_w, by2 * image_h
-                    ),
-                    coarse_class=self.classmap.coarse_classes[int(label)],
-                    score=float(score),
+                self._detection(
+                    BBox.from_xyxy(bx1 * image_w, by1 * image_h, bx2 * image_w, by2 * image_h),
+                    int(label),
+                    float(score),
                 )
             )
         return detections
@@ -162,6 +205,8 @@ class DetectInferPipeline(BasePipeline):
     def run(self) -> None:
         self.validate()
         model = YOLO(str(self.cfg.detector.ckpt))
+        self._check_model_names(model)
+        fine = self._label_level() == "fine"
         split = str(self.cfg.eval.split)
         image_ids = self._image_ids()
         out_dir = self.paths.derived / "detections" / split
@@ -179,7 +224,7 @@ class DetectInferPipeline(BasePipeline):
 
             detections = self._detect_image(model, image, w, h)
             out_path = out_dir / f"{image_id}.txt"
-            _write_detections_txt(out_path, detections, self.classmap, w, h)
+            _write_detections_txt(out_path, detections, self.classmap, w, h, fine)
             logger.info("%s: %d detections -> %s", image_id, len(detections), out_path)
 
 
