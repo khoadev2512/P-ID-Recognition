@@ -191,6 +191,24 @@ R1a; không xem số P1 rồi sửa H.
 **Gửi lại**: log 5 epoch (loss, `val_acc`, thời gian/epoch), dòng in của 5b, hai dòng `prototype
 separation` của mục 7, lỗi nếu có.
 
+## 5e. Eval one-shot mức crop — notebook §8 + §9 (2026-11-13)
+
+**Trước khi mở Colab**: commit + push code B6b-1 **và** `configs/splits/digitizepid_val_test.json`
+(notebook đọc file này từ repo đã clone).
+
+| Mục | Cell | Việc | Kiểm / gửi lại |
+|---|---|---|---|
+| 1–4 | như §5d | mount, clone, giải nén crop, đọc H | 32 lớp ở cả hai split |
+| 7 | R2 | chỉ nếu `encoders/iso_prototypes*.pt` chưa có | — |
+| 8 | C | `fgc_only ++eval.image_subset=test` | top-1, macro-F1, 5 lớp yếu nhất |
+| **9a** | **chọn τ** | cả `lo` và `full`, chỉ `val_sel`, lớp nhóm S | in τ quy tắc A / B / B bỏ cặp sinh đôi, số crop, lớp dùng |
+| 9b | P1 | `__global_lo__.pt`, `h_in` vs `h_out` | macro top-1/top-3 `h_in`, AUROC, OSCR, từng lớp, "Other" tại ba τ |
+| 9c | P2 | `__global__.pt`, nửa `test` | S / V / V_of_S / OOV_seen, AUROC, OSCR, "Other" tại ba τ |
+
+**Không làm**: không chạy 9b/9c trước 9a; không đổi τ sau khi thấy số 9b/9c; không chạy lại 9c nhiều lần
+(nửa `test`). **Gửi lại**: toàn bộ in ra của 8, 9a, 9b, 9c + ba file `oneshot_*_crops.csv` (để phân tích
+lại không cần GPU) + hai `oneshot_*_sweep.png`.
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

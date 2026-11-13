@@ -84,11 +84,17 @@ def test_prototypes_step_is_wired(code_cells):
 def test_evaluation_scores_the_global_head_closed_set(code_cells):
     """Protocol C (B6c): without fgc.global_encoder=true evaluation looks for per-group
     <group>.pt and skips the global encoder; fgc_only needs no detector output."""
-    evals = [c for c in code_cells if "run_pipeline.py evaluate" in _active([c])]
+    evals = [
+        c
+        for c in code_cells
+        if "run_pipeline.py evaluate" in _active([c]) and "eval.mode=oneshot" not in _active([c])
+    ]
     assert evals and all(
         "fgc.global_encoder=true" in _active([c]) and "eval.mode=fgc_only" in _active([c])
         for c in evals
     )
+    # the exam half only: val_sel chose tau (and, with val_acc, the checkpoint)
+    assert all("++eval.image_subset=test" in _active([c]) for c in evals)
 
 
 def test_both_encoders_train_to_the_same_fixed_epochs(code_cells):
@@ -109,4 +115,31 @@ def test_finalize_is_defined_apart_from_its_calls(code_cells):
     assert "finalize('" not in _active([definition])
     calls = [c for c in code_cells if "finalize('" in _active([c])]
     assert len(calls) == 2 and all("def finalize(" not in c for c in calls)
-    assert "__global__.ep{epoch}.pt" in definition and "st['epoch'] + 1 == epoch" in definition
+    assert "newest(f'__global__.ep{epoch}.pt') + newest('__global__.pt')" in definition
+    assert "st['epoch'] + 1 == epoch" in definition
+
+
+def test_oneshot_eval_section_runs_tau_on_val_sel_then_p1_and_p2_on_the_right_data(code_cells):
+    """B6b-1: tau on val_sel for both encoders, P1 on the leave-out encoder over crops it never
+    trained on (no image subset), P2 on the full encoder over the test half; mean aggregate."""
+    cells = [c for c in code_cells if "eval.mode=oneshot" in _active([c])]
+    by = {p: [c for c in cells if f"protocol={p}" in _active([c])] for p in ("tau", "p1", "p2")}
+    assert all(len(v) == 1 for v in by.values()) and len(cells) == 3
+    tau, p1, p2 = (_active(by[p]) for p in ("tau", "p1", "p2"))
+    assert "++eval.image_subset=val_sel" in tau and "test" not in tau.split("image_subset=")[1][:8]
+    assert "__global_lo__.pt" in tau and "__global__.pt" in tau and "iso_prototypes_lo.pt" in tau
+    assert "image_subset" not in p1
+    assert "oneshot.encoder_ckpt=$ENC_DIR/__global_lo__.pt" in p1
+    assert "oneshot.prototypes=$ENC_DIR/iso_prototypes_lo.pt" in p1
+    assert "++eval.image_subset=test" in p2
+    assert "oneshot.encoder_ckpt=$ENC_DIR/__global__.pt" in p2
+    assert "oneshot.prototypes=$ENC_DIR/iso_prototypes.pt" in p2
+    for code in (tau, p1, p2):
+        assert "oneshot.aggregate=mean" in code and "data_root=$LOCAL_DATA_ROOT" in code
+        assert "oneshot.vocab_csv=$REPO_DATA/iso_symbols/vocab.csv" in code
+    order = [
+        next(i for i, c in enumerate(code_cells) if c is by[p][0]) for p in ("tau", "p1", "p2")
+    ]
+    assert order == sorted(order)  # tau is chosen before the test half is touched
+    evaluate_c = next(i for i, c in enumerate(code_cells) if "run_dir=$RUNS_DIR/eval_c" in c)
+    assert evaluate_c < order[0]

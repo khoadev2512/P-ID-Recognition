@@ -202,6 +202,8 @@ class OneShotClassifier:
         }
         self._subsets: dict[str, PrototypeDirectory] = {}
         self._warned: set[str] = set()
+        # The encoder checkpoint's training classes; set by load_oneshot_classifier.
+        self.encoder_classes: list[str] = []
 
     def _candidates(self, coarse_class: str) -> PrototypeDirectory:
         if not self.route_by_coarse:
@@ -229,12 +231,16 @@ class OneShotClassifier:
     def classify(self, crop: np.ndarray, coarse_class: str) -> tuple[str, str, float, float]:
         """(label, best_name, best_cos, second_cos) for one crop; see module docstring."""
         directory = self._candidates(coarse_class)
-        views = make_views(Image.fromarray(crop), self.views, self.background)
-        emb = embed_images(self.encoder, views, self.transform, self.device)
+        emb = self.embed_crop(crop)
         gated = directory.match_views(emb, self.min_cosine, self.aggregate)
         free = directory.match_views(emb, None, self.aggregate)
         label = OTHER_CLASS_NAME if gated.is_other else gated.name
         return label, free.name, free.cosine, self._second_cosine(directory, emb, free.name)
+
+    def embed_crop(self, crop: np.ndarray) -> torch.Tensor:
+        """The (V, D) unit embeddings of a crop's query views (oneshot.query_views)."""
+        views = make_views(Image.fromarray(crop), self.views, self.background)
+        return embed_images(self.encoder, views, self.transform, self.device)
 
     def _second_cosine(
         self, directory: PrototypeDirectory, emb: torch.Tensor, best_name: str
@@ -283,7 +289,9 @@ def load_oneshot_classifier(cfg: DictConfig, transform, device) -> OneShotClassi
     encoder, fine_classes = load_arcface_encoder(cfg, ckpt, device)
     directory = PrototypeDirectory.load(Path(str(cfg.oneshot.prototypes)))
     check_encoder_matches_prototypes(directory, ckpt, fine_classes, cfg)
-    return OneShotClassifier(encoder, directory, cfg, transform, device)
+    classifier = OneShotClassifier(encoder, directory, cfg, transform, device)
+    classifier.encoder_classes = fine_classes
+    return classifier
 
 
 def require_oneshot_inputs(cfg: DictConfig) -> None:

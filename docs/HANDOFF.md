@@ -500,6 +500,74 @@ Script `p2_mini.py` (đặt ở `/content/`, chạy với `--max-per-class 50`; 
 - Lề template: macro S 0.70 (1.0) vs 0.67 (1.2); 1.2 sửa một phần S3 nhưng làm hỏng S10.
 - Mỗi lớp ≈ một điểm dữ liệu (50 crop cùng một dự đoán) → báo cáo THEO LỚP; không cần chạy đủ crop.
 
+### R1a (chia A) + R2 — XONG 2026-11-13
+```
+holding out 13 classes: S2 S3 S4 S5 S9 S10 S12 S13 S15 S18 S19 S27 S30
+19 fine classes, 29360 train crops, 7329 val crops
+epoch 1  train_loss=1.7550 train_acc=0.8336 val_loss=0.0000 val_acc=0.9999
+epoch 2  train_loss=0.0423 train_acc=0.9939 val_loss=0.0004 val_acc=0.9999
+epoch 3  train_loss=0.0066 train_acc=0.9989 val_loss=0.0000 val_acc=1.0000   -> .ep3.pt (CMP_EPOCH)
+epoch 4  train_loss=0.0216 train_acc=0.9974 val_loss=0.0000 val_acc=1.0000
+epoch 5  train_loss=0.0182 train_acc=0.9970 val_loss=0.0000 val_acc=1.0000   -> .ep5.pt
+```
+- Run `runs/r1a/2026-11-13_11-05-11/`. Finalize: 19 lớp, **epoch 3**, không rò rỉ →
+  `runs/encoders/__global_lo__.pt`. (Finalize lấy `__global__.pt` của epoch 3, trùng nội dung với
+  `.ep3.pt` vì best `val_acc` rơi đúng epoch 3; notebook đã sửa để ưu tiên `.ep<N>.pt`.)
+- Bão hoà giống R1b → quy tắc epoch cố định là đúng chỗ.
+- R2, 1 view, scale 1.0:
+
+| Encoder | mean off-diag cos | max | cặp sát nhất |
+|---|---|---|---|
+| R1b `__global__.pt` (32 lớp) | 0.245 | 0.989 | pump_general – vessel_spherical |
+| R1a `__global_lo__.pt` (19 lớp) | 0.315 | 0.957 | valve_globe – check_valve_globe |
+
+- Hai encoder là hai không gian khác nhau: so **thứ hạng, z-score trong từng ma trận, láng giềng gần
+  nhất (NN)**, không so trị số tuyệt đối. Separation chỉ là chỉ báo; bằng chứng P1 là B6b-1.
+
+**So ma trận đầy đủ (2026-11-13, 861 cặp, prototype 1 view scale 1.0):**
+
+| | mean | p90 | p99 | max | >0.85 | >0.9 | >0.95 |
+|---|---|---|---|---|---|---|---|
+| R1b | 0.245 | 0.415 | 0.919 | 0.989 | 17 | 12 | 7 |
+| R1a | 0.315 | 0.560 | 0.840 | 0.957 | 6 | 3 | 2 |
+
+1. **Cấu trúc phụ thuộc mạnh vào tập train**: Spearman giữa cos các cặp của R1b và R1a chỉ 0.458;
+   NN đổi ở 30/42 template. Hệ quả: "max separation" một số là chỉ báo không ổn định → báo phân
+   bố + NN theo nhóm; τ phải chọn riêng cho từng encoder (đã đúng theo plan).
+2. **Cụm tròn của R1b vỡ một phần ở R1a**: pump_diaphragm–vessel_spherical 0.965 → 0.359,
+   viewing_glass rời cụm (NN → silencer 0.639); nhưng cụm bơm/máy nén khác hình thành (pump_general–
+   compressor_vacuum 0.868, pump_centrifugal–hx_general 0.884). Giả thuyết (CHƯA kiểm): R1b train
+   S27 `isa_bubble_ro` (vòng tròn trơn), R1a không → ở R1b mọi template có vòng tròn lớn bị kéo về
+   hướng của S27. Kiểm được bằng class center trong checkpoint (template nào gần center S27 nhất).
+3. **Cụm van globe ổn định ở cả hai encoder**: globe–butterfly 0.981 → 0.951 (hạng 3 → 2),
+   globe–check_valve_globe 0.837 → 0.957. Lỗi "đặc điểm không cộng dồn" không do tập train cụ thể
+   → kết quả vững cho luận văn.
+4. **Template H chọn mất tách biệt khi lớp của nó bị giữ ra**: NN cos trung bình 0.607 → 0.792
+   (z +2.35 → +2.88), ngược với S (z 1.88 → 1.87, không đổi) và V (0.832 → 0.677). Cụ thể:
+   valve_general ↔ valve_needle 0.389 → 0.790 (cả hai `h_in`, NN của nhau); interchangeable_disc ↔
+   interchangeable_disc_open 0.726 (NN của nhau, cả hai `h_in`), open_disc 0.717; valve_ball NN →
+   pump_general 0.761. Đọc: encoder chỉ tách được template bằng đặc điểm nó đã học từ lớp train.
+
+**Class center (ArcFace) ↔ template — CƠ CHẾ của cụm (2026-11-13).** cos(template, tâm lớp train):
+- **Giả thuyết S27 BỊ BÁC**: tâm S27 xa mọi template (max 0.201, motor_electric). Cụm tròn của R1b
+  là do **S15** (`valve_rotary_generic_other_std`, OOV, `h_out`): pump_general, pump_diaphragm,
+  compressor_vacuum, vessel_spherical, viewing_glass đều có tâm gần nhất là S15 (0.56–0.66).
+- **Cụm = các template chung một tâm lớp gần nhất.** R1b: S15 hút 5 template tròn; S3 hút globe,
+  butterfly, check_valve_globe/swing. R1a (không có S15, S3): S25 (`emergency_relief_valve`,
+  UNSURE) hút 9 template bơm/hx; S6 (butterfly VARIANT) hút 8 template van. Cụm van tồn tại ở cả hai
+  vì luôn còn một lớp van "bow-tie" trong train để hút chúng.
+- **Tâm lớp → template gần nhất tái hiện P2 thu nhỏ của R1b 19/19 lớp**: đúng 7 lớp S + S22, sai
+  đúng S3 → butterfly, S24 → pipeline, S21 → agitator_general, S8 → reducer, S23 → hx_straight_tube
+  (cùng tên sai như P2 thu nhỏ). Lý do: crop DigitizePID gom chặt quanh tâm lớp (val_acc ≈ 1). →
+  **Proxy gần như miễn phí cho P2 trên lớp đã train** (không cần crop/GPU): dùng để sàng lề template,
+  ★ `pipeline`, S21 trước khi chạy P2 thật. KHÔNG dùng được cho P1 (lớp giữ ra không có tâm).
+- ★ `pipeline` gần tâm S24 hơn chính ★ flow_direction (0.604 > 0.546) ở R1b → giải thích vấn đề 4;
+  ở R1a đảo lại (flow_direction 0.507, pipeline không trong top 3). S21 ở R1a: ★ flanged_connection
+  hạng 1 nhưng cos chỉ 0.194.
+- OOV đã train ở R1b nằm gần template: S15 → compressor_vacuum 0.664, S29 → compressor_centrifugal
+  0.605, S26 → pump_gear 0.489 → rủi ro cổng "Other" ở P2/P4 với R1b.
+- Script: scratchpad `sep_compare.py` + đoạn class-center (chưa vào `scripts/`).
+
 ### Chờ user quyết (PLAN "Vấn đề mở 2026-11-12")
 - Điểm 4: bỏ ★ `pipeline` (và template thuần đường kẻ) khỏi thư mục prototype?
 - Điểm 5: S21 giữ ISO hay đổi VARIANT? (xem crop cạnh template mặt bích, như đã làm với S6)
@@ -516,13 +584,14 @@ Script `p2_mini.py` (đặt ở `/content/`, chạy với `--max-per-class 50`; 
 4. ✅ B5b (2026-11-13): `check_b5.py` kiểm luật VARIANT, h_extra, không rút cạn họ; chia A 0 lỗi.
 5. ✅ Quyết 2026-11-13: R1b dùng epoch 3, không resume; R1a so ở cùng epoch 3 (`fgc_train` +
    notebook đã sửa).
-6. Train R1a (chia A): **sẵn sàng** sau khi push code (notebook mới cần `holdout_classes` 3 danh
-   sách + `fgc.save_epochs`). Runbook §5d.
+6. ✅ R1a (chia A) xong 2026-11-13: `__global_lo__.pt` (epoch 3), `iso_prototypes_lo.pt`.
 7. Code đường găng P4: B6a, B6b (P2/P4, AUROC/OSCR, đường quét τ, chọn τ trên `val_sel`), B6d.
    ✅ B6c (2026-11-13): `evaluate eval.mode=fgc_only` cho `__global__.pt`, YOLO fine chấm bằng
-   `det_only detector.label_level=fine`; còn lọc crop theo `test` (PLAN B6c "Chưa làm").
+   `det_only detector.label_level=fine`; lọc `++eval.image_subset=test` ✅ (B6b-1).
    ✅ B6a (2026-11-13): `++fgc.oneshot=true` → `derived/detections_oneshot/` (điểm chưa cắt ngưỡng
-   cho B6b). Còn: B6b, B6d.
+   cho B6b).
+   ✅ B6b-1 (2026-11-13): `eval.mode=oneshot` p1/p2/tau mức crop; notebook §9 → **chạy trên Colab**
+   (RUNBOOK §5e). Còn: B6b-2 (P4) + B6d.
 8. (Nếu rẻ) B4a: separation encoder chỉ-ImageNet.
 9. Chưa đụng `test` cho tới khi chốt checkpoint, τ, lề template, (d).
 
@@ -541,6 +610,17 @@ Script `p2_mini.py` (đặt ở `/content/`, chạy với `--max-per-class 50`; 
   với cosine cao → cổng "Other" khó chặn. S30 (`isa_square_sta`, hình vuông) ít rủi ro hơn.
 - `h_extra` không thi, nhưng loại S2/S13/S12 khỏi train có thể làm S5/S4 (`h_in`) khớp ★ ISO dễ
   hơn ở R1a so với R1b (không còn lớp anh em bị ArcFace đẩy ra xa — vấn đề mở 6).
+
+**Dự đoán bổ sung từ ma trận R1a (ghi 2026-11-13, trước B6b-1):**
+- S4 (valve_general) và S10 (valve_needle) nhầm sang nhau.
+- S18 và S19 nhầm sang nhau và/hoặc sang open_disc.
+- S3 → check_valve_globe hoặc valve_butterfly (sai ở cả R1b lẫn R1a).
+- S5 (valve_ball) có nguy cơ khớp template thân tròn (pump_general).
+- P1 trên các lớp `h_in` thấp hơn P2 trên các lớp S tương ứng ở R1b (cùng ★) — đó là cái giá của
+  "chưa thấy", là số chính của P1.
+- **Sửa đổi (2026-11-13, sau phân tích class center, vẫn trước P1)**: rủi ro "Other" lớn nhất trong
+  `h_out` là **S15** (ở R1b tâm S15 ≈ template tròn 0.66), không phải S27 (tâm S27 xa mọi template).
+  Dự đoán S27 ở trên giữ nguyên để đối chiếu.
 
 ### Stage 1 — ĐÃ CHỐT trong PLAN (Quyết định 2026-11-09 mục 10)
 Giữ detector 8 lớp coarse + `agnostic_merge` lúc suy luận (B6e); detector 1 lớp là ablation (giả

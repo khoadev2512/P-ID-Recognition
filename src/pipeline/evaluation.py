@@ -13,6 +13,12 @@ eval.mode:
     det_plus_fgc  end-to-end on derived/detections_fgc (fine labels), plus the FGC metrics.
     fgc_only      the FGC metrics alone, on ground-truth crops: needs no detector output,
                   so a freshly trained `__global__.pt` can be scored on its own.
+    oneshot       crop-level one-shot evaluation against the ISO prototypes (protocols p1 /
+                  p2 / tau, eval.oneshot.protocol; pipeline.oneshot_eval, PLAN B6b).
+
+The crop-level modes (fgc_only, oneshot) read crops_fgc/val through eval.image_subset
+(all | val_sel | test, image ids from eval.splits_file): the 100 val images are split 50/50
+by image so that checkpoint / tau selection (val_sel) and the exam (test) do not share crops.
 
 With fgc.global_encoder=true the FGC metrics are those of the single head in
 `<fgc.ckpt_dir>/__global__.pt` (protocol C, docs/PLAN_STAGE2_ONESHOT.md B6c): top-k,
@@ -37,7 +43,7 @@ from utils.types import BBox
 
 logger = logging.getLogger(__name__)
 
-MODES = ("det_only", "det_plus_fgc", "fgc_only")
+MODES = ("det_only", "det_plus_fgc", "fgc_only", "oneshot")
 
 
 def _stem(file_name: str) -> str:
@@ -87,9 +93,31 @@ class EvaluationPipeline(BasePipeline):
         mode = str(self.cfg.eval.mode)
         if mode not in MODES:
             raise ValueError(f"cfg.eval.mode must be one of {MODES}, got {mode!r}")
+        subset = str(self.cfg.eval.get("image_subset", "all"))
+        if mode in ("det_only", "det_plus_fgc") and subset != "all":
+            raise ValueError(
+                f"eval.image_subset={subset!r} only applies to the crop-level modes "
+                "(fgc_only, oneshot), not to detection metrics"
+            )
+        if mode == "oneshot":
+            from pipeline.oneshot_eval import PROTOCOLS
+            from pipeline.oneshot_infer import require_oneshot_inputs
+            from utils.dataset import image_subset_ids
+
+            require_oneshot_inputs(self.cfg)
+            protocol = (self.cfg.eval.get("oneshot", None) or {}).get("protocol", None)
+            if protocol not in PROTOCOLS:
+                raise ValueError(
+                    f"eval.oneshot.protocol must be one of {PROTOCOLS}, got {protocol!r}"
+                )
+            image_subset_ids(self.cfg, "val")  # unknown subset name / unreadable splits file
+            return True
         if mode == "fgc_only":
+            from utils.dataset import image_subset_ids
+
             if self.cfg.fgc.get("ckpt_dir", None) is None:
                 raise ValueError("eval.mode=fgc_only needs fgc.ckpt_dir (the checkpoints to score)")
+            image_subset_ids(self.cfg, str(self.cfg.eval.split))  # subset != all needs split=val
             return True
 
         det_dir = self._predictions_dir()
@@ -395,7 +423,7 @@ class EvaluationPipeline(BasePipeline):
         import torch
         from torch.utils.data import DataLoader
 
-        from utils.dataset import build_dataset
+        from utils.dataset import build_dataset, crop_image_id, image_subset_ids
         from utils.model import ArcFaceModel, build_model
 
         split = str(self.cfg.eval.split)
@@ -405,7 +433,18 @@ class EvaluationPipeline(BasePipeline):
         if fine_names is None:
             fine_names = list(checkpoint["fine_classes"])
 
-        dataset = build_dataset(self.cfg, split, group, fine_classes=fine_names)
+        image_ids = image_subset_ids(self.cfg, split)
+        dataset = build_dataset(
+            self.cfg, split, group, fine_classes=fine_names, image_ids=image_ids
+        )
+        if image_ids is not None:
+            logger.info(
+                "eval.image_subset=%s: kept %d crops from %d images (group=%s)",
+                self.cfg.eval.image_subset,
+                len(dataset),
+                len({crop_image_id(p.name) for p, _ in dataset.samples}),
+                group,
+            )
         loader = DataLoader(dataset, batch_size=64, shuffle=False, num_workers=0)
 
         model = build_model(self.cfg, group, len(fine_names))
@@ -467,6 +506,17 @@ class EvaluationPipeline(BasePipeline):
         plt.close(fig)
 
     # ------------------------------------------------------------------ #
+    # one-shot metrics
+    # ------------------------------------------------------------------ #
+
+    def compute_oneshot_metrics(self) -> dict:
+        """Crop-level one-shot evaluation (eval.oneshot.protocol = p1 | p2 | tau), see
+        pipeline.oneshot_eval. Writes its per-crop CSV (and sweep PNG) next to metrics.json."""
+        from pipeline.oneshot_eval import OneShotEvaluation
+
+        return OneShotEvaluation(self.cfg, self.output_dir).run()
+
+    # ------------------------------------------------------------------ #
     # driver
     # ------------------------------------------------------------------ #
 
@@ -475,7 +525,11 @@ class EvaluationPipeline(BasePipeline):
 
         mode = str(self.cfg.eval.mode)
         metrics: dict = {"mode": mode, "split": str(self.cfg.eval.split)}
-        if mode != "fgc_only":
+        if mode in ("fgc_only", "oneshot"):
+            metrics["image_subset"] = str(self.cfg.eval.get("image_subset", "all"))
+        if mode == "oneshot":
+            metrics["oneshot"] = self.compute_oneshot_metrics()
+        elif mode != "fgc_only":
             metrics["detection"] = self.compute_detection_metrics()
             if mode == "det_only":
                 metrics["detection"]["label_level"] = self._detector_level()

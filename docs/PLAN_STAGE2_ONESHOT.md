@@ -281,7 +281,7 @@ R1b) → báo cáo tách khỏi `other_iso`.
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► (B5b ✅) ─► (B6c ✅) ─► (B6a ✅) ─► B6b GĐ5
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► (B5b ✅) ─► (B6c ✅) ─► (B6a ✅) ─► B6b GĐ5 (B6b-1 ✅)
   ─► B6d đề thi OPEN100-ISO ─► B6e Stage 1 agnostic_merge ─► B4a baseline
 B5 🧑 CHỌN danh sách H (+ B5b 🤖 luật VARIANT trong check_b5) ── song song, ⛔ PHẢI XONG trước R1 ──►
 ```
@@ -725,6 +725,31 @@ và của GT DigitizePID.
 
 ## B6b — GĐ5: eval one-shot + "Other" 🤖 (Phase A)
 
+**B6b-1 ✅ 2026-11-13 — mức crop trên DigitizePID (P1, P2, chọn τ).** Còn B6b-2: P4 OPEN100-ISO,
+`eval.class_agnostic`, recall theo nhóm, box sai của detector (đi cùng B6d).
+- `eval.mode=oneshot ++eval.oneshot.protocol=p1|p2|tau` (`src/pipeline/oneshot_eval.py`); metric
+  thuần numpy `src/utils/oneshot_metrics.py` (AUROC rank-based, OSCR, sweep, quy tắc A/B,
+  `assign_groups`). Mỗi lượt ghi `oneshot_<protocol>_crops.csv` (top-3 + cos từng crop, không gate)
+  → mọi số phụ thuộc τ tính lại được không cần GPU.
+- Crop nhúng qua view box + 10% → `oneshot.query_views` → `oneshot.aggregate` (notebook: `mean`),
+  so với MỌI prototype (không route coarse).
+- **p1**: `h_in` (biết) vs `h_out` (lạ), crop train + val; guard rò rỉ raise; `h_extra` không thi;
+  từ chối `image_subset` ≠ `all`. **p2**: S, V (biết) vs `OOV_seen`; `val` lọc `image_subset`
+  (notebook: `test`); nhóm phụ `V_of_S` (VARIANT có template thuộc lớp S: S2, S12, S13 ở R1b) báo
+  riêng, không gộp vào AUROC/OSCR → R1b S=10 / V=6 như bảng nhóm. UNSURE loại, đếm số crop.
+  **tau**: chỉ `val_sel`, chỉ lớp nhóm S encoder đã train; quy tắc A; quy tắc B (bỏ ★ của chính lớp);
+  B lần nữa bỏ thêm mọi ★ có cos > 0.95 với ★ đó (`twin_pairs`). Youden, hoà → τ lớn nhất, đặt giữa
+  hai cos quan sát liền kề. Không ghi τ vào config.
+- `++eval.image_subset=all|val_sel|test` (+ `++eval.splits_file`) dùng chung cho `fgc_only` (C)
+  và one-shot; raise nếu split ≠ `val`.
+- Key mới (qua `++`, chưa vào `config.yaml`): `eval.image_subset` (`all`), `eval.splits_file`,
+  `eval.oneshot.protocol`, `eval.oneshot.tau_tpr` (0.95), `eval.oneshot.twin_cos` (0.95),
+  `oneshot.symbol_map` (`docs/symbol_mapping/symbol_map.csv`). Trên Colab truyền
+  `oneshot.vocab_csv=$REPO_DATA/iso_symbols/vocab.csv`.
+- Notebook §9 (9a τ cả hai encoder → 9b P1 → 9c P2); 9b/9c báo "Other" tại ba τ của 9a, tính từ
+  CSV (`other_at_tau` trong metrics.json là tại placeholder 0.35). §8 C: `++eval.image_subset=test`.
+- Test: `test_oneshot_metrics.py`, `test_oneshot_eval.py` (+42; tổng 696).
+
 Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và như protocol OSSR-PID) — tách
 được lỗi Stage 2 khỏi lỗi detection. Chỉ số P1 mới đặt cạnh 85.78% của OSSR-PID được.
 
@@ -813,10 +838,8 @@ Eval ở **mức crop** trước (như `compute_fgc_metrics` hiện tại và nh
 - Notebook mục 8: chạy C ngay sau R1b.
 
 **Chưa làm**:
-- Chấm trên `test` thay vì cả `val`: `fgc_only` hiện đọc `crops_fgc/val` (100 ảnh). Số C chính
-  thức phải trên 50 ảnh `test` (mục "Tách val") → cần lọc crop theo id ảnh từ
-  `digitizepid_val_test.json` (tên crop `<id ảnh>_<n>.png`), đi cùng việc commit hai file split.
-  Với C đã bão hoà, số trên cả `val` dùng tạm để chẩn đoán được.
+- ~~Chấm trên `test` thay vì cả `val`~~ → ✅ 2026-11-13 (B6b-1): `++eval.image_subset=test`, file
+  `configs/splits/digitizepid_val_test.json` (sha256 khớp). Notebook §8 đã dùng.
 - C trên crop DigitizePID suy giảm (`scan_degrade`, seed cố định) — "nếu kịp".
 
 Nội dung gốc:
