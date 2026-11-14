@@ -15,9 +15,16 @@ import pytest
 from omegaconf import OmegaConf
 
 from utils.oneshot_metrics import (
+    OTHER_NAMES,
     assign_groups,
+    assign_iso_groups,
     auroc,
     class_stats,
+    gated_other_prf,
+    margin_auroc,
+    margin_rule_a,
+    margins,
+    mean_std,
     open_set_summary,
     oscr,
     other_auroc,
@@ -140,6 +147,38 @@ def test_other_prf_at_tau():
     assert r["f1"] == pytest.approx(2 / 3)
 
 
+def test_margin_is_top1_minus_top2_and_infinite_without_a_second_prototype():
+    m = margins([0.9, 0.7, 0.6], [0.5, 0.69, float("nan")])
+    assert m[0] == pytest.approx(0.4) and m[1] == pytest.approx(0.01) and m[2] == np.inf
+
+
+def test_margin_rule_a_is_rule_a_on_the_margin_and_off_when_that_margin_is_infinite():
+    known = _RNG.uniform(0.0, 0.3, 1000)
+    delta = margin_rule_a(known, 0.95)
+    assert delta == tau_rule_a(known, 0.95)
+    assert (known >= delta).mean() == pytest.approx(0.95, abs=0.002)
+    assert margin_rule_a([np.inf, np.inf, 0.2], 0.5) == 0.0  # never "reject everything finite"
+
+
+def test_margin_auroc_scores_unknown_as_small_margin():
+    assert margin_auroc([0.3, 0.2], [0.01, 0.02]) == 1.0
+    assert margin_auroc([0.01], [0.3]) == 0.0
+
+
+def test_gated_prf_counts_any_gate_and_other_prf_is_the_cosine_gate():
+    """A near unknown (high cosine, tiny margin) passes the cosine gate and is caught by the
+    OR-gate; the known crop with a wide margin stays accepted."""
+    known_cos, known_m = np.array([0.9, 0.8]), np.array([0.2, 0.15])
+    unk_cos, unk_m = np.array([0.95, 0.3]), np.array([0.005, 0.1])
+    tau, delta = 0.5, 0.05
+    cos_only = other_prf(known_cos, unk_cos, tau)
+    both = gated_other_prf((known_cos < tau) | (known_m < delta), (unk_cos < tau) | (unk_m < delta))
+    assert cos_only["recall"] == 0.5 and both["recall"] == 1.0 and both["fp"] == 0
+    assert {k: v for k, v in cos_only.items() if k != "tau"} == gated_other_prf(
+        known_cos < tau, unk_cos < tau
+    )
+
+
 # ------------------------------------------------------------------ #
 # empty unknown set
 # ------------------------------------------------------------------ #
@@ -252,6 +291,60 @@ def test_an_unknown_status_is_an_error(real):
     _, vocab, _ = real
     with pytest.raises(ValueError, match="status"):
         assign_groups({"Symbol_1": {"status": "TODO"}}, vocab, ["Symbol_1"])
+
+
+def _iso_by_group(real, fine, excluded, names=None):
+    symbol_map, vocab, holdout = real
+    templates = [r["fine_name"] for r in vocab.values()]
+    iso = assign_iso_groups(assign_groups(symbol_map, vocab, fine, excluded, holdout), templates)
+    out: dict[str, set[str]] = {}
+    for name, g in iso.items():
+        if names is None or name in names:
+            out.setdefault(g, set()).add(name)
+    return out
+
+
+def _open100_names():
+    """Vocab categories with instances on OPEN100-ISO (skip when the export is not local)."""
+    path = _ROOT / "data" / "iso_open100" / "canonical" / "annotations.coco.json"
+    if not path.exists():
+        pytest.skip("OPEN100-ISO export not present")
+    coco = json.loads(path.read_text())
+    used = {a["category_id"] for a in coco["annotations"]}
+    names = {c["name"] for c in coco["categories"] if c["id"] in used}
+    return names - set(OTHER_NAMES)
+
+
+def test_iso_groups_match_the_plan_table(real):
+    """PLAN "Lớp ISO thuộc nhóm nào": R1b 10 S / 6 V / 26 H tự nhiên over the 42 templates; on
+    OPEN100-ISO 9 S (no open_disc) / 4 V / 17 H tự nhiên. R1a: its h_in templates are H_chon.
+    ImageNet-only (trained on no class): no S / V."""
+    symbol_map, vocab, holdout = real
+    full = [f"Symbol_{i}" for i in range(1, 33)]
+    by = _iso_by_group(real, full, [])
+    assert {g: len(v) for g, v in by.items()} == {"S": 10, "V": 6, "H_tu_nhien": 26}
+    r1a = [c for c in full if c not in holdout.excluded]
+    by = _iso_by_group(real, r1a, holdout.excluded)
+    groups = assign_groups(symbol_map, vocab, full, [], holdout)
+    assert by["H_chon"] == {groups[c].template for c in holdout.h_in}
+    assert by["S"] == {"valve_gate", "open_disc", "flanged_connection", "flow_direction"}
+    assert len(by["V"]) == 6 and len(by["H_tu_nhien"]) == 26
+    by = _iso_by_group(real, [], full)
+    assert {g: len(v) for g, v in by.items()} == {"H_chon": 10, "V_held": 6, "H_tu_nhien": 26}
+
+    names = _open100_names()
+    assert len(names) == 30
+    by = _iso_by_group(real, full, [], names)
+    assert {g: len(v) for g, v in by.items()} == {"S": 9, "V": 4, "H_tu_nhien": 17}
+    assert "open_disc" not in names
+
+
+def test_mean_std_is_over_the_units_that_have_a_value():
+    assert mean_std([1.0, None, 0.5]) == {
+        "mean": 0.75, "std": pytest.approx(float(np.std([1.0, 0.5], ddof=1))), "n": 2
+    }  # fmt: skip
+    assert mean_std([0.3]) == {"mean": 0.3, "std": None, "n": 1}
+    assert mean_std([None]) == {"mean": None, "std": None, "n": 0}
 
 
 # ------------------------------------------------------------------ #

@@ -20,6 +20,17 @@ detector.label_level=fine (the one-stage 32-class baseline of the closed-set cha
 same files hold FINE ids (classes.yaml fine: order), scored with eval.mode=det_only. The
 checkpoint's own class names must equal the label set named by detector.label_level, so a
 coarse model is never read as a fine one or the other way round.
+
+detector.agnostic_merge=true (B6e; default false, set with `++detector.agnostic_merge=true`):
+YOLO's NMS and the WBF merge both ignore the label, so two overlapping boxes of different
+classes on one symbol (e.g. `valve` + `heat_exchanger` on an unseen ISO symbol) become ONE
+box instead of two; the fused box keeps the label of its highest-scoring member. Off, the
+merge is per label, as before.
+
+++detector.classes_yaml=<classes.yaml> (default: the data root's): the label set of the checkpoint,
+for a detector run on another dataset — the DigitizePID coarse detector on OPEN100-ISO
+(data_root=data/iso_open100, whose classes.yaml is ISO's) writes DigitizePID coarse ids, checked
+against that file. Scored there class-agnostically (eval.class_agnostic) or through Stage 2.
 """
 
 from __future__ import annotations
@@ -29,8 +40,14 @@ from pathlib import Path
 
 import cv2
 import hydra
+import numpy as np
 import pandas as pd
 from ensemble_boxes import weighted_boxes_fusion
+from ensemble_boxes.ensemble_boxes_wbf import (
+    find_matching_box_fast,
+    get_weighted_box,
+    prefilter_boxes,
+)
 from omegaconf import DictConfig
 from sahi.slicing import slice_image
 from ultralytics import YOLO
@@ -72,6 +89,59 @@ def _write_detections_txt(
             )
 
 
+def fuse_boxes(
+    boxes: list[list[float]],
+    scores: list[float],
+    labels: list[float],
+    iou_thr: float,
+    skip_box_thr: float,
+    agnostic: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """WBF over ONE detector's boxes (all tiles in a single model list, see `_detect_image`):
+    normalised xyxy boxes -> (boxes, scores, labels), best score first. Per label unless
+    `agnostic`, where boxes of any label fuse and each fused box takes the label of its
+    highest-scoring member."""
+    if not agnostic:
+        return weighted_boxes_fusion(
+            [boxes], [scores], [labels], iou_thr=iou_thr, skip_box_thr=skip_box_thr
+        )
+    return _wbf_agnostic(boxes, scores, labels, iou_thr, skip_box_thr)
+
+
+def _wbf_agnostic(
+    boxes: list[list[float]],
+    scores: list[float],
+    labels: list[float],
+    iou_thr: float,
+    skip_box_thr: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """`weighted_boxes_fusion` of one model list (conf_type `avg`) with every label taken as one,
+    built from the library's own steps so the boxes and scores are exactly what it gives for a
+    single-label input; the loop is repeated here only to see each cluster's members, which the
+    library does not return. Each box goes in as its own "model" list of weight 1, so its score
+    is untouched and `prefilter_boxes` records its index (column 3) for the label lookup."""
+    n = len(boxes)
+    pools = prefilter_boxes(
+        [[b] for b in boxes], [[s] for s in scores], [[0]] * n, np.ones(n), skip_box_thr
+    )
+    if not pools:
+        return np.zeros((0, 4)), np.zeros((0,)), np.zeros((0,))
+    members: list[list[np.ndarray]] = []
+    fused = np.empty((0, 8))
+    for b in pools[0]:  # best score first: a cluster's first member is its highest-scoring one
+        index, _ = find_matching_box_fast(fused, b, iou_thr)
+        if index != -1:
+            members[index].append(b)
+            fused[index] = get_weighted_box(members[index], "avg")
+        else:
+            members.append([b.copy()])
+            fused = np.vstack((fused, b.copy()))
+    # one model of weight 1: WBF's score rescale (x min(1, n) / 1) is the identity
+    out_labels = np.array([float(labels[int(m[0][3])]) for m in members])
+    order = fused[:, 1].argsort()[::-1]
+    return fused[order, 4:], fused[order, 1], out_labels[order]
+
+
 class DetectInferPipeline(BasePipeline):
     """SAHI-tiled YOLOv8 inference + WBF merge over full-resolution P&ID diagrams."""
 
@@ -108,26 +178,32 @@ class DetectInferPipeline(BasePipeline):
         label set of detector.label_level, in classes.yaml order: the label id is read
         as an index into that list."""
         level = self._label_level()
-        want = self.classmap.coarse_classes if level == "coarse" else self.classmap.fine_classes
+        classmap = self.detector_classmap
+        want = classmap.coarse_classes if level == "coarse" else classmap.fine_classes
         names = model.names
         have = [names[i] for i in range(len(names))] if isinstance(names, dict) else list(names)
         if have != list(want):
             raise ValueError(
                 f"detector.ckpt classes {have[:4]}... ({len(have)}) are not the "
                 f"detector.label_level={level} classes of classes.yaml {list(want)[:4]}... "
-                f"({len(want)}); set detector.label_level to match the checkpoint"
+                f"({len(want)}); set detector.label_level to match the checkpoint (a detector "
+                "trained on another dataset: ++detector.classes_yaml=<its classes.yaml>)"
             )
 
     def _detection(self, box: BBox, label: int, score: float) -> Detection:
+        classmap = self.detector_classmap
         if self._label_level() == "fine":
-            fine = self.classmap.fine_classes[label]
+            fine = classmap.fine_classes[label]
             return Detection(
                 bbox=box,
-                coarse_class=self.classmap.fine_to_coarse[fine],
+                coarse_class=classmap.fine_to_coarse[fine],
                 score=score,
                 fine_class=fine,
             )
-        return Detection(bbox=box, coarse_class=self.classmap.coarse_classes[label], score=score)
+        return Detection(bbox=box, coarse_class=classmap.coarse_classes[label], score=score)
+
+    def _agnostic_merge(self) -> bool:
+        return bool(self.cfg.detector.get("agnostic_merge", False))
 
     def _detect_image(self, model: YOLO, image, image_w: int, image_h: int) -> list[Detection]:
         """Slice `image` with SAHI, run YOLO per tile, fuse tile detections with WBF."""
@@ -152,13 +228,14 @@ class DetectInferPipeline(BasePipeline):
         all_boxes: list[list[float]] = []
         all_scores: list[float] = []
         all_labels: list[float] = []
+        agnostic = self._agnostic_merge()
 
         for sliced_image, starting_pixel in zip(
             slice_result.images, slice_result.starting_pixels, strict=True
         ):
             sx, sy = starting_pixel
             # conf kept low here: WBF/skip_box_thr does the real filtering downstream.
-            pred = model.predict(sliced_image, conf=0.001, verbose=False)[0]
+            pred = model.predict(sliced_image, conf=0.001, verbose=False, agnostic_nms=agnostic)[0]
 
             for xyxy, conf, cls in zip(
                 pred.boxes.xyxy.tolist(),
@@ -181,12 +258,13 @@ class DetectInferPipeline(BasePipeline):
 
         # One model list -> no score division. Empty-detections case: WBF returns empty
         # arrays (rather than raising) when no tile contributed a box.
-        merged_boxes, merged_scores, merged_labels = weighted_boxes_fusion(
-            [all_boxes],
-            [all_scores],
-            [all_labels],
+        merged_boxes, merged_scores, merged_labels = fuse_boxes(
+            all_boxes,
+            all_scores,
+            all_labels,
             iou_thr=float(self.cfg.detector.wbf.iou_thr),
             skip_box_thr=float(self.cfg.detector.wbf.skip_box_thr),
+            agnostic=agnostic,
         )
 
         detections: list[Detection] = []
@@ -224,7 +302,7 @@ class DetectInferPipeline(BasePipeline):
 
             detections = self._detect_image(model, image, w, h)
             out_path = out_dir / f"{image_id}.txt"
-            _write_detections_txt(out_path, detections, self.classmap, w, h, fine)
+            _write_detections_txt(out_path, detections, self.detector_classmap, w, h, fine)
             logger.info("%s: %d detections -> %s", image_id, len(detections), out_path)
 
 

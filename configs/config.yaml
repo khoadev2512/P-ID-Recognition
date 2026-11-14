@@ -237,10 +237,18 @@ oneshot:
   # out-of-vocabulary (fine_id=-2, OTHER_CLASS_NAME) instead of being forced into the
   # nearest ISO symbol. SEPARATE from fgc.route.other_min_cosine: that gate measures
   # distance to TRAINED class centers, this one to single-template prototypes, and the
-  # two cosine distributions are not interchangeable. 0.35 is a PLACEHOLDER copied from
-  # that gate -- calibrate on val (pid-iso-prototypes logs the inter-prototype cosine,
-  # which this threshold must sit above to mean anything).
-  other_min_cosine: 0.35
+  # two cosine distributions are not interchangeable.
+  #
+  # Chosen 2026-11-13 by the fixed B8 rules (docs/PLAN_STAGE2_ONESHOT.md, "Ngưỡng
+  # Other") on DigitizePID val_sel crops of seen classes that have a prototype, with
+  # oneshot.aggregate=mean (a vote-aggregated score is a different distribution: re-pick
+  # before using vote). Never re-tuned on P1 / P2 / OPEN100-ISO. Each encoder has its own:
+  #   encoder           crops  rule A (TPR95)  rule B (Youden)  rule B, no twins
+  #   R1b full (32 cls) 2138   0.4291          0.5210           0.5210
+  #   R1a lo   (19 cls) 1094   0.4699          0.4301           0.4301
+  # Default = R1b, rule A (standard open-set, needs no simulated unknown). For R1a or
+  # rule B pass it on the CLI, e.g. oneshot.other_min_cosine=0.4699.
+  other_min_cosine: 0.4291
 
   # Unseen-class protocol P1 (docs/PLAN_STAGE2_ONESHOT.md): DigitizePID classes held out
   # of the leave-out encoder (R1a). h_in = held out AND mapped to an ISO symbol (one-shot

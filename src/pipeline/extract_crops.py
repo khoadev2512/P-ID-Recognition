@@ -63,6 +63,8 @@ class ExtractCropsPipeline(BasePipeline):
 
         anns_by_image: dict[int, list[dict]] = {}
         for ann in coco.get("annotations", []):
+            if ann.get("iscrowd"):
+                continue  # an ignore region (utils.classmap.IGNORE_CATEGORY) is no symbol
             anns_by_image.setdefault(ann["image_id"], []).append(ann)
 
         stored: dict[Path, list[tuple[str, StoredCrop]]] = {}  # per class dir: its _boxes.csv

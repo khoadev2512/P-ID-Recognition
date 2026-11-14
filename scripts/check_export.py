@@ -20,6 +20,7 @@ from PIL import Image, ImageDraw
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from utils.classmap import IGNORE_CATEGORY  # noqa: E402
 from utils.iso_export import read_source_graphml  # noqa: E402
 
 Image.MAX_IMAGE_PIXELS = None
@@ -47,6 +48,10 @@ def main() -> None:
     args = ap.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     coco = json.loads((args.root / "canonical" / "annotations.coco.json").read_text())
+    # the ignore regions (iscrowd: 1: leader arrows, flags) are no symbols: counted apart
+    ignore = Counter(a.get("ignore_kind", "?") for a in coco["annotations"] if a.get("iscrowd"))
+    coco["annotations"] = [a for a in coco["annotations"] if not a.get("iscrowd")]
+    coco["categories"] = [c for c in coco["categories"] if c["name"] != IGNORE_CATEGORY]
     names = {c["id"]: c["name"] for c in coco["categories"]}
     imgs = {i["id"]: i for i in coco["images"]}
     split = json.loads((args.root / "splits.json").read_text())
@@ -89,6 +94,7 @@ def main() -> None:
         f"{sum(1 for n in names.values() if n not in OTHERS and inst[n])} of "
         f"{sum(1 for n in names.values() if n not in OTHERS)}",
         f"agitators (added): {sum(1 for a in coco['annotations'] if a.get('added'))}",
+        f"ignore regions (iscrowd, not counted above): {sum(ignore.values())} {dict(ignore)}",
         f"split by sheet: {split['sheets']} (mode {split['mode']})",
     ]
     (args.out / "summary.txt").write_text("\n".join(lines) + "\n")

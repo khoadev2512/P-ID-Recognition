@@ -18,6 +18,7 @@ import yaml
 from omegaconf import DictConfig
 
 from pipeline.base import BasePipeline
+from utils.classmap import IGNORE_CATEGORY
 from utils.cli import CONFIG_DIR
 
 
@@ -38,10 +39,12 @@ class BuildClassesPipeline(BasePipeline):
         with self.paths.coco_json.open("r") as f:
             coco = json.load(f)
 
-        categories = coco.get("categories", [])
+        # The ignore-region category (iscrowd: 1 boxes, utils.classmap.IGNORE_CATEGORY) is no
+        # class; DigitizePID's COCO has none, so this changes nothing there.
+        categories = [c for c in coco.get("categories", []) if c["name"] != IGNORE_CATEGORY]
         if not categories:
             raise ValueError(f"{self.paths.coco_json}: no `categories` found")
-        annotations = coco.get("annotations", [])
+        annotations = [a for a in coco.get("annotations", []) if not a.get("iscrowd")]
 
         # fine -> coarse, preserving COCO category-id order (not alphabetical) so
         # fine ids stay meaningful / stable across re-derivations of the same COCO file.

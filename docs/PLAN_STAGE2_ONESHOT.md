@@ -281,8 +281,8 @@ R1b) → báo cáo tách khỏi `other_iso`.
 **Phase A — Code** (🤖, local, test bằng encoder giả / model chưa train; không cần Colab):
 
 ```
-(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► (B5b ✅) ─► (B6c ✅) ─► (B6a ✅) ─► B6b GĐ5 (B6b-1 ✅)
-  ─► B6d đề thi OPEN100-ISO ─► B6e Stage 1 agnostic_merge ─► B4a baseline
+(B0 ✅) ─► (B1 ✅) ─► (B1b ✅) ─► (B2 ✅) ─► (B1c ✅) ─► (B5b ✅) ─► (B6c ✅) ─► (B6a ✅) ─► B6b GĐ5 ✅
+  ─► B6d đề thi OPEN100-ISO ✅ ─► B6e Stage 1 agnostic_merge ✅ ─► B4a baseline ✅  (Phase A code XONG 2026-11-14)
 B5 🧑 CHỌN danh sách H (+ B5b 🤖 luật VARIANT trong check_b5) ── song song, ⛔ PHẢI XONG trước R1 ──►
 ```
 
@@ -317,7 +317,7 @@ nằm trước R1 nên không có nguy cơ train rồi mới thêm augment.
 - Câu hỏi khoa học lớn nhất — encoder DigitizePID có chuyển sang ISO không — chỉ trả lời ở R2.
   Nếu R2 kém, thử B9 (d) trước (Phase C, không train lại); vẫn kém thì không còn GĐ3 để cứu
   (B7 đã bỏ) → `docs/BACKUP_PLAN.md`.
-- **B4a** (tùy chọn, đề xuất — user chưa chốt): encoder chỉ-ImageNet làm baseline. Chạy được
+- **B4a** (user chốt làm 2026-11-14 — đối chứng cho P1 âm; code ✅): encoder chỉ-ImageNet làm baseline. Chạy được
   ngay đầu Phase B, trước cả R1, cho tín hiệu separation sớm + một dòng ablation
   "ImageNet-only vs train DigitizePID".
 
@@ -723,7 +723,33 @@ và của GT DigitizePID.
 
 ---
 
-## B6b — GĐ5: eval one-shot + "Other" 🤖 (Phase A)
+## B6b — GĐ5: eval one-shot + "Other" 🤖 (Phase A) — ✅ CODE XONG 2026-11-14
+
+**B6b-2 ✅ 2026-11-14.**
+- **P4 mức crop**: `++eval.oneshot.protocol=p4` (`data_root` = OPEN100-ISO; `++eval.oneshot.max_per_class`,
+  `++eval.oneshot.seed`). Nhóm bằng `assign_iso_groups` (từ `assign_groups` + checkpoint / `groups_ckpt`):
+  S → V → H chọn → `V_held` (chỉ encoder không học lớp nào: lớp VARIANT bị giữ ra) → H tự nhiên. Khối
+  `degraded` (chính) và `clean` (tham chiếu), theo tờ + mean ± std, Other dương = `other_iso`,
+  `other_isa` / `other_generic` riêng. CSV `oneshot_p4_crops.csv` có `sheet`, `variant`, `degraded`, `ann_id`.
+- **Detection** (`src/pipeline/detection_eval.py`, `utils/detection_metrics.py`): đường mới chỉ chạy khi
+  COCO có `iscrowd: 1`, hoặc `++eval.class_agnostic=true`, hoặc mọi ảnh có `degraded` + `sheet` (trộn →
+  lỗi); DigitizePID đi đường cũ, `mean_ap` giữ nguyên (test). Vùng bỏ qua: dự đoán không khớp GT mà IoU
+  ≥ 0.5 hoặc ≥ 50% diện tích nằm trong vùng → không TP không FP, bỏ khỏi xếp hạng AP; đếm theo
+  `ignore_kind`. `class_agnostic`: thêm P/R tại IoU đầu + `eval.score_thr`; `recall_by_group` /
+  `recall_by_class` (nhóm theo `eval.oneshot.groups_ckpt` hoặc `oneshot.encoder_ckpt`).
+- **End-to-end P4**: `eval.mode=det_plus_fgc ++fgc.oneshot=true` đọc `derived/detections_oneshot/` →
+  khối `oneshot_e2e`; cổng Other áp lúc chấm (τ = `oneshot.other_min_cosine`, thêm lề nếu
+  `++eval.oneshot.margin_delta`). TP = IoU ≥ 0.5 và đúng nhãn ISO; Other đúng với GT `other_iso`,
+  `other_isa`, `other_generic` (mỗi loại một dòng); Other trên nền = FP. Theo nhóm: recall, recall
+  chỉ-box, nhãn của box khớp (đúng / Other / sai tên); precision theo nhóm dự đoán; FP chia box sai /
+  nhãn sai. UNSURE = vùng bỏ qua.
+- **Box sai của detector**: dự đoán IoU < 0.3 với mọi GT → tỉ lệ bị τ (và τ HOẶC lề) loại; so với tỉ lệ
+  loại nhầm box đúng. `eval.image_subset` chấp nhận ở mode end-to-end này (DigitizePID `val_sel`).
+- `++detector.classes_yaml`: chạy detector DigitizePID trên data root khác (OPEN100-ISO có
+  `classes.yaml` ISO).
+- Notebook §11 (P4 mức crop, 3 encoder) + §12 (Stage 1 trên OPEN100-ISO có/không `agnostic_merge`,
+  end-to-end R1b/R1a, box sai trên DigitizePID `val_sel`). RUNBOOK §5g.
+
 
 **B6b-1 ✅ 2026-11-13 — mức crop trên DigitizePID (P1, P2, chọn τ).** Còn B6b-2: P4 OPEN100-ISO,
 `eval.class_agnostic`, recall theo nhóm, box sai của detector (đi cùng B6d).
@@ -857,7 +883,14 @@ Hiện `fgc_infer` từ chối global encoder và `evaluation.compute_fgc_metric
 
 ---
 
-## B6d — Chuẩn bị đề thi OPEN100-ISO 🤖 (Phase A, ⛔ trước R4) — 2026-11-11
+## B6d — Chuẩn bị đề thi OPEN100-ISO 🤖 (Phase A, ⛔ trước R4) — 2026-11-11 — ✅ CODE XONG 2026-11-14
+
+**Đã làm**: `iso_export.degrade_mismatch` + `render_iso.degraded_mismatches` (chạy trước khi xoá gì;
+kiểm cả `seed`); kiểm chỉ-đọc data hiện có: 432/432 khớp. Vùng bỏ qua: category `__ignore__`
+(`utils.classmap.IGNORE_CATEGORY`, id cuối), `iscrowd: 1`, `ignore_kind` = `leader_arrow` | `flag`; mọi
+reader dựng dữ liệu bỏ qua; `export_summary.json` thay `dropped_not_in_coco` bằng `ignore_regions` ….
+**Còn**: export lại `data/iso_open100` (chờ user duyệt) rồi zip lại cho Colab.
+
 
 Hai việc từ V8_REVIEW, quan trọng hơn sau khi OPEN100-ISO thành đề thi chính:
 
@@ -885,7 +918,12 @@ dương giả.
 
 ---
 
-## B6e — Stage 1 không phân lớp lúc suy luận 🤖 (Phase A, ⛔ trước R4) — 2026-11-11
+## B6e — Stage 1 không phân lớp lúc suy luận 🤖 (Phase A, ⛔ trước R4) — 2026-11-11 — ✅ 2026-11-14
+
+**Đã làm**: `++detector.agnostic_merge=true` (`detect_infer.fuse_boxes` / `_wbf_agnostic`, dựa trên các
+bước của `ensemble_boxes` 1.0.9; điểm box gộp = trung bình mọi thành phần). Không làm
+`data.label_level=agnostic` (dùng `single_cls` nếu cần detector một lớp).
+
 
 **Vì sao**: WBF trong `detect_infer` (`ensemble_boxes.weighted_boxes_fusion`) chỉ gộp box
 **cùng nhãn**, NMS của YOLO mặc định cũng theo lớp. Trên bản vẽ ISO, detector coarse có thể ra
@@ -980,7 +1018,17 @@ DigitizePID, chỉ P4 thiếu lớp này.
 
 ---
 
-## B4a — Baseline encoder chỉ-ImageNet 🤖 (tùy chọn, đề xuất)
+## B4a — Baseline encoder chỉ-ImageNet 🤖 — CODE ✅ 2026-11-14
+
+**Đã làm**: `scripts/make_imagenet_encoder.py` (timm `resnet34.a1_in1k` = đúng điểm xuất phát của
+R1a/R1b; `proj` Identity → embedding = trunk ImageNet thuần; `fine_classes=[]`, `excluded_classes` = 32
+lớp, head 0 hàng, `imagenet_only=True`). Leak guard P1 qua tự nhiên (encoder không học lớp nào).
+τ: khóa mới `++eval.oneshot.groups_ckpt` (mặc định = encoder) lấy nhóm S của R1a → τ đọc đúng
+S1/S17/S21/S24 như R1a; có `groups_ckpt` thì τ từ chối mọi lớp `oneshot.holdout`. Notebook §10
+(`cell-24g`..`cell-24l`): tạo ckpt + prototype, τ, P1 in cạnh R1a. Separation cục bộ (CPU):
+ImageNet mean 0.474 / max 0.978 (check_valve_globe–check_valve_swing), 36 cặp > 0.8 — so R1a lo
+0.315 / 0.957 (14 cặp), R1b full 0.245 / 0.989 (22 cặp). P1 chờ Colab.
+
 
 - `scripts/make_imagenet_encoder.py`: dựng `ArcFaceModel` với `fgc.pretrained=true`, KHÔNG
   train, lưu theo đúng format checkpoint của pid-fgc-train (`model`, `fine_classes`, ...).
@@ -1029,6 +1077,11 @@ dữ liệu test thì mọi số P1 mất giá trị. Ba lớp:
 3. **Lớp lạ thứ hai: box sai của detector** (box dự đoán IoU < 0.3 với mọi GT trên val
    DigitizePID: ống, chữ, góc bảng) → báo tỉ lệ bị τ loại. Lọt nhiều thì thử dạng điểm 2.
 
+**Dạng điểm 2 — CODE ✅ 2026-11-14 (user duyệt)**: lượt `protocol=tau` chọn thêm δ@TPR95 trên lề
+top1−top2 (`margin_rule_a`, cùng crop `val_sel` với τ; ghi `metrics.json` → `margin_rule_a.delta`);
+P1/P2 báo `margin_auroc`; notebook `at_chosen_taus` tính cổng "cos < τ_A HOẶC lề < δ" từ CSV. Không
+có khóa config mới. Chưa đưa vào suy luận (`oneshot_infer`) — chỉ là ablation eval.
+
 **Dạng điểm số**: (1) một τ chung trên max-cosine — mặc định, làm trước; (2) thêm lề top-1/top-2:
 loại nếu cos₁ < τ hoặc cos₁ − cos₂ < δ (δ chọn cùng quy tắc trên val); (3) ngưỡng theo từng
 prototype — chỉ cho lớp S có val, lớp H vẫn τ chung; chỉ là ablation.
@@ -1072,20 +1125,21 @@ của detector; nếu lọt nhiều, thêm lề top-1/top-2.
 - [x] B1b `fgc.exclude_classes` + tests chống rò rỉ (2026-10-18)
 - [x] B2 run_pipeline `prototypes` + notebook global + zip mới + assert 32 class + cell leave-out (2026-10-19)
 - [x] B6a GĐ4 one-shot infer + coarse_map (routing mặc định tắt; tắt bắt buộc cho P4) (2026-11-13)
-- [ ] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3/P4 + nhóm S/V/H tự động + guard rò rỉ
+- [x] B6b GĐ5 metrics + sweep + AUROC, theo protocol P1/P2/P3/P4 + nhóm S/V/H tự động + guard rò rỉ
       + Stage 1 không phân lớp (`eval.class_agnostic`) + recall theo nhóm
 - [x] B6c closed-set infer + eval cho `__global__.pt` (lõi, protocol C) (2026-11-13; còn lọc theo `test`)
-- [ ] B6d đề thi OPEN100-ISO: kiểm ảnh suy giảm với config V7 + vùng bỏ qua (`iscrowd`) cho mũi tên dẫn / cờ — ⛔ trước R4
-- [ ] B6e Stage 1 `agnostic_merge` (+ tuỳ chọn `label_level=agnostic`) — ⛔ trước R4
+- [x] B6d đề thi OPEN100-ISO: kiểm ảnh suy giảm với config V7 + vùng bỏ qua (`iscrowd`) cho mũi tên dẫn / cờ — ⛔ trước R4
+- [x] B6e Stage 1 `agnostic_merge` (+ tuỳ chọn `label_level=agnostic`) — ⛔ trước R4
 - [x] B1c crop có ngữ cảnh + box jitter + sửa lề crop lúc suy luận + notebook `AUG` (2026-11-11)
 - [x] ~~B7-code GĐ3 fine-tune ISO~~ — bỏ 2026-11-09
-- [ ] B4a-code baseline ImageNet (tùy chọn)
+- [x] B4a-code baseline ImageNet (2026-11-14)
 - [x] B5 🧑 hoàn thành `symbol_map.csv` (32/32, 2026-11-09)
 - [x] B5 🧑 **chọn H_in, H_out** (theo luật VARIANT) — chia A, 2026-11-11
 - [x] B5b 🤖 `check_b5.py` luật VARIANT + `oneshot.holdout.h_extra` (2026-11-13)
 
 **Phase B — Chạy** (🧑 Colab, đúng thứ tự)
-- [ ] (B4a) baseline ImageNet → separation "trước khi học"
+- [x] (B4a) baseline ImageNet → separation "trước khi học" (cục bộ 2026-11-14: mean 0.474, max 0.978)
+- [ ] (B4a) P1 với encoder ImageNet — notebook §10, Colab
 - [ ] R1b = train `__global__.pt` (đủ 32 class, `AUG`), copy về Drive — chạy được khi H đã chốt
 - [ ] YOLO một-stage 32 lớp fine (`detector.label_level=fine`) — baseline cho C
 - [ ] (tuỳ chọn) YOLO một lớp (`label_level=agnostic`, B6e) — ablation Stage 1

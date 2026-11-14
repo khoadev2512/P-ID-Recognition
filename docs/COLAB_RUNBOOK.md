@@ -205,9 +205,49 @@ separation` của mục 7, lỗi nếu có.
 | 9b | P1 | `__global_lo__.pt`, `h_in` vs `h_out` | macro top-1/top-3 `h_in`, AUROC, OSCR, từng lớp, "Other" tại ba τ |
 | 9c | P2 | `__global__.pt`, nửa `test` | S / V / V_of_S / OOV_seen, AUROC, OSCR, "Other" tại ba τ |
 
+**Lề top1−top2 (2026-11-14)**: 9a in thêm `δ` (TPR95 trên lề, cùng `val_sel`); 9b/9c/10c in thêm dòng
+`rule_a + lề` và AUROC của lề. Lượt 9a cũ không có δ → chạy lại 9a (rẻ, chỉ `val_sel`) rồi 9b, 9c.
+
 **Không làm**: không chạy 9b/9c trước 9a; không đổi τ sau khi thấy số 9b/9c; không chạy lại 9c nhiều lần
 (nửa `test`). **Gửi lại**: toàn bộ in ra của 8, 9a, 9b, 9c + ba file `oneshot_*_crops.csv` (để phân tích
 lại không cần GPU) + hai `oneshot_*_sweep.png`.
+
+## 5f. Baseline chỉ-ImageNet (B4a) — notebook §10 (2026-11-14)
+
+**Trước khi mở Colab**: commit + push `scripts/make_imagenet_encoder.py`, `oneshot_eval.py`, notebook.
+Cần `encoders/__global_lo__.pt` trên Drive (10b lấy nhóm S của R1a). Nên chạy 9a–9b trong cùng phiên
+để 10c in "Other" tại τ (không có thì chỉ in gợi ý, AUROC/OSCR vẫn đủ).
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4 | mount, clone, giải nén crop, đọc H | như §5d |
+| 10a | tạo `__imagenet__.pt` (không train, ~1 phút) + `iso_prototypes_imagenet.pt` | separation mean/max cạnh lo/full |
+| 10b | τ trên `val_sel`, `++eval.oneshot.groups_ckpt=$ENC_DIR/__global_lo__.pt` | lớp dùng = S1/S17/S21/S24 như R1a (notebook assert) |
+| 10c | P1 với encoder ImageNet | AUROC, OSCR, `h_in` top-1/top-3, từng lớp — in cạnh R1a |
+
+**Gửi lại**: in ra 10a–10c + `eval_p1_imagenet/*/oneshot_p1_crops.csv` (+ CSV τ nếu tiện).
+
+## 5g. P4 + Stage 1 trên OPEN100-ISO — notebook §11 + §12 (2026-11-14)
+
+**Trước khi mở Colab**:
+1. (Nếu user duyệt export lại để có vùng bỏ qua) export lại OPEN100-ISO trên máy.
+2. Zip: `cd data/iso_open100 && zip -r -0 iso_open100_canonical.zip canonical` (~1.9 GB) → đặt ở
+   `<DRIVE_ROOT>/data/iso_open100_canonical.zip`.
+3. Commit + push code B6.
+4. Cần trên Drive: ba encoder + prototype (`encoders/`), τ/δ của 9a (và 10b cho ImageNet), và
+   `best.pt` của detector coarse → điền `DET_CKPT` ở cell 12a (cell in mọi `best.pt` tìm thấy và dừng nếu sai).
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 11a ▶▶ | giải nén OPEN100-ISO vào `/content/iso_open100` (`LOCAL_ISO_ROOT`) | 864 ảnh, 93,800 symbol (không đếm `iscrowd`) |
+| 11b | P4 mức crop: R1b, R1a, ImageNet (ImageNet nhóm như R1a) | — |
+| 11c | bảng cạnh nhau (suy giảm trước, sạch sau) + tại τ/δ của 9a | toàn bộ in ra + `eval_p4_*/*/oneshot_p4_crops.csv` |
+| 12a | detector trên OPEN100-ISO, gộp theo nhãn và `agnostic_merge`; chấm không phân lớp, recall theo nhóm (R1b, R1a) | bảng recall theo nhóm, số dự đoán rơi vào vùng bỏ qua |
+| 12b | end-to-end P4 (R1b, R1a) trên detection `agnostic_merge`, tại τ, rồi τ + δ | khối `oneshot_e2e` |
+| 12c | detector + one-shot trên DigitizePID `val`, chấm `val_sel` → tỉ lệ box sai bị loại | `wrong_boxes` |
+
+Detection lưu trên Drive (`runs/stage1_iso/`, `runs/stage1_dpid/`) — phiên sau dùng lại, không chạy lại
+detector. 864 tờ × mỗi lượt detector / encoder: lâu, nên chạy §12 trong phiên riêng.
 
 ## 6. Infer + eval (sau khi train xong)
 

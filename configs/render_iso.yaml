@@ -165,7 +165,8 @@ render_iso:
     link: hardlink        # hardlink | symlink | copy: how renderings enter canonical/images
     other_labels: [other_iso, other_isa, other_generic]
     other_coarse: other   # the coarse class of the three above
-    # not exported to COCO: an annotation with no label (inlet / outlet flags) and these labels
+    # no class: an annotation with no label (inlet / outlet flags) and these labels go to COCO as
+    # ignore regions (iscrowd: 1, category __ignore__), never as symbols
     drop_labels: [leader_arrow]
     split:
       mode: all_test      # all_test | by_source (a seeded split of the 12 sources)

@@ -89,8 +89,8 @@ def _read_gt_coco(
         return []
     rows = []
     for ann in coco.get("annotations", []):
-        if ann["image_id"] != coco_img_id:
-            continue
+        if ann["image_id"] != coco_img_id or ann.get("iscrowd"):
+            continue  # another image, or an ignore region (no symbol)
         x, y, w, h = ann["bbox"]
         coarse_id = cat_id_to_coarse_id.get(ann["category_id"])
         if coarse_id is None:

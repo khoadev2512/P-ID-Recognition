@@ -1,4 +1,5 @@
-"""Crop-level one-shot evaluation on DigitizePID (PLAN B6b-1): eval.mode=oneshot.
+"""Crop-level one-shot evaluation (PLAN B6b-1): eval.mode=oneshot, on DigitizePID (p1 / p2 /
+tau) or OPEN100-ISO (p4).
 
 Every ground-truth crop is embedded through its inference-time view (the stored context crop
 cut to box + 10%, utils.crop_box.view), expanded into oneshot.query_views, aggregated by
@@ -15,7 +16,29 @@ eval.oneshot.protocol:
          filtered by eval.image_subset (use `test`).
     tau  tau selection on val_sel (PLAN B8 point 2): rule A (tau@TPR95) and rule B (leave the
          crop's own prototype out; once more also leaving out its near-twin prototypes), only
-         on group-S classes the encoder trained on. Prints tau; writes nothing to config.
+         on group-S classes the encoder trained on; plus delta@TPR95 on the top-1 minus top-2
+         margin (score form 2, `margin_rule_a`): a crop is Other when cos < tau OR margin <
+         delta. Prints tau and delta; writes nothing to config.
+    p4   OPEN100-ISO (data_root=data/iso_open100, PLAN B6b "P4"): every GT box of the COCO
+         export cut from its sheet with the inference-time margin (utils.crop_box.cut), each
+         sheet read once. Templates grouped S / V / H_chon / V_held / H_tu_nhien
+         (utils.oneshot_metrics.assign_iso_groups), one row per group, never pooled; "Other"
+         with other_iso as the positive and every vocab instance as the negative, other_isa /
+         other_generic apart. Every number separately for the degraded sheets (primary) and
+         the clean ones (reference), and per source sheet (iso00..iso11) with mean +- std over
+         the sheets. Selects nothing: tau is oneshot.other_min_cosine, recorded.
+         eval.oneshot.max_per_class (null = all) samples that many boxes per (category,
+         degraded) with eval.oneshot.seed, for cheap CPU runs.
+
+p1 / p2 also report `margin_auroc` (threshold-free, like `auroc`); the tau + delta gate
+itself is recomputed from the CSV (best_cos, second_cos), as every other threshold.
+
+eval.oneshot.groups_ckpt (default: oneshot.encoder_ckpt) is the checkpoint whose training
+classes define the groups (S / H_chon / OOV_heldout ...). For the ImageNet-only baseline (B4a,
+scripts/make_imagenet_encoder.py), which trained on no class and so has no group S: pointed at
+the leave-out encoder, tau reads the same classes as R1a's own tau run. The P1 leak guard keeps
+checking the encoder actually loaded, and tau with groups_ckpt also refuses every
+oneshot.holdout class.
 
 With oneshot.aggregate=vote best_cos is the mean cosine of the winning views, so a sweep of
 tau over best_cos only approximates the gated vote (exact for `mean`).
@@ -24,8 +47,11 @@ tau over best_cos only approximates the gated vote (exact for `mean`).
 from __future__ import annotations
 
 import csv
+import json
 import logging
+import random
 from collections import defaultdict
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +60,8 @@ from omegaconf import DictConfig
 from PIL import Image
 
 from pipeline.oneshot_infer import OneShotClassifier, load_oneshot_classifier
-from utils.crop_box import view
+from utils.classmap import IGNORE_CATEGORY
+from utils.crop_box import cut, view
 from utils.dataset import (
     build_eval_transform,
     crop_image_id,
@@ -44,13 +71,23 @@ from utils.dataset import (
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256
 from utils.oneshot import PrototypeDirectory, aggregate_views, holdout_classes
 from utils.oneshot_metrics import (
+    DEFAULT_SYMBOL_MAP,  # noqa: F401  (re-exported: oneshot.symbol_map's default)
+    ISO_GROUPS,
+    OTHER_NAMES,
     ClassInfo,
     assign_groups,
+    assign_iso_groups,
     class_stats,
     macro,
+    margin_auroc,
+    margin_rule_a,
+    margins,
+    mean_std,
     open_set_summary,
+    other_auroc,
     read_symbol_map,
     read_vocab,
+    symbol_map_path,
     tau_rule_a,
     tau_rule_b,
 )
@@ -58,9 +95,7 @@ from utils.paths import DataPaths
 
 logger = logging.getLogger(__name__)
 
-PROTOCOLS = ("p1", "p2", "tau")
-DEFAULT_SYMBOL_MAP = "docs/symbol_mapping/symbol_map.csv"  # oneshot.symbol_map, repo-relative
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+PROTOCOLS = ("p1", "p2", "tau", "p4")
 _SWEEP_TAUS = np.round(np.linspace(0.0, 1.0, 101), 2)
 _GROUP_SWEEP_TAUS = np.round(np.linspace(0.0, 1.0, 21), 2)
 _CSV_FIELDS = (
@@ -79,6 +114,8 @@ _CSV_FIELDS = (
     "best_cos",
     "second_cos",
 )
+_P4_FIELDS = ("sheet", "variant", "degraded", "ann_id")  # ann_id: the COCO annotation id
+_P4_VIEWS = ("degraded", "clean")  # degraded = the primary number, clean = the reference
 
 
 def rank_names(
@@ -133,6 +170,42 @@ def validate_tau_classes(classes: list[str], encoder_classes: list[str], holdout
         )
 
 
+def validate_p4_coco(coco: Mapping, templates: list[str]) -> None:
+    """p4 guard: the COCO is an OPEN100-ISO export. Every category is a vocab template, an
+    OPEN100-ISO Other name or the ignore-region category (a DigitizePID `Symbol_N`, or a
+    category the groups cannot place, raises), and every image says its source sheet and
+    whether it is degraded."""
+    names = [c["name"] for c in coco.get("categories", [])]
+    unknown = sorted(set(names) - set(templates) - set(OTHER_NAMES) - {IGNORE_CATEGORY})
+    if unknown:
+        raise ValueError(
+            f"eval.oneshot.protocol=p4 reads OPEN100-ISO (data_root=data/iso_open100): COCO "
+            f"categories {unknown} are neither oneshot.vocab_csv fine_names nor {OTHER_NAMES}"
+        )
+    need = {"sheet", "degraded"}
+    bare = [im.get("file_name") for im in coco.get("images", []) if not need <= set(im)]
+    if bare or not coco.get("images"):
+        raise ValueError(
+            "eval.oneshot.protocol=p4 needs every COCO image to carry `sheet` and `degraded` "
+            f"(an OPEN100-ISO export); missing on {bare[:3]}"
+        )
+
+
+def sample_per_class(
+    ids: Mapping[tuple[str, bool], list[int]], max_per_class: int | None, seed: int
+) -> dict[tuple[str, bool], list[int]]:
+    """At most `max_per_class` annotation ids per (category, degraded) key, sorted. The draw of
+    a key depends only on (seed, key, its ids), not on the other keys or their order."""
+    out = {}
+    for key, values in ids.items():
+        values = sorted(values)
+        if max_per_class is not None and len(values) > max_per_class:
+            rng = random.Random(f"{seed}/{key[0]}/{int(key[1])}")
+            values = sorted(rng.sample(values, max_per_class))
+        out[key] = values
+    return out
+
+
 class OneShotEvaluation:
     """eval.mode=oneshot for one protocol; `run()` returns the `oneshot` block of metrics.json."""
 
@@ -153,10 +226,20 @@ class OneShotEvaluation:
             )
         self.tau_tpr = float(node.get("tau_tpr", 0.95))
         self.twin_cos = float(node.get("twin_cos", 0.95))
+        self.groups_ckpt = node.get("groups_ckpt", None)
+        self.max_per_class = node.get("max_per_class", None)
+        if self.max_per_class is not None:
+            self.max_per_class = int(self.max_per_class)
+            if self.max_per_class < 1:
+                raise ValueError(
+                    f"eval.oneshot.max_per_class must be >= 1 or null, got {self.max_per_class}"
+                )
+        self.seed = int(node.get("seed", 0))
         self.subset = str(cfg.eval.get("image_subset", "all"))
         self.other_tau = float(cfg.oneshot.other_min_cosine)
         self.aggregate = str(cfg.oneshot.get("aggregate", "vote"))
         self._classifier = classifier
+        self._seen: tuple[list[str], list[str]] | None = None
 
     # ------------------------------------------------------------------ #
 
@@ -172,16 +255,28 @@ class OneShotEvaluation:
             )
         return self._classifier
 
+    def _seen_classes(self, clf: OneShotClassifier) -> tuple[list[str], list[str]]:
+        """(training, excluded) classes that define the groups: the loaded encoder's, or
+        eval.oneshot.groups_ckpt's when set."""
+        if self._seen is None:
+            if self.groups_ckpt is None:
+                ckpt = Path(str(self.cfg.oneshot.encoder_ckpt))
+                self._seen = list(clf.encoder_classes), checkpoint_excluded_classes(ckpt)
+            else:
+                state = torch.load(
+                    Path(str(self.groups_ckpt)), map_location="cpu", weights_only=False
+                )
+                self._seen = list(state["fine_classes"]), list(state.get("excluded_classes", []))
+        return self._seen
+
     def _groups(self, clf: OneShotClassifier, holdout) -> dict[str, ClassInfo]:
-        symbol_map = Path(str(self.cfg.oneshot.get("symbol_map", None) or DEFAULT_SYMBOL_MAP))
-        if not symbol_map.is_absolute():
-            symbol_map = _REPO_ROOT / symbol_map
-        ckpt = Path(str(self.cfg.oneshot.encoder_ckpt))
+        symbol_map = symbol_map_path(self.cfg.oneshot.get("symbol_map", None))
+        seen, excluded = self._seen_classes(clf)
         return assign_groups(
             read_symbol_map(symbol_map),
             read_vocab(Path(str(self.cfg.oneshot.vocab_csv))),
-            clf.encoder_classes,
-            checkpoint_excluded_classes(ckpt),
+            seen,
+            excluded,
             holdout,
         )
 
@@ -211,7 +306,6 @@ class OneShotEvaluation:
                 if path in stored:
                     img = view(img, stored[path])
                 emb = clf.embed_crop(np.array(img))
-                top = rank_names(clf.directory, emb, self.aggregate, 3)
                 info = groups[classes[idx]]
                 row = {
                     "split": split,
@@ -220,18 +314,26 @@ class OneShotEvaluation:
                     "class": info.name,
                     "group": info.group,
                     "expected": info.template or "",
-                    "names": [n_ for n_, _ in top],
-                    "best_cos": top[0][1],
-                    "second_cos": clf._second_cosine(clf.directory, emb, top[0][0]),
+                    **self._ranked(clf, emb),
                 }
-                for j, (name, cos) in enumerate(top, 1):
-                    row[f"top{j}"], row[f"cos{j}"] = name, cos
                 if keep_emb:
                     row["emb"] = emb
                 rows.append(row)
                 if n % 500 == 0:
                     logger.info("[oneshot] %s: %d / %d crops", split, n, len(samples))
         return rows
+
+    def _ranked(self, clf: OneShotClassifier, emb: torch.Tensor) -> dict:
+        """The un-gated part of a crop's row: top-3 names / cosines, best_cos, second_cos."""
+        top = rank_names(clf.directory, emb, self.aggregate, 3)
+        row = {
+            "names": [n for n, _ in top],
+            "best_cos": top[0][1],
+            "second_cos": clf._second_cosine(clf.directory, emb, top[0][0]),
+        }
+        for j, (name, cos) in enumerate(top, 1):
+            row[f"top{j}"], row[f"cos{j}"] = name, cos
+        return row
 
     def _write_csv(self, rows: list[dict], extra: tuple[str, ...] = ()) -> str:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -243,12 +345,13 @@ class OneShotEvaluation:
                 out.writerow({k: (f"{v:.6f}" if isinstance(v, float) else v) for k, v in r.items()})
         return str(path)
 
-    def _plot_sweep(self, sweep: dict) -> str:
+    def _plot_sweep(self, sweep: dict, tag: str = "") -> str:
         import matplotlib
 
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
+        name = f"{self.protocol}_{tag}" if tag else self.protocol
         fig, ax = plt.subplots(figsize=(6, 4))
         ax.plot(sweep["tau"], sweep["known_acc"], label="known: accepted and correct")
         ax.plot(sweep["tau"], sweep["known_reject_rate"], label="known: rejected")
@@ -257,11 +360,11 @@ class OneShotEvaluation:
         ax.axvline(self.other_tau, color="grey", linestyle=":", label="other_min_cosine")
         ax.set_xlabel("tau (best cosine)")
         ax.set_ylabel("fraction of crops")
-        ax.set_title(f"One-shot {self.protocol}: tau sweep")
+        ax.set_title(f"One-shot {name}: tau sweep")
         ax.legend(fontsize=8)
         fig.tight_layout()
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        path = self.output_dir / f"oneshot_{self.protocol}_sweep.png"
+        path = self.output_dir / f"oneshot_{name}_sweep.png"
         fig.savefig(path)
         plt.close(fig)
         return str(path)
@@ -283,6 +386,7 @@ class OneShotEvaluation:
             "encoder_checkpoint": str(ckpt),
             "encoder_sha256": checkpoint_sha256(ckpt),
             "encoder_classes": len(clf.encoder_classes),
+            "groups_checkpoint": None if self.groups_ckpt is None else str(self.groups_ckpt),
             "prototypes": str(self.cfg.oneshot.prototypes),
             "n_prototypes": len(clf.directory),
             "aggregate": self.aggregate,
@@ -290,7 +394,7 @@ class OneShotEvaluation:
             "image_subset": self.subset,
             "other_min_cosine": self.other_tau,
         }
-        run = {"p1": self._p1, "p2": self._p2, "tau": self._tau}[self.protocol]
+        run = {"p1": self._p1, "p2": self._p2, "tau": self._tau, "p4": self._p4}[self.protocol]
         result.update(run(clf, groups, holdout))
         return result
 
@@ -310,13 +414,19 @@ class OneShotEvaluation:
         return known, unknown
 
     def _summary(self, known, unknown, taus=_GROUP_SWEEP_TAUS) -> dict:
-        return open_set_summary(
+        summary = open_set_summary(
             [r["top1"] == r["expected"] for r in known],
             [r["best_cos"] for r in known],
             [r["best_cos"] for r in unknown],
             self.other_tau,
             taus,
         )
+
+        def margin(rs):
+            return margins([r["best_cos"] for r in rs], [r["second_cos"] for r in rs])
+
+        summary["margin_auroc"] = margin_auroc(margin(known), margin(unknown))
+        return summary
 
     def _per_class(self, rows: list[dict], groups: dict[str, ClassInfo], names: list[str]) -> dict:
         out = {}
@@ -378,10 +488,11 @@ class OneShotEvaluation:
             "sweep_png": self._plot_sweep(summary["sweep"]),
         }
         logger.info(
-            "[oneshot/p1] h_in macro top1=%s top3=%s  AUROC=%s OSCR=%s",
+            "[oneshot/p1] h_in macro top1=%s top3=%s  AUROC=%s (margin %s) OSCR=%s",
             out["h_in"]["macro_top1"],
             out["h_in"]["macro_top3"],
             summary["auroc"],
+            summary["margin_auroc"],
             summary["oscr_area"],
         )
         return out
@@ -418,10 +529,11 @@ class OneShotEvaluation:
             "sweep_png": self._plot_sweep(summary["sweep"]),
         }
         logger.info(
-            "[oneshot/p2] S macro top1=%s  V macro top1=%s  AUROC=%s OSCR=%s",
+            "[oneshot/p2] S macro top1=%s  V macro top1=%s  AUROC=%s (margin %s) OSCR=%s",
             out["groups"]["S"]["macro_top1"],
             out["groups"]["V"]["macro_top1"],
             summary["auroc"],
+            summary["margin_auroc"],
             summary["oscr_area"],
         )
         return out
@@ -441,7 +553,14 @@ class OneShotEvaluation:
             if info.group != "S":
                 continue
             (classes if info.template in directory.names else skipped).append(name)
-        validate_tau_classes(classes, clf.encoder_classes, holdout)
+        validate_tau_classes(classes, self._seen_classes(clf)[0], holdout)
+        held = sorted(set(classes) & set(holdout.excluded))
+        if self.groups_ckpt is not None and held:
+            # Another encoder's group S: still never a class P1 tests (nor h_extra).
+            raise ValueError(
+                f"tau with eval.oneshot.groups_ckpt would read {held}, held out by "
+                "oneshot.holdout; point groups_ckpt at the leave-out encoder"
+            )
         if skipped:
             logger.warning(
                 "[oneshot/tau] no prototype for %s (oneshot.exclude_prototypes?): skipped", skipped
@@ -498,6 +617,17 @@ class OneShotEvaluation:
                 **base,
             },
         }
+        margin = margins(known, [r["second_cos"] for r in rows])
+        delta = margin_rule_a(margin, self.tau_tpr)
+        out["margin_rule_a"] = {
+            "delta": delta,
+            "tpr": self.tau_tpr,
+            "known_accepted": float(np.mean(margin >= delta)),
+            "known_accepted_with_rule_a_tau": float(
+                np.mean((margin >= delta) & (np.asarray(known) >= tau_a))
+            ),
+            **base,
+        }
         for rule, key in (("rule_b", "pseudo_cos"), ("rule_b_no_twins", "pseudo_cos_no_twins")):
             pseudo = [r[key] for r in rows]
             picked = tau_rule_b(known, pseudo)
@@ -520,12 +650,236 @@ class OneShotEvaluation:
         )
         out["crops_csv"] = self._write_csv(rows, ("pseudo_cos", "pseudo_cos_no_twins"))
         logger.info(
-            "[oneshot/tau] %d crops, %d classes: rule A tau=%.4f, rule B tau=%s, "
-            "rule B (no twins) tau=%s",
+            "[oneshot/tau] %d crops, %d classes: rule A tau=%.4f (margin delta=%.4f), "
+            "rule B tau=%s, rule B (no twins) tau=%s",
             len(rows),
             len(classes),
             tau_a,
+            delta,
             out["rule_b"]["tau"],
             out["rule_b_no_twins"]["tau"],
         )
+        return out
+
+    # -- p4 -------------------------------------------------------------- #
+
+    def _p4(self, clf, groups, holdout) -> dict:
+        if self.subset != "all":
+            raise ValueError(
+                "eval.oneshot.protocol=p4 scores OPEN100-ISO, which has no val_sel / test "
+                f"halves, so eval.image_subset={self.subset!r} cannot apply; leave it `all`"
+            )
+        vocab = read_vocab(Path(str(self.cfg.oneshot.vocab_csv)))
+        templates = [r["fine_name"].strip() for r in vocab.values()]
+        with self.paths.coco_json.open() as f:
+            coco = json.load(f)
+        validate_p4_coco(coco, templates)
+        iso_groups = assign_iso_groups(groups, templates)
+        group_of = {**iso_groups, **{n: n for n in OTHER_NAMES}}
+        cat = {c["id"]: c["name"] for c in coco["categories"]}
+        images = {im["id"]: im for im in coco["images"]}
+
+        # Ignore regions (iscrowd, utils.classmap.IGNORE_CATEGORY) are no symbol: never a crop,
+        # never known, never Other.
+        anns = [a for a in coco["annotations"] if not a.get("iscrowd")]
+        if any(cat[a["category_id"]] == IGNORE_CATEGORY for a in anns):
+            raise ValueError(f"an {IGNORE_CATEGORY!r} annotation without iscrowd: not a symbol")
+        ids: dict[tuple[str, bool], list[int]] = defaultdict(list)
+        for a in anns:
+            ids[(cat[a["category_id"]], bool(images[a["image_id"]]["degraded"]))].append(a["id"])
+        available = {
+            v: {name: len(i) for (name, deg), i in sorted(ids.items()) if deg == (v == "degraded")}
+            for v in _P4_VIEWS
+        }
+        keep = {i for kept in sample_per_class(ids, self.max_per_class, self.seed).values()
+                for i in kept}  # fmt: skip
+        present = sorted({name for name, _ in ids if name in iso_groups})
+        missing = sorted(set(present) - set(clf.directory.names))
+        if missing:
+            logger.warning(
+                "[oneshot/p4] no prototype for %s (oneshot.exclude_prototypes?): their crops "
+                "can never be named right",
+                missing,
+            )
+        rows = self._score_coco(clf, coco, cat, group_of, keep)  # keep holds no ignore region
+        out: dict = {
+            "dataset": str(self.paths.root),
+            "primary": "degraded",
+            "max_per_class": self.max_per_class,
+            "seed": self.seed,
+            "template_groups": iso_groups,
+            "group_classes": {g: [n for n in present if iso_groups[n] == g] for g in ISO_GROUPS},
+            "templates_without_prototype": missing,
+            "n_annotations": len(anns),
+            "n_ignored": len(coco["annotations"]) - len(anns),
+            "n_crops": len(rows),
+        }
+        for v in _P4_VIEWS:
+            out[v] = self._p4_view([r for r in rows if r["split"] == v], available[v], v)
+        out["crops_csv"] = self._write_csv(rows, _P4_FIELDS)
+        for v in _P4_VIEWS:
+            block = out[v]
+            logger.info(
+                "[oneshot/p4] %s: %s  AUROC=%s (margin %s)",
+                v,
+                "  ".join(
+                    f"{g} top1={b['macro_top1']} (n={b['n_crops']})"
+                    for g, b in block["groups"].items()
+                    if b["n_crops"]
+                ),
+                (block["open_set"] or {}).get("auroc"),
+                (block["open_set"] or {}).get("margin_auroc"),
+            )
+        return out
+
+    def _score_coco(self, clf, coco, cat, group_of, keep: set[int]) -> list[dict]:
+        """One row per kept COCO annotation (see _CSV_FIELDS + _P4_FIELDS), the view cut from
+        its sheet with the inference-time margin; each sheet image is read once."""
+        by_image: dict[int, list[dict]] = defaultdict(list)
+        for a in coco["annotations"]:
+            if a["id"] in keep:
+                by_image[a["image_id"]].append(a)
+        images = {im["id"]: im for im in coco["images"]}
+        logger.info("[oneshot/p4] %d crops from %d images", len(keep), len(by_image))
+        rows: list[dict] = []
+        for n, image_id in enumerate(sorted(by_image), 1):
+            im = images[image_id]
+            stem = Path(im["file_name"]).stem
+            pixels = np.array(Image.open(self.paths.find_image(stem)).convert("RGB"))
+            degraded = bool(im["degraded"])
+            for a in sorted(by_image[image_id], key=lambda a: a["id"]):
+                x, y, w, h = a["bbox"]
+                emb = clf.embed_crop(np.ascontiguousarray(cut(pixels, (x, y, x + w, y + h))))
+                name = cat[a["category_id"]]
+                rows.append(
+                    {
+                        "split": "degraded" if degraded else "clean",
+                        "path": im["file_name"],
+                        "image_id": stem,
+                        "class": name,
+                        "group": group_of[name],
+                        "expected": "" if name in OTHER_NAMES else name,
+                        **self._ranked(clf, emb),
+                        "sheet": int(im["sheet"]),
+                        "variant": int(im["variant"]),
+                        "degraded": int(degraded),
+                        "ann_id": int(a["id"]),
+                    }
+                )
+            if n % 50 == 0:
+                logger.info("[oneshot/p4] %d / %d images", n, len(by_image))
+        return rows
+
+    @staticmethod
+    def _p4_groups(rows: list[dict]) -> dict:
+        """One row per ISO group (never pooled): classes, crops, macro and instance top-1/3."""
+
+        def mean(flags):
+            return float(np.mean(flags)) if flags else None
+
+        out = {}
+        for g in ISO_GROUPS:
+            mine = [r for r in rows if r["group"] == g]
+            stats = [
+                class_stats(
+                    [r["names"] for r in mine if r["class"] == c],
+                    c,
+                    [r["best_cos"] for r in mine if r["class"] == c],
+                )
+                for c in sorted({r["class"] for r in mine})
+            ]
+            out[g] = {
+                "n_classes": len(stats),
+                "n_crops": len(mine),
+                "macro_top1": macro(s["top1"] for s in stats),
+                "macro_top3": macro(s["top3"] for s in stats),
+                "top1": mean([r["top1"] == r["expected"] for r in mine]),
+                "top3": mean([r["expected"] in r["names"] for r in mine]),
+            }
+        return out
+
+    def _p4_other(self, known: list[dict], other: list[dict]) -> dict:
+        """An Other category against every vocab crop: reject rate at tau, AUROC (cos, margin)."""
+        cos = [r["best_cos"] for r in other]
+        both = bool(other) and bool(known)
+        rejected = float(np.mean([c < self.other_tau for c in cos])) if cos else None
+
+        def margin(rs):
+            return margins([r["best_cos"] for r in rs], [r["second_cos"] for r in rs])
+
+        stats = class_stats([r["names"] for r in other], None, cos)
+        return {
+            "n": len(other),
+            "reject_rate_at_tau": rejected,
+            "auroc": other_auroc([r["best_cos"] for r in known], cos) if both else None,
+            "margin_auroc": margin_auroc(margin(known), margin(other)) if both else None,
+            "most_predicted": stats["most_predicted"],
+            "most_predicted_frac": stats["most_predicted_frac"],
+            "mean_best_cos": stats["mean_best_cos"],
+        }
+
+    def _p4_view(self, rows: list[dict], available: dict[str, int], tag: str) -> dict:
+        """Every P4 number for one view (degraded or clean), never mixing the two."""
+        known = [r for r in rows if r["group"] in ISO_GROUPS]
+        unknown = [r for r in rows if r["group"] == "other_iso"]
+        per_class = {}
+        for name in sorted({r["class"] for r in rows}):
+            mine = [r for r in rows if r["class"] == name]
+            expected = None if name in OTHER_NAMES else name
+            stats = class_stats([r["names"] for r in mine], expected, [r["best_cos"] for r in mine])
+            stats.update(group=mine[0]["group"], n_available=available.get(name, 0))
+            if expected is None:
+                stats["reject_rate_at_tau"] = float(
+                    np.mean([r["best_cos"] < self.other_tau for r in mine])
+                )
+            per_class[name] = stats
+        sheets = {}
+        for sheet in sorted({r["sheet"] for r in rows}):
+            mine = [r for r in rows if r["sheet"] == sheet]
+            other = self._p4_other(
+                [r for r in mine if r["group"] in ISO_GROUPS],
+                [r for r in mine if r["group"] == "other_iso"],
+            )
+            sheets[f"iso{sheet:02d}"] = {
+                "n_crops": len(mine),
+                "groups": self._p4_groups(mine),
+                "auroc": other["auroc"],
+                "margin_auroc": other["margin_auroc"],
+            }
+        out: dict = {
+            "n_crops": len(rows),
+            "n_images": len({r["image_id"] for r in rows}),
+            "n_available": available,
+            "groups": self._p4_groups(rows),
+            "per_class": per_class,
+            "other": {
+                name: self._p4_other(known, [r for r in rows if r["group"] == name])
+                for name in OTHER_NAMES
+            },
+            "per_sheet": sheets,
+            "sheet_mean_std": {
+                "groups": {
+                    g: {
+                        m: mean_std(s["groups"][g][m] for s in sheets.values())
+                        for m in ("macro_top1", "macro_top3")
+                    }
+                    for g in ISO_GROUPS
+                },
+                "auroc": mean_std(s["auroc"] for s in sheets.values()),
+                "margin_auroc": mean_std(s["margin_auroc"] for s in sheets.values()),
+            },
+            "open_set": None,
+            "open_set_by_group": {},
+            "sweep_png": None,
+        }
+        if known:
+            out["open_set"] = self._summary(known, unknown, _SWEEP_TAUS)
+            out["open_set_by_group"] = {
+                g: self._summary([r for r in known if r["group"] == g], unknown)
+                for g in ISO_GROUPS
+                if any(r["group"] == g for r in known)
+            }
+            out["sweep_png"] = self._plot_sweep(out["open_set"]["sweep"], tag)
+        else:
+            logger.warning("[oneshot/p4] %s: no vocab crop, open-set metrics left out", tag)
         return out

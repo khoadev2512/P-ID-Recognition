@@ -11,6 +11,10 @@ eval.mode:
                   32 fine classes (detector.label_level=fine) is scored per fine class:
                   the baseline of the closed-set chapter (protocol C).
     det_plus_fgc  end-to-end on derived/detections_fgc (fine labels), plus the FGC metrics.
+                  With ++fgc.oneshot=true (the flag pid-fgc-infer wrote them with): the one-shot
+                  end-to-end score on derived/detections_oneshot instead, gated at
+                  oneshot.other_min_cosine (+ ++eval.oneshot.margin_delta) here, plus the
+                  detector's wrong-box rate (pipeline.detection_eval, PLAN B6b-2).
     fgc_only      the FGC metrics alone, on ground-truth crops: needs no detector output,
                   so a freshly trained `__global__.pt` can be scored on its own.
     oneshot       crop-level one-shot evaluation against the ISO prototypes (protocols p1 /
@@ -19,6 +23,13 @@ eval.mode:
 The crop-level modes (fgc_only, oneshot) read crops_fgc/val through eval.image_subset
 (all | val_sel | test, image ids from eval.splits_file): the 100 val images are split 50/50
 by image so that checkpoint / tau selection (val_sel) and the exam (test) do not share crops.
+The one-shot end-to-end score takes it too (the wrong-box rate is read on val_sel).
+
+Detection metrics take the extended path of pipeline.detection_eval when the COCO has ignore
+regions (`iscrowd: 1`, B6d.2), when ++eval.class_agnostic=true (one class "symbol", recall per
+group from eval.oneshot.groups_ckpt / oneshot.encoder_ckpt), or when its images carry
+`degraded` + `sheet` (OPEN100-ISO: clean and degraded never pooled, per source sheet + mean +-
+std). Otherwise (DigitizePID with both switches off) the original mean_ap path runs unchanged.
 
 With fgc.global_encoder=true the FGC metrics are those of the single head in
 `<fgc.ckpt_dir>/__global__.pt` (protocol C, docs/PLAN_STAGE2_ONESHOT.md B6c): top-k,
@@ -94,10 +105,10 @@ class EvaluationPipeline(BasePipeline):
         if mode not in MODES:
             raise ValueError(f"cfg.eval.mode must be one of {MODES}, got {mode!r}")
         subset = str(self.cfg.eval.get("image_subset", "all"))
-        if mode in ("det_only", "det_plus_fgc") and subset != "all":
+        if mode in ("det_only", "det_plus_fgc") and subset != "all" and not self._oneshot_e2e():
             raise ValueError(
                 f"eval.image_subset={subset!r} only applies to the crop-level modes "
-                "(fgc_only, oneshot), not to detection metrics"
+                "(fgc_only, oneshot) and the one-shot end-to-end score, not to detection metrics"
             )
         if mode == "oneshot":
             from pipeline.oneshot_eval import PROTOCOLS
@@ -120,8 +131,14 @@ class EvaluationPipeline(BasePipeline):
             image_subset_ids(self.cfg, str(self.cfg.eval.split))  # subset != all needs split=val
             return True
 
+        if self._oneshot_e2e():
+            from utils.dataset import image_subset_ids
+
+            image_subset_ids(self.cfg, str(self.cfg.eval.split))  # subset != all needs split=val
         det_dir = self._predictions_dir()
-        infer_cmd = "pid-detect-infer" if mode == "det_only" else "pid-fgc-infer"
+        infer_cmd = {"det_only": "pid-detect-infer", "det_plus_fgc": "pid-fgc-infer"}[mode]
+        if self._oneshot_e2e():
+            infer_cmd += " ++fgc.oneshot=true"
         if not det_dir.exists() or not any(det_dir.glob("*.txt")):
             raise FileNotFoundError(
                 f"{det_dir} does not exist or has no prediction .txt files; run "
@@ -136,18 +153,35 @@ class EvaluationPipeline(BasePipeline):
 
     def _predictions_dir(self) -> Path:
         """`derived/detections/<split>` (det_only) or `derived/detections_fgc/<split>`
-        (det_plus_fgc) — the output contract of `pipeline.detect_infer` / `pipeline.fgc_infer`
-        respectively.
+        (det_plus_fgc; `derived/detections_oneshot/<split>` with fgc.oneshot=true) — the output
+        contract of `pipeline.detect_infer` / `pipeline.fgc_infer` respectively.
         """
         split = str(self.cfg.eval.split)
         mode = str(self.cfg.eval.mode)
         subdir = "detections" if mode == "det_only" else "detections_fgc"
+        if self._oneshot_e2e():
+            subdir = "detections_oneshot"
         return self.paths.derived / subdir / split
+
+    def _oneshot_e2e(self) -> bool:
+        """det_plus_fgc on the one-shot Stage-2 output (++fgc.oneshot=true, as pid-fgc-infer)."""
+        fgc = self.cfg.get("fgc", None) or {}
+        return str(self.cfg.eval.mode) == "det_plus_fgc" and bool(fgc.get("oneshot", False))
+
+    def _class_agnostic(self) -> bool:
+        return bool(self.cfg.eval.get("class_agnostic", False))
 
     def _eval_image_ids(self) -> set[str]:
         manifest = pd.read_csv(self.paths.manifest_csv, dtype={"id": str})
         split = str(self.cfg.eval.split)
-        return set(manifest.loc[manifest["split"] == split, "id"])
+        ids = set(manifest.loc[manifest["split"] == split, "id"])
+        if self._oneshot_e2e():
+            from utils.dataset import image_subset_ids
+
+            subset = image_subset_ids(self.cfg, split)
+            if subset is not None:
+                ids &= subset
+        return ids
 
     def _load_coco(self) -> dict:
         with self.paths.coco_json.open("r") as f:
@@ -188,18 +222,25 @@ class EvaluationPipeline(BasePipeline):
             if image_id is None or image_id not in eval_ids:
                 continue
 
+            if ann.get("iscrowd"):
+                continue  # an ignore region (B6d.2); DigitizePID has none
             category = category_id_to_category[ann["category_id"]]
             x, y, w, h = ann["bbox"]
             xyxy = (float(x), float(y), float(x + w), float(y + h))
-
-            if mode == "det_only" and self._detector_level() == "coarse":
-                class_id = self.classmap.coarse_id(category["supercategory"])
-            else:
-                class_id = self.classmap.fine_id(category["name"])
-
-            gts.append((image_id, class_id, xyxy))
+            gts.append(
+                (
+                    image_id,
+                    self._gt_class_id(category["name"], category["supercategory"], mode),
+                    xyxy,
+                )
+            )
 
         return gts
+
+    def _gt_class_id(self, name: str, supercategory: str, mode: str) -> int:
+        if mode == "det_only" and self._detector_level() == "coarse":
+            return self.classmap.coarse_id(supercategory)
+        return self.classmap.fine_id(name)
 
     def _detector_level(self) -> str:
         """Label set of the Stage-1 detector whose files det_only scores."""
@@ -209,8 +250,10 @@ class EvaluationPipeline(BasePipeline):
         return level
 
     def _load_preds(
-        self, eval_ids: set[str], image_id_to_wh
+        self, eval_ids: set[str], image_id_to_wh, agnostic: bool = False
     ) -> list[tuple[str, int, float, tuple[float, float, float, float]]]:
+        """Predictions with score >= eval.score_thr. `agnostic`: every box is class 0, the
+        ones without a vocabulary label included (a box is a box)."""
         det_dir = self._predictions_dir()
         score_thr = float(self.cfg.eval.score_thr)
 
@@ -236,7 +279,9 @@ class EvaluationPipeline(BasePipeline):
                     cx, cy, w, h, score = (float(v) for v in parts[1:6])
                     if score < score_thr:
                         continue
-                    if class_id < 0:
+                    if agnostic:
+                        class_id = 0
+                    elif class_id < 0:
                         # OTHER_FINE_ID / UNREFINED_FINE_ID: the box got no vocabulary
                         # label, so it predicts no class. Kept, each would be scored as a
                         # class of its own with AP 0 and drag the mean down.
@@ -255,11 +300,22 @@ class EvaluationPipeline(BasePipeline):
         return preds
 
     def compute_detection_metrics(self) -> dict:
-        """mAP@50, mAP@50:95, and (if cfg.eval.per_class_ap) per-class AP@50."""
+        """mAP@50, mAP@50:95, and (if cfg.eval.per_class_ap) per-class AP@50; the extended
+        report of pipeline.detection_eval with ignore regions / class_agnostic / OPEN100-ISO
+        views (module docstring)."""
+        from pipeline import detection_eval
+
         mode = str(self.cfg.eval.mode)
         eval_ids = self._eval_image_ids()
         coco = self._load_coco()
         image_id_to_wh, coco_id_to_image_id = self._image_sizes(coco)
+
+        boxes, ignores = detection_eval.load_boxes(coco, eval_ids, coco_id_to_image_id)
+        views = detection_eval.image_views(coco, eval_ids)
+        if self._class_agnostic() or ignores or views is not None:
+            return self._extended_detection_metrics(
+                mode, eval_ids, image_id_to_wh, boxes, ignores, views
+            )
 
         gts = self._load_gt(coco, eval_ids, image_id_to_wh, coco_id_to_image_id, mode)
         preds = self._load_preds(eval_ids, image_id_to_wh)
@@ -282,6 +338,166 @@ class EvaluationPipeline(BasePipeline):
             result = {k: v for k, v in result.items() if k != "per_class_ap_50"}
 
         return result
+
+    def _extended_detection_metrics(
+        self, mode: str, eval_ids, image_id_to_wh, boxes, ignores, views
+    ) -> dict:
+        from pipeline import detection_eval
+
+        agnostic = self._class_agnostic()
+        preds = self._load_preds(eval_ids, image_id_to_wh, agnostic=agnostic)
+        gts = [
+            (
+                b.image_id,
+                0 if agnostic else self._gt_class_id(b.name, b.supercategory, mode),
+                b.xyxy,
+            )
+            for b in boxes
+        ]
+        groups = None
+        if agnostic:
+            groups = detection_eval.gt_groups(self.cfg, {b.name for b in boxes})
+            if groups.note:
+                logger.warning("[detection] %s", groups.note)
+        iou_thrs = [float(t) for t in self.cfg.eval.iou_thrs]
+        logger.info(
+            "Detection metrics (class_agnostic=%s): %d GT boxes, %d ignore regions, %d "
+            "predictions (score>=%.2f) over %d images (split=%s, mode=%s%s).",
+            agnostic,
+            len(gts),
+            len(ignores),
+            len(preds),
+            float(self.cfg.eval.score_thr),
+            len(eval_ids),
+            self.cfg.eval.split,
+            mode,
+            ", clean / degraded apart" if views is not None else "",
+        )
+        report = detection_eval.detection_report(
+            eval_ids,
+            views,
+            preds,
+            gts,
+            boxes,
+            ignores,
+            iou_thrs,
+            groups,
+            bool(self.cfg.eval.per_class_ap),
+        )
+        out = {
+            "class_agnostic": agnostic,
+            "score_thr": float(self.cfg.eval.score_thr),
+            "ignore_match": {
+                "iou": detection_metrics.IGNORE_IOU,
+                "inside_frac_of_prediction": detection_metrics.IGNORE_INSIDE,
+            },
+            **report,
+        }
+        if groups is not None:
+            out["groups"] = groups.summary()
+        for view in ("degraded", "clean") if views is not None else (None,):
+            block = report if view is None else report[view]
+            logger.info(
+                "[detection%s] P=%s R=%s mAP50=%.4f mAP50:95=%.4f%s",
+                "" if view is None else f"/{view}",
+                block["precision"],
+                block["recall"],
+                block["map_50"],
+                block["map_50_95"],
+                "".join(
+                    f"  {g} R={r['recall']} (n={r['n']})"
+                    for g, r in block.get("recall_by_group", {}).items()
+                ),
+            )
+        return out
+
+    def compute_oneshot_e2e_metrics(self) -> dict:
+        """End-to-end Stage 1 + one-shot Stage 2 on whole sheets, and the wrong-box rate
+        (pipeline.detection_eval), from derived/detections_oneshot, gated here."""
+        from pipeline import detection_eval
+        from pipeline.oneshot_infer import UNREFINED_LABEL, read_oneshot_detections
+
+        eval_ids = self._eval_image_ids()
+        coco = self._load_coco()
+        image_id_to_wh, coco_id_to_image_id = self._image_sizes(coco)
+        boxes, ignores = detection_eval.load_boxes(coco, eval_ids, coco_id_to_image_id)
+        views = detection_eval.image_views(coco, eval_ids)
+        groups = detection_eval.gt_groups(self.cfg, {b.name for b in boxes}, require_vocab=True)
+        if groups.note:
+            logger.warning("[oneshot_e2e] %s", groups.note)
+        tau = float(self.cfg.oneshot.other_min_cosine)
+        node = self.cfg.eval.get("oneshot", None) or {}
+        delta = node.get("margin_delta", None)
+        delta = None if delta is None else float(delta)
+        score_thr = float(self.cfg.eval.score_thr)
+
+        det_dir = self._predictions_dir()
+        preds: list[detection_eval.E2EPred] = []
+        n_unrefined = 0
+        for image_id in sorted(eval_ids):
+            path = det_dir / f"{image_id}.txt"
+            if not path.exists():
+                continue
+            width, height = image_id_to_wh[image_id]
+            for r in read_oneshot_detections(path):
+                if r.score < score_thr:
+                    continue
+                if r.label == UNREFINED_LABEL or not np.isfinite(r.best_cos):
+                    n_unrefined += 1  # never classified: no decision (B6a)
+                    continue
+                preds.append(
+                    detection_eval.E2EPred(
+                        image_id,
+                        r.best_name,
+                        r.score,
+                        r.best_cos,
+                        r.second_cos,
+                        bbox_utils.yolo_to_xyxy(r.box, width, height),
+                    )
+                )
+        logger.info(
+            "[oneshot_e2e] %d GT boxes, %d ignore regions, %d predictions (score>=%.2f; %d "
+            "unrefined dropped) over %d images; tau=%.4f delta=%s",
+            len(boxes),
+            len(ignores),
+            len(preds),
+            score_thr,
+            n_unrefined,
+            len(eval_ids),
+            tau,
+            delta,
+        )
+        report = detection_eval.e2e_report(
+            eval_ids, views, preds, boxes, ignores, groups, tau, delta
+        )
+        out = {
+            "predictions": str(det_dir),
+            "encoder_checkpoint": self.cfg.oneshot.get("encoder_ckpt", None),
+            "groups": groups.summary(),
+            "tau": tau,
+            "margin_delta": delta,
+            "score_thr": score_thr,
+            "iou": detection_eval.E2E_IOU,
+            "wrong_box_iou": detection_eval.WRONG_BOX_IOU,
+            "n_unrefined_dropped": n_unrefined,
+            **report,
+        }
+        for view in ("degraded", "clean") if views is not None else (None,):
+            block = report if view is None else report[view]
+            wrong = block["wrong_boxes"]
+            logger.info(
+                "[oneshot_e2e%s] P=%s R=%s box R=%s | wrong boxes %d (%s of predictions), "
+                "rejected at tau %s%s",
+                "" if view is None else f"/{view}",
+                block["precision"],
+                block["recall"],
+                block["box_recall"],
+                wrong["n"],
+                wrong["frac_of_predictions"],
+                wrong["rejected_tau"],
+                "" if delta is None else f", tau or margin {wrong['rejected_tau_or_margin']}",
+            )
+        return out
 
     # ------------------------------------------------------------------ #
     # FGC metrics
@@ -529,12 +745,15 @@ class EvaluationPipeline(BasePipeline):
             metrics["image_subset"] = str(self.cfg.eval.get("image_subset", "all"))
         if mode == "oneshot":
             metrics["oneshot"] = self.compute_oneshot_metrics()
+        elif self._oneshot_e2e():
+            metrics["image_subset"] = str(self.cfg.eval.get("image_subset", "all"))
+            metrics["oneshot_e2e"] = self.compute_oneshot_e2e_metrics()
         elif mode != "fgc_only":
             metrics["detection"] = self.compute_detection_metrics()
             if mode == "det_only":
                 metrics["detection"]["label_level"] = self._detector_level()
 
-        if mode in ("det_plus_fgc", "fgc_only"):
+        if mode in ("det_plus_fgc", "fgc_only") and not self._oneshot_e2e():
             fgc_result = self.compute_fgc_metrics()
             if fgc_result is not None:
                 metrics["fgc"] = fgc_result

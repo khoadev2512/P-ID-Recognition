@@ -568,6 +568,143 @@ epoch 5  train_loss=0.0182 train_acc=0.9970 val_loss=0.0000 val_acc=1.0000   -> 
   0.605, S26 → pump_gear 0.489 → rủi ro cổng "Other" ở P2/P4 với R1b.
 - Script: scratchpad `sep_compare.py` + đoạn class-center (chưa vào `scripts/`).
 
+### Eval Colab 2026-11-13 — C trên `test`, chọn τ, P1, P2 (notebook §8–§9, `aggregate=mean`)
+CSV từng crop: `runs/oneshot_{p1,p2,tau}_crops.csv` (local, đã tải về; tau = encoder full).
+
+**C (R1b, nửa `test`, 6021 crop)**: top-1 0.9998, top-3 1.0, macro-F1 0.9998, nhảy họ 0 — bão hoà.
+
+**τ (9a, `val_sel`, lớp nhóm S encoder đã train)**:
+
+| Encoder | lớp / crop | A (TPR95) | B (Youden) | B bỏ cặp > 0.95 |
+|---|---|---|---|---|
+| R1a `lo` | S1, S17, S21, S24 / 1094 | 0.470 | 0.430 (J 0.673) | 0.430 (không cặp nào) |
+| R1b `full` | 10 lớp S / 2138 | 0.429 | 0.521 (J 0.471) | 0.521 (bỏ S3–butterfly 0.981) |
+
+Chưa ghi vào `config.yaml` (cần user duyệt).
+
+**P1 (R1a, crop train + val: 10470 h_in / 6909 h_out)**: h_in macro top-1 **0.036** (ngẫu nhiên
+1/42 = 0.024), top-3 0.365; AUROC 0.777; OSCR 0.030. So cặp cùng lớp, R1b (đã thấy, P2 `test`) →
+R1a (chưa thấy):
+
+| Lớp | ★ | R1b top-1 (cos) | R1a top-1 / top-3 (cos) | R1a hay ra |
+|---|---|---|---|---|
+| S3 | valve_globe | 0.00 (0.974) | 0.07 / 0.85 (0.931) | valve_butterfly |
+| S4 | valve_general | 1.00 (0.961) | 0.00 / 0.00 (0.702) | valve_control |
+| S5 | valve_ball | 1.00 (0.529) | 0.15 / 0.34 (0.652) | check_valve_swing |
+| S10 | valve_needle | 1.00 (0.681) | 0.00 / 0.00 (0.641) | valve_control |
+| S18 | interchangeable_disc | 1.00 (0.904) | 0.00 / 0.00 (0.527) | open_disc |
+| S19 | interchangeable_disc_open | 1.00 (0.844) | 0.00 / 1.00 (0.532) | open_disc |
+
+→ **5/5 lớp đúng khi đã thấy thành sai khi chưa thấy**; S3 sai ở cả hai. One-shot qua template ISO
+cho lớp DigitizePID chưa thấy ≈ ngẫu nhiên. Thành công của P2 trên lớp S là do encoder đã học lớp
+đó (template rơi gần tâm lớp), không phải khả năng so khớp one-shot. h_out (τ_A = 0.470):
+
+| Lớp | cos trung vị | bị loại tại τ_A | hay ra |
+|---|---|---|---|
+| S9 `valve_diaphragm_other_std` | 0.676 | 0% | pump_diaphragm |
+| S15 `valve_rotary_generic_other_std` | 0.563 | 2% | compressor_vacuum |
+| S27 `isa_bubble_ro` | 0.464 | 91% | pump_gear |
+| S30 `isa_square_sta` | 0.376 | 98% | reducer |
+
+"Other" tại τ_A: P 0.997, R 0.467, F1 0.636 (tại τ_B 0.430: R 0.211) — thực chất 2/4 lớp bị loại.
+
+**P2 (R1b, nửa `test`, 5665 crop)**: S macro top-1 0.70 (top-3 0.914) — sai đúng S3 → butterfly,
+S21 → agitator_general, S24 → pipeline, **y hệt P2 thu nhỏ và proxy tâm lớp**; V 1/6 (chỉ S22);
+V_of_S 0/3 (S2, S12, S13; cos ~0.26 → ArcFace đẩy chúng xa ★, vấn đề mở 6); OOV_seen: S15 →
+pump_general cos 0.952. AUROC 0.682, OSCR 0.372. UNSURE loại: S11 168, S25 188 crop.
+
+**Lưu ý cho P4**: prototype (`iso_symbols_clean`) và ảnh OPEN100-ISO cùng nguồn vector BK-2020 → nhóm
+H tự nhiên của P4 là so khớp gần-trùng (cùng hình vẽ, khác render/suy giảm), KHÁC P1 (khác phong cách
+vẽ). P1 thất bại không suy ra P4 thất bại; P4 tốt cũng không chứng minh chuyển giao sang phong cách
+lạ. Phải nói rõ khi viết.
+
+**τ đã ghi vào `config.yaml` (user duyệt 2026-11-14)**: `oneshot.other_min_cosine: 0.4291` = R1b,
+quy tắc A; bảng đủ 4 giá trị (R1a/R1b × A/B) nằm trong comment ngay trên khóa. R1a hoặc quy tắc B
+truyền qua CLI. τ chọn với `aggregate=mean` — nếu dùng `vote` (mặc định config) phải chọn lại.
+
+**S9 — vì sao khớp pump_diaphragm (2026-11-14, trang so sánh
+https://claude.ai/artifact/Qxu6bm5yNvpvTdDGx46PsP)**: tính lại cục bộ 12 crop S9 (khớp CSV đến 3
+chữ số). Với R1a, 11/12 crop có tâm lớp gần nhất là **S25** (`emergency_relief_valve`, tròn có X;
+cos 0.36–0.60, mọi tâm khác < 0.12 trừ S7); tâm S25 → pump_diaphragm 0.516 > hx_general 0.494 >
+pump_centrifugal 0.486 > pump_general 0.350 — **trùng đúng thứ tự top-4 của crop S9**, lề top1−top2
+trung vị chỉ 0.007. Crop gần S7 (`valve_manual_other_std`) hơn thì ra valve_control. Kết luận:
+pump_diaphragm thắng vì là ★ gần tâm S25 nhất, không vì nét riêng của S9 — cùng cơ chế "đi theo tâm
+lớp đã học gần nhất" như h_in. R1b (đã train S9): ra hx_general cos ~0.47 → **lọt τ_A 0.4291 (loại
+0%) nhưng bị τ_B 0.5210 loại 97%**. Trên cả OOV_seen của P2: τ_A loại 27.8%, τ_B 47.2%, còn S+V
+nhận-và-đúng gần như không đổi (0.444 vs 0.435). Không đổi mặc định theo số này (là chỉnh τ trên
+tập đánh giá); ghi làm quan sát cho chương thảo luận.
+User trả lời 2026-11-14 (`docs/i_chi_u_chuy_n_m_n_l_p_s9_van_m_ng.md`): **chốt** S9 giữ OOV / `h_out`,
+không gán ★ ISO nào; **chốt** giữ τ_A làm mặc định. **Còn mở**: mục 1 + câu 1 của tài liệu mô tả hình
+ngược với ảnh gốc (kiểm 8 crop ngẫu nhiên mỗi lớp từ COCO: S9 = hai tam giác đối đỉnh + cung tròn một
+phía; S25 = vòng tròn có X; S7 = hai tam giác + móc chữ L; ★ X8087 = hai tam giác + gạch chéo, không
+vòm) → lập luận "S9 là tròn có X" cần user xác nhận lại trước khi đưa vào luận văn.
+**Câu 1 đo trực tiếp (2026-11-14, 40 crop/lớp, 19 lớp R1a đã thấy, cắt từ COCO)**: lớp đã thấy gần S9
+nhất — HOG-lite (pixel, không học): tâm S1 0.751 > S11 0.742 > S6 0.723 > S25 0.702, từng crop hay
+ra S7 (14/40); ImageNet (B4a): tâm S7 0.959 > S1 > S14 > S11, từng crop S7 25/40, S25 7/40; **R1a: S25
+0.898, kế S7 0.394, từng crop S25 40/40**. → Theo hình (pixel, ImageNet) S9 gần các lớp van hai tam
+giác (S7, S1, S11) nhất; **lực hút về S25 do train DigitizePID tạo ra**, không phải hình học sẵn có.
+Khớp Kornblith et al. NeurIPS 2021 (loss tách lớp tốt hơn → feature cố định chuyển giao kém hơn,
+co biến thiên trong lớp). Dùng làm luận điểm cho P1 âm, và là dự đoán cho B4a §10 (ImageNet có thể
+không kém R1a trên P1).
+**Lề top1−top2 (dạng điểm 2 của PLAN B8), thử nhanh 2026-11-14 trên R1b**: δ chọn trên `val_sel` (tau
+CSV) theo quy tắc TPR95 → δ = 0.0321 (không nhìn P2 khi chọn). Trên P2: cổng "cos < τ_A **hoặc**
+lề < δ" loại OOV_seen 47.9% (chỉ τ_A: 27.8%), **S9 82%, S15 100%** (τ_A: 0% cả hai; S15 cos 0.952);
+cái giá: S bị loại 5.8% → 10.9%, V 15.9% → 34.7%. Lạ "gần" (cùng họ van: S9, S15) không loại được bằng
+cos nhưng lộ ra ở lề nhỏ (crop nằm giữa nhiều ★ gần nhau); lạ "xa" (S27, S30, ISA) đã bị τ loại ở P1.
+**Code ✅ 2026-11-14 (user duyệt)**: `margins` / `margin_rule_a` / `margin_auroc` / `gated_other_prf`
+(`utils/oneshot_metrics.py`), lượt τ ghi `margin_rule_a.delta`, P1/P2 ghi `margin_auroc`, notebook in dòng
+`rule_a + lề` (RUNBOOK §5e). Kiểm notebook trên CSV P2 thật: Other R 0.278 → 0.478, P 0.649 → 0.610,
+F1 0.389 → 0.536, nhận+đúng 0.4437 → 0.4434. AUROC của lề một mình **không** hơn cos (P1 0.705 vs
+0.777; P2 0.686 vs 0.682): hai điểm bắt hai loại lạ khác nhau (xa = cos thấp, gần = lề nhỏ) nên chỉ
+cổng HOẶC mới có lợi. Cần chạy lại 9a trên Colab để có δ của R1a, rồi 9b.
+
+**Câu trả lời user cho câu 2, 3 — đánh giá sau khi đọc tài liệu ngoài (2026-11-14, chỉ ghi ở đây)**:
+- Câu 2 — giữ kết luận (S9 OOV, không ★). Bỏ: "X8087 có mũ vòm" (★ trong repo không có vòm), "S9 gần
+  pump_diaphragm/hx_general về pixel" (dựa trên mô tả hình bị tráo; HOG nói ngược lại), mã "2107" ISO
+  14617-8 (chưa xác minh; 14617-8 đã bị thay bằng 14617-2:2025, bản trả phí). Thêm: S9 là lạ **gần**
+  (cùng họ van) — h_out chia gần (S9, S15: loại 0–2% ở P1) / xa (S27, S30 ISA: 91–98%), khớp khung
+  near/far semantic shift của Vaze et al. ICLR 2022 (arXiv 2110.06207).
+- Câu 3 — giữ τ_A. Bỏ: "cos 0.676 → 0.473 chứng tỏ R1b tốt hơn". Sửa: "τ_B loại 97% S9" phải nêu kèm
+  cái giá (S+V được nhận 0.909 → 0.651). Thêm: Dhamija et al. NeurIPS 2018 (arXiv 1811.04110, đặc
+  trưng lạ chồng lên biết → ngưỡng độ tương đồng không đủ; nguồn của OSCR) → động cơ cho dạng điểm 2.
+- Khung cho P1 âm: Kornblith et al. NeurIPS 2021 (arXiv 2010.16402: loss tách lớp tốt hơn → feature
+  cố định chuyển giao kém, co biến thiên trong lớp); đối trọng Galanti et al. ICLR 2022 (arXiv
+  2112.15121: neural collapse giúp chuyển giao khi nguồn đa dạng — DigitizePID chỉ 32 lớp). Không dùng so sánh
+cos 0.676 (R1a) → 0.473 (R1b) như bằng chứng "R1b tốt hơn": hai encoder khác thang cos, R1b đã thấy S9.
+
+### B6 code — 2026-11-14 (user: làm xong B6 trước khi báo cáo sơ bộ với thầy)
+- **B6d ✅**: export kiểm tham số ảnh suy giảm (sinh lại từ seed + config hiện tại; lệch → lỗi, không
+  export); kiểm chỉ-đọc trên `data/iso_open100` hiện có: **432/432 khớp**. Mũi tên dẫn + cờ ghi vào COCO
+  là vùng bỏ qua (`iscrowd: 1`, category `__ignore__` cuối danh sách, `ignore_kind`); build_classes /
+  build_manifest / coco_to_yolo / extract_crops bỏ qua; DigitizePID ra giống hệt từng byte. **Chưa
+  export lại `data/iso_open100`** (ghi đè, chờ user duyệt; ~3–4 phút; symbol không đổi — thử tờ 0).
+  Sau export lại phải zip lại cho Colab (cell 11a đang kiểm cứng 93,800 annotation).
+- **B6e ✅**: `++detector.agnostic_merge=true` (mặc định tắt): `agnostic_nms` mỗi tile + WBF không phân
+  nhãn, nhãn theo box thành phần điểm cao nhất. Bỏ `data.label_level=agnostic` (dùng `single_cls`
+  nếu cần detector một lớp).
+- **B6b-2 P4 mức crop ✅**: `++eval.oneshot.protocol=p4` (+ `++eval.oneshot.max_per_class`, `seed`);
+  nhóm tự động `assign_iso_groups` khớp bảng PLAN (R1b S9/V4/H tự nhiên 17; R1a S3/V4/H chọn 6/H tự
+  nhiên 17); không bao giờ gộp sạch/suy giảm; theo tờ mean ± std; Other: dương = other_iso,
+  other_isa / other_generic riêng. Notebook §11 (11a giải nén OPEN100-ISO từ Drive:
+  `<DRIVE_ROOT>/data/iso_open100_canonical.zip` ~1.9 GB, tạo bằng
+  `cd data/iso_open100 && zip -r -0 iso_open100_canonical.zip canonical`).
+  **Số sơ bộ cục bộ (CPU, 30 crop/lớp/view, `aggregate=mean`, suy giảm)**: S top-1 R1b 0.53 / R1a 1.00
+  (chỉ 3 lớp) / ImageNet 0.80; H tự nhiên R1b 0.50 / R1a 0.37 / ImageNet 0.20; H chọn R1a 0.24 /
+  ImageNet 0.02; AUROC Other (cos) 0.56 / 0.65 / 0.61, (lề) 0.70 / 0.72 / 0.43. Tại τ_A không loại
+  other_iso nào (cos other_iso ~0.76 vs vocab ~0.79 với R1b); τ_A HOẶC lề bắt ~57% other_iso nhưng
+  nhận+đúng 0.50 → 0.40. S của R1b bị kéo bởi flanged_connection → agitator_general, flow_direction →
+  pipeline, valve_globe → butterfly (**cùng lỗi P2: vấn đề mở 4, 5, cụm van**), valve_needle → gate.
+  Trái với kỳ vọng "P4 gần-trùng nên dễ": cổng Other yếu trên OPEN100 cho cả ba encoder.
+- **B6b-2 phần detection / end-to-end / box sai ✅ (2026-11-14)** — chi tiết PLAN B6b. Khóa mới (chỉ
+  `++`): `eval.class_agnostic`, `eval.oneshot.margin_delta`, `detector.classes_yaml`, end-to-end =
+  `eval.mode=det_plus_fgc ++fgc.oneshot=true`. Notebook §12 (RUNBOOK §5g); user phải điền `DET_CKPT`.
+  Chưa chạy detector thật (không có `best.pt` trên máy) — chỉ thử đường code với box giả.
+  Mặc định đã chọn (user có thể đổi): Other đúng cho cả `other_iso` / `other_isa` / `other_generic` (báo
+  riêng từng dòng); Other trên nền = FP; end-to-end OPEN100 dùng detection `agnostic_merge`, DigitizePID
+  dùng gộp theo nhãn.
+- **Phase A (code) XONG 2026-11-14**: 766 test pass. Còn lại là chạy (Colab §9 lại 9a, §10, §11, §12)
+  + export lại OPEN100-ISO (chờ duyệt).
+
 ### Chờ user quyết (PLAN "Vấn đề mở 2026-11-12")
 - Điểm 4: bỏ ★ `pipeline` (và template thuần đường kẻ) khỏi thư mục prototype?
 - Điểm 5: S21 giữ ISO hay đổi VARIANT? (xem crop cạnh template mặt bích, như đã làm với S6)
@@ -592,7 +729,10 @@ epoch 5  train_loss=0.0182 train_acc=0.9970 val_loss=0.0000 val_acc=1.0000   -> 
    cho B6b).
    ✅ B6b-1 (2026-11-13): `eval.mode=oneshot` p1/p2/tau mức crop; notebook §9 → **chạy trên Colab**
    (RUNBOOK §5e). Còn: B6b-2 (P4) + B6d.
-8. (Nếu rẻ) B4a: separation encoder chỉ-ImageNet.
+8. ✅ B4a code (2026-11-14, user chốt làm): `scripts/make_imagenet_encoder.py`, `++eval.oneshot.groups_ckpt`,
+   notebook §10 (RUNBOOK §5f). Separation cục bộ: ImageNet mean 0.474 / max 0.978 (lo 0.315, full
+   0.245) → train DigitizePID kéo prototype xa nhau. **Chạy §10 trên Colab** — P1 ImageNet vs R1a là
+   đối chứng quyết định cho kết quả P1 âm.
 9. Chưa đụng `test` cho tới khi chốt checkpoint, τ, lề template, (d).
 
 Đã xong: tách val; S6 = VARIANT (có sẵn); loại giả thuyết "vạch = ống"; R2; P2 thu nhỏ.
@@ -618,6 +758,14 @@ epoch 5  train_loss=0.0182 train_acc=0.9970 val_loss=0.0000 val_acc=1.0000   -> 
 - S5 (valve_ball) có nguy cơ khớp template thân tròn (pump_general).
 - P1 trên các lớp `h_in` thấp hơn P2 trên các lớp S tương ứng ở R1b (cùng ★) — đó là cái giá của
   "chưa thấy", là số chính của P1.
+**Đối chiếu dự đoán P1 (2026-11-13, sau Colab):**
+- P1 `h_in` thấp hơn P2 cùng lớp → **ĐÚNG**, mạnh hơn dự kiến (5/5 lớp từ 1.0 về ~0).
+- S3 sai ở cả hai → **ĐÚNG** (→ valve_butterfly).
+- S18, S19 nhầm sang nhau / open_disc → **ĐÚNG** (cả hai → open_disc).
+- S4 ↔ S10 nhầm sang nhau → **SAI chi tiết**: cả hai cùng ra valve_control (cùng sụp, nhưng sang ★ thứ ba).
+- S5 → template thân tròn → **SAI** (→ check_valve_swing).
+- S27 khớp cụm tròn với cos cao → **SAI** (cos 0.464, 91% bị loại). Bản sửa "S15 rủi ro nhất" → đúng
+  một phần (S15 → compressor_vacuum, 2% bị loại), nhưng **S9 còn tệ hơn** (cos 0.676, 0% bị loại).
 - **Sửa đổi (2026-11-13, sau phân tích class center, vẫn trước P1)**: rủi ro "Other" lớn nhất trong
   `h_out` là **S15** (ở R1b tâm S15 ≈ template tròn 0.66), không phải S27 (tâm S27 xa mọi template).
   Dự đoán S27 ở trên giữ nguyên để đối chiếu.

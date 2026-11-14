@@ -58,6 +58,8 @@ class CocoToYoloPipeline(BasePipeline):
 
         anns_by_image: dict[int, list[dict]] = {}
         for ann in coco.get("annotations", []):
+            if ann.get("iscrowd"):
+                continue  # an ignore region (utils.classmap.IGNORE_CATEGORY) is no label
             anns_by_image.setdefault(ann["image_id"], []).append(ann)
 
         for img in coco.get("images", []):

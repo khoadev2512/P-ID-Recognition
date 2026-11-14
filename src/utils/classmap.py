@@ -62,6 +62,13 @@ GLOBAL_GROUP = "__global__"
 # gate (utils.oneshot) emit it, and utils/ must not import from pipeline/.
 OTHER_CLASS_NAME = "__other__"
 
+# The COCO category of an IGNORE REGION: an annotation with `iscrowd: 1` (COCO's own marker)
+# that is neither a class nor background, e.g. the leader arrows and off-page flags of the ISO
+# export (utils.iso_export). It is never a class of classes.yaml: build_classes leaves it out,
+# and every stage that turns COCO annotations into labels or crops skips `iscrowd: 1`.
+# DigitizePID's COCO has neither, so nothing changes there.
+IGNORE_CATEGORY = "__ignore__"
+
 
 @dataclass
 class ClassMap:

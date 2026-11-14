@@ -15,11 +15,17 @@ An image's stem is `iso<sheet>_v<NNN>` (clean) or `iso<sheet>_v<NNN>_deg` (degra
 
 COCO category of an annotation = its V5 `label`: a `fine_name` of the Stage 2 vocabulary
 (`vocab.csv`) or `other_iso` / `other_isa` / `other_generic`. An annotation with no label (the
-inlet / outlet flags) or whose label is in `drop_labels` (leader arrows) is not exported to COCO:
-the vocabulary has no such class and a detector asked for symbols should not be scored on them.
-They stay in the GraphML as nodes (label = their kind, `category` empty). An agitator
-(`added: true`) is in COCO and has no GraphML node; a disc's flanges are a second box on the
-disc's node.
+inlet / outlet flags) or whose label is in `drop_labels` (leader arrows) is no class: the
+vocabulary has none for it, and a detector asked for symbols should be neither rewarded nor
+punished for finding one. It goes to COCO as an IGNORE REGION (B6d): `iscrowd: 1`, category
+`utils.classmap.IGNORE_CATEGORY` (the last category, not in the vocabulary), `ignore_kind` =
+`leader_arrow` / `flag`; the stages that make labels or crops skip it. In the GraphML these stay
+nodes (label = their kind, `category` empty). An agitator (`added: true`) is in COCO and has no
+GraphML node; a disc's flanges are a second box on the disc's node.
+
+A degraded image is exported from its V7 json and JPEG as they are; `degrade_mismatch` checks
+that the json's `params` are what the current `degrade` config draws from its seed, so a config
+changed after make_degraded.py stops the export instead of slipping into the test set.
 """
 
 from __future__ import annotations
@@ -33,6 +39,10 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+
+from utils.classmap import IGNORE_CATEGORY
+from utils.iso_degrade import params_dict, sample_params
+from utils.iso_variants import derive_seed
 
 Box = tuple[float, float, float, float]
 _NS = "http://graphml.graphdrawing.org/xmlns"
@@ -75,15 +85,40 @@ def build_categories(
     return cats
 
 
+def ignore_category(cat_id: int) -> dict[str, Any]:
+    """The COCO category of the ignore regions (`iscrowd: 1`); not a class (see module doc)."""
+    return {"id": cat_id, "name": IGNORE_CATEGORY, "supercategory": IGNORE_CATEGORY, "fgc": False}
+
+
 def coco_category(ann: Mapping[str, Any], known: set[str], drop: set[str]) -> str | None:
-    """The COCO category of a V5 annotation, or None when it is not exported (see module doc).
-    A label that is neither in the vocabulary nor an `other_*` is an error, not a guess."""
+    """The COCO category of a V5 annotation, or None when it is no class and is exported as an
+    ignore region (see module doc). A label that is neither in the vocabulary nor an `other_*`
+    is an error, not a guess."""
     label = ann.get("label")
     if label is None or ann.get("kind") == "flag" or label in drop:
         return None
     if label not in known:
         raise ValueError(f"annotation {ann['id']}: label {label!r} is not a known category")
     return str(label)
+
+
+def ignore_kind(ann: Mapping[str, Any]) -> str:
+    """What an ignore region is: its label (`leader_arrow`), else its drawn kind (`flag`)."""
+    return str(ann.get("label") or ann["kind"])
+
+
+def degrade_mismatch(doc: Mapping[str, Any], render_cfg: Mapping[str, Any]) -> list[str]:
+    """The keys of a V7 json's `params` that the current config does not draw from its stored
+    `seed` (and `seed` itself when `variants.base_seed` would no longer give it); empty when the
+    degraded image is what make_degraded.py would make now."""
+    seed = int(doc["seed"])
+    want = params_dict(sample_params(render_cfg, float(doc["stroke_px"]), random.Random(seed)))
+    have = doc["params"]
+    bad = sorted(k for k in want.keys() | have.keys() if want.get(k) != have.get(k))
+    base = int(render_cfg["variants"]["base_seed"])
+    if seed != derive_seed(base, doc["sheet"], doc["index"], "degrade"):
+        bad.insert(0, "seed")
+    return bad
 
 
 def union(boxes: Iterable[Sequence[float]]) -> Box:

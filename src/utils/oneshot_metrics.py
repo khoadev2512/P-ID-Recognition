@@ -174,21 +174,39 @@ def tau_rule_b(known_cos, pseudo_unknown_cos) -> tuple[float, float] | None:
     return tau, float(j[best])
 
 
-def other_prf(known_cos, unknown_cos, tau: float) -> dict | None:
-    """Precision / recall / F1 of the "Other" decision (cos < tau) with unknown = positive."""
-    known, unknown = _arr(known_cos), _arr(unknown_cos)
+def margins(best_cos, second_cos) -> np.ndarray:
+    """Top-1 minus top-2 cosine per crop (PLAN B8, score form 2). A crop with no second
+    prototype (second_cos NaN) gets +inf: the margin gate never rejects it."""
+    best, second = _arr(best_cos), _arr(second_cos)
+    return np.where(np.isnan(second), np.inf, best - second)
+
+
+def margin_rule_a(known_margin, tpr: float = 0.95) -> float:
+    """delta@TPR95: the largest delta that still accepts at least `tpr` of the known crops on
+    the margin alone (the same rule A as tau, applied to `margins`). 0.0 (gate off) when that
+    crop's margin is infinite (no second prototype)."""
+    picked = tau_rule_a(known_margin, tpr)
+    return picked if np.isfinite(picked) else 0.0
+
+
+def margin_auroc(known_margin, unknown_margin) -> float | None:
+    """AUROC of "Other" detection on the margin: positives = unknown, score = -margin."""
+    return auroc(-_arr(unknown_margin), -_arr(known_margin))
+
+
+def gated_other_prf(known_reject, unknown_reject) -> dict | None:
+    """P/R/F1 of "Other" for any gate, from per-crop reject flags (unknown = positive)."""
+    known, unknown = np.asarray(known_reject, bool), np.asarray(unknown_reject, bool)
     if len(unknown) == 0:
-        logger.warning("other_prf: no unknown crops")
+        logger.warning("gated_other_prf: no unknown crops")
         return None
-    tp = int((unknown < tau).sum())
-    fp = int((known < tau).sum())
+    tp, fp = int(unknown.sum()), int(known.sum())
     precision = tp / (tp + fp) if tp + fp else None
     recall = tp / len(unknown)
     f1 = None
     if precision is not None:
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
     return {
-        "tau": float(tau),
         "tp": tp,
         "fp": fp,
         "fn": len(unknown) - tp,
@@ -196,6 +214,15 @@ def other_prf(known_cos, unknown_cos, tau: float) -> dict | None:
         "recall": recall,
         "f1": f1,
     }
+
+
+def other_prf(known_cos, unknown_cos, tau: float) -> dict | None:
+    """Precision / recall / F1 of the "Other" decision (cos < tau) with unknown = positive."""
+    if len(_arr(unknown_cos)) == 0:
+        logger.warning("other_prf: no unknown crops")
+        return None
+    prf = gated_other_prf(_arr(known_cos) < tau, _arr(unknown_cos) < tau)
+    return {"tau": float(tau), **prf}
 
 
 def open_set_summary(known_correct, known_cos, unknown_cos, other_tau: float, taus) -> dict:
@@ -241,6 +268,17 @@ class ClassInfo:
     reg_number: str
     template: str | None
     group: str
+
+
+# oneshot.symbol_map's default, relative to the repository root (docs/ ships with the code).
+DEFAULT_SYMBOL_MAP = "docs/symbol_mapping/symbol_map.csv"
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def symbol_map_path(value: str | Path | None = None) -> Path:
+    """oneshot.symbol_map (None: DEFAULT_SYMBOL_MAP); a relative path is repo-relative."""
+    path = Path(str(value or DEFAULT_SYMBOL_MAP))
+    return path if path.is_absolute() else _REPO_ROOT / path
 
 
 def read_symbol_map(path: str | Path) -> dict[str, dict[str, str]]:
@@ -312,6 +350,46 @@ def assign_groups(
     return out
 
 
+# Groups of an ISO template (a vocab fine_name) on OPEN100-ISO (P4), never pooled.
+ISO_GROUPS = ("S", "V", "H_chon", "V_held", "H_tu_nhien")
+# OPEN100-ISO's out-of-vocabulary categories: other_iso (ISO templates outside the vocabulary)
+# is the "Other" positive; other_isa (ISA bubbles, "seen Other" for R1b) and other_generic are
+# reported apart.
+OTHER_NAMES = ("other_iso", "other_isa", "other_generic")
+
+
+def assign_iso_groups(
+    class_groups: Mapping[str, ClassInfo], templates: Iterable[str]
+) -> dict[str, str]:
+    """Group of every ISO template for one encoder, from the DigitizePID classes mapped to it
+    in `class_groups` (`assign_groups`' result: one computation for both sides).
+
+        S           an ISO-status class with this template is among the training classes
+        V           not S; a VARIANT class with this template is
+        H_chon      not S / V; its ISO-status class is held out of the encoder (R1a h_in;
+                    every one for the ImageNet-only encoder)
+        V_held      not S / V and no ISO-status class: only held-out VARIANT classes map to
+                    it (the ImageNet-only encoder's V)
+        H_tu_nhien  no DigitizePID class maps to it
+    """
+    mapped: dict[str, list[ClassInfo]] = {}
+    for info in class_groups.values():
+        if info.template is not None and info.status in ("ISO", "VARIANT"):
+            mapped.setdefault(info.template, []).append(info)
+    out: dict[str, str] = {}
+    for name in templates:
+        infos = mapped.get(name, [])
+        if any(i.status == "ISO" and i.group == "S" for i in infos):
+            out[name] = "S"
+        elif any(i.status == "VARIANT" and i.group in ("V", "V_of_S") for i in infos):
+            out[name] = "V"
+        elif any(i.status == "ISO" for i in infos):
+            out[name] = "H_chon"
+        else:
+            out[name] = "V_held" if infos else "H_tu_nhien"
+    return out
+
+
 # ------------------------------------------------------------------ #
 # Per-class report
 # ------------------------------------------------------------------ #
@@ -344,3 +422,14 @@ def macro(values: Iterable[float | None]) -> float | None:
     """Mean over the classes that have a value (None: no class does)."""
     vals = [v for v in values if v is not None]
     return float(np.mean(vals)) if vals else None
+
+
+def mean_std(values: Iterable[float | None]) -> dict:
+    """Mean and sample standard deviation (ddof=1) over the units that have a value, e.g. one
+    number per OPEN100-ISO source sheet; std None with fewer than two."""
+    vals = [v for v in values if v is not None]
+    return {
+        "mean": float(np.mean(vals)) if vals else None,
+        "std": float(np.std(vals, ddof=1)) if len(vals) > 1 else None,
+        "n": len(vals),
+    }

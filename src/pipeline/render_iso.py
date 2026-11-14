@@ -7,6 +7,11 @@ Input: `<root>/variants/` (V6: clean `v<NNN>.png` + `.json`) and `<root>/degrade
 `BuildManifestPipeline`. Nothing is written outside `<root>` and nothing in it is read from
 `data/canonical/`.
 
+Both kinds of image are checked against the current config before they are exported: a clean
+variant is redrawn and must give its json's boxes; a degraded one must carry the `params` the
+current `degrade` ranges draw from its seed (`degraded_mismatches`, run before anything in the
+root is touched). Either failing is an error: re-run make_variants.py / make_degraded.py.
+
     PID_DATA_ROOT=data/iso_open100 pid-render-iso render_iso.export.images=degraded
 
 Config: `render_iso.export` of configs/render_iso.yaml. Overrides are Hydra's (`a.b=c`), composed
@@ -37,6 +42,24 @@ from utils.pid2graph import load_graphml, pipe_runs
 
 IMAGES = ("clean", "degraded", "both")
 BBOX_TOL = 0.02  # px: a redrawn clean variant must give the boxes stored in its json
+SHOW_MISMATCHES = 20  # degraded images named in the error at most (the count is always given)
+
+
+def degraded_mismatches(root: Path, sheets: list[int], render_cfg: dict) -> list[str]:
+    """`<stem>: <keys>` for every degraded image the export would read (one per clean variant
+    json) whose stored `params` the current `degrade` config does not draw from its seed (see
+    `iso_export.degrade_mismatch`). Read only; a missing degraded json is not checked here."""
+    out = []
+    for sheet_id in sheets:
+        for jf in sorted((root / "variants" / f"sheet{sheet_id}").glob("v*.json")):
+            dj = root / "degraded" / f"sheet{sheet_id}" / jf.name
+            if not dj.exists():
+                continue
+            doc = json.loads(dj.read_text())
+            bad = ex.degrade_mismatch(doc, render_cfg)
+            if bad:
+                out.append(f"{ex.stem_of(sheet_id, int(doc['index']), True)}: {', '.join(bad)}")
+    return out
 
 
 def _export_sheet(job: tuple[int, dict, dict, str]) -> tuple[list[dict], dict[str, int]]:
@@ -116,7 +139,11 @@ def _export_sheet(job: tuple[int, dict, dict, str]) -> tuple[list[dict], dict[st
                          "node": a.get("node", a["id"]), "added": bool(a.get("added"))}
                         for a in anns if cats[a["id"]] is not None
                     ],
-                    "dropped": sum(cats[a["id"]] is None for a in anns),
+                    "ignore": [
+                        {"kind": ex.ignore_kind(a), "box": a["bbox"], "id": a["id"],
+                         "node": a.get("node", a["id"])}
+                        for a in anns if cats[a["id"]] is None
+                    ],
                 }
             )  # fmt: skip
     return records, dict(counters)
@@ -155,6 +182,17 @@ class RenderIsoPipeline(BasePipeline):
             float(opt["split"]["test_fraction"]),
             int(opt["split"]["seed"]),
         )
+        if opt["images"] != "clean":
+            bad = degraded_mismatches(root, sheets, render_cfg)
+            if bad:
+                more = len(bad) - SHOW_MISMATCHES
+                raise ValueError(
+                    f"{len(bad)} degraded images were not made with the current "
+                    "render_iso.degrade config (stored params differ); re-run "
+                    "scripts/make_degraded.py. Nothing was exported.\n  "
+                    + "\n  ".join(bad[:SHOW_MISMATCHES])
+                    + (f"\n  ... and {more} more" if more > 0 else "")
+                )
         for stale in (root / "graphml", self.paths.canonical / "images"):
             shutil.rmtree(stale, ignore_errors=True)
         for stale in (self.paths.coco_json, self.paths.classes_yaml, self.paths.manifest_csv):
@@ -171,7 +209,9 @@ class RenderIsoPipeline(BasePipeline):
 
         vocab = ex.load_vocab(opt["vocab_csv"])
         cats = ex.build_categories(vocab, opt["other_labels"], opt["other_coarse"])
+        cats.append(ex.ignore_category(len(cats) + 1))  # last: the class ids stay as they were
         cat_id = {c["name"]: c["id"] for c in cats}
+        ignore_id = cats[-1]["id"]
         images, annotations = [], []
         for i, r in enumerate(records, start=1):
             images.append(
@@ -189,6 +229,16 @@ class RenderIsoPipeline(BasePipeline):
                 if a["added"]:
                     ann["added"] = True
                 annotations.append(ann)
+        n_symbols = len(annotations)
+        # the ignore regions after every symbol, so the symbols keep the ids they had before
+        for i, r in enumerate(records, start=1):
+            for a in r["ignore"]:
+                box = ex.coco_box(a["box"])
+                annotations.append(
+                    {"id": len(annotations) + 1, "image_id": i, "category_id": ignore_id,
+                     "bbox": box, "area": round(box[2] * box[3], 2), "iscrowd": 1,
+                     "node": a["node"], "ann_id": a["id"], "ignore_kind": a["kind"]}
+                )  # fmt: skip
         ex.dump_json(
             self.paths.coco_json, {"images": images, "annotations": annotations, "categories": cats}
         )
@@ -207,8 +257,9 @@ class RenderIsoPipeline(BasePipeline):
         BuildClassesPipeline(stage_cfg).run()
         BuildManifestPipeline(stage_cfg).run()
         summary = {
-            "images": len(images), "annotations": len(annotations),
-            "dropped_not_in_coco": sum(r["dropped"] for r in records), **counters,
+            "images": len(images), "annotations": n_symbols,
+            "ignore_regions": len(annotations) - n_symbols,
+            **Counter(f"ignore_{a['kind']}" for r in records for a in r["ignore"]), **counters,
         }  # fmt: skip
         ex.dump_json(root / "export_summary.json", summary)
         print(json.dumps(summary))

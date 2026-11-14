@@ -26,7 +26,9 @@ with a threshold chosen by the B8 rules, not to fgc.route.other_min_cosine.
 One-shot (cfg.fgc.oneshot=true, PLAN B6a): instead of any head, each detection crop is matched
 against the ISO prototype directory (pipeline.oneshot_infer) and the result is written to
 derived/detections_oneshot/<split>/<image_id>.txt, a different file format from
-detections_fgc (columns in pipeline.oneshot_infer). No checkpoint directory is needed.
+detections_fgc (columns in pipeline.oneshot_infer). No checkpoint directory is needed. The
+Stage-1 coarse ids are read with ++detector.classes_yaml when set (the DigitizePID detector's
+files on OPEN100-ISO, see pipeline.detect_infer); they only matter with oneshot.route_by_coarse.
 
 This is where the two stages compose into the final list[Detection].
 """
@@ -255,7 +257,7 @@ class FGCInferPipeline(BasePipeline):
                 [
                     classifier.resolve(
                         coarse_id,
-                        self.classmap.coarse_classes[coarse_id],
+                        self.detector_classmap.coarse_classes[coarse_id],
                         box,
                         score,
                         image_np,
