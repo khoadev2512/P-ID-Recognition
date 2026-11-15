@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -759,3 +760,120 @@ def test_p4_skips_ignore_regions(tmp_path):
     assert IGNORE_CATEGORY not in o["clean"]["n_available"]
     deg = o["degraded"]["open_set"]
     assert deg["n_known"] == 20 and deg["n_unknown"] == 4
+
+
+# ------------------------------------------------------------------ #
+# center (CL2N)
+# ------------------------------------------------------------------ #
+
+_CENTER_CLASSES = sorted(set(_FULL) - {"Symbol_3", "Symbol_7"})  # minus h_in / h_out
+
+
+def _center_file(tmp_path, fine=_FULL, excluded=(), **over):
+    cfg, out = _run(tmp_path, "center", fine=fine, excluded=excluded, **over)
+    return cfg, out["oneshot"]
+
+
+def _manual_center(cfg, classes, crops_per_class=None):
+    from pipeline.oneshot_infer import load_oneshot_classifier
+
+    clf = load_oneshot_classifier(cfg, build_eval_transform(cfg), "cpu")
+    root = cfg.data_root + "/derived/crops_fgc/train"
+    embs = []
+    for cls in classes:
+        files = sorted((Path(root) / cls).glob("*.png"))
+        for f in files[:crops_per_class]:
+            embs.append(clf.embed_crop(np.array(Image.open(f).convert("RGB"))))
+    return torch.cat(embs).mean(0)
+
+
+def test_center_is_the_mean_view_embedding_of_seen_train_crops_outside_the_holdout(tmp_path):
+    from utils.oneshot import load_center
+
+    cfg, o = _center_file(tmp_path)
+    assert o["classes"] == _CENTER_CLASSES
+    assert o["held_out_dropped"] == ["Symbol_3", "Symbol_7"]
+    assert o["split"] == "train" and o["n_crops"] == 3 * len(_CENTER_CLASSES)
+    assert o["center"] is None  # the run itself is not centered
+    center, meta = load_center(o["center_file"])
+    assert meta["encoder_sha256"] == checkpoint_sha256(cfg.oneshot.encoder_ckpt)
+    assert torch.allclose(center, _manual_center(cfg, _CENTER_CLASSES), atol=1e-6)
+
+
+def test_center_samples_max_per_class(tmp_path):
+    _, o = _center_file(tmp_path, eval={"oneshot": {"max_per_class": 1}})
+    assert o["n_crops"] == len(_CENTER_CLASSES)
+    assert set(o["per_class"].values()) == {1}
+
+
+def test_center_of_an_encoder_trained_on_no_class_needs_groups_ckpt(tmp_path):
+    cfg = _cfg(tmp_path, "center")
+    _encoder(cfg, [], _FULL)
+    _crops(tmp_path)
+    with pytest.raises(ValueError, match="groups_ckpt"):
+        OneShotEvaluation(cfg, tmp_path / "out").run()
+    ref = _reference(tmp_path, _LO, ["Symbol_3", "Symbol_7"])
+    cfg.eval.oneshot.groups_ckpt = ref
+    o = OneShotEvaluation(cfg, tmp_path / "out").run()
+    assert o["classes"] == sorted(_LO) and o["held_out_dropped"] == []
+
+
+def test_center_refuses_an_image_subset_and_a_centered_classifier(tmp_path):
+    cfg, o = _center_file(tmp_path)
+    cfg.eval.image_subset = "val_sel"
+    with pytest.raises(ValueError, match="crops_fgc/train only"):
+        OneShotEvaluation(cfg, tmp_path / "out").run()
+    cfg.eval.image_subset = "all"
+    cfg.oneshot.center = o["center_file"]
+    with pytest.raises(ValueError, match="drop oneshot.center"):
+        OneShotEvaluation(cfg, tmp_path / "out").run()
+
+
+def test_a_centered_run_scores_cl2n_cosines(tmp_path):
+    import torch.nn.functional as F
+
+    from utils.oneshot import load_center
+
+    cfg, o = _center_file(tmp_path, fine=_LO, excluded=["Symbol_3", "Symbol_7"])
+    center, _ = load_center(o["center_file"])
+    cfg.eval.oneshot.protocol = "p1"
+    out = OneShotEvaluation(cfg, tmp_path / "raw").run()
+    cfg.oneshot.center = o["center_file"]
+    cen = OneShotEvaluation(cfg, tmp_path / "cen").run()
+    assert out["center"] is None and cen["center"] == o["center_file"]
+
+    protos = PrototypeDirectory.load(cfg.oneshot.prototypes)
+    crop = np.array(_glyph(_OOV_SEED["Symbol_7"]))
+    from pipeline.oneshot_infer import load_oneshot_classifier
+
+    raw_clf = load_oneshot_classifier(OmegaConf.merge(cfg, {"oneshot": {"center": None}}),
+                                      build_eval_transform(cfg), "cpu")  # fmt: skip
+    q = F.normalize(F.normalize(raw_clf.embed_crop(crop) - center, dim=-1).mean(0), dim=0)
+    p = F.normalize(protos.embeddings - center, dim=-1)
+    expected = float((p @ q).max())
+    with (tmp_path / "cen" / "oneshot_p1_crops.csv").open() as f:
+        rows = [r for r in csv.DictReader(f) if r["class"] == "Symbol_7"]
+    assert rows and all(abs(float(r["best_cos"]) - expected) < 1e-5 for r in rows)
+    with (tmp_path / "raw" / "oneshot_p1_crops.csv").open() as f:
+        raw = [r for r in csv.DictReader(f) if r["class"] == "Symbol_7"]
+    assert abs(float(raw[0]["best_cos"]) - expected) > 1e-4  # the space really changed
+
+
+def test_a_center_built_with_another_encoder_is_refused(tmp_path):
+    from pipeline.oneshot_infer import load_oneshot_classifier
+
+    cfg, o = _center_file(tmp_path)
+    _encoder(cfg, _LO, ["Symbol_3", "Symbol_7"])  # a different checkpoint at the same path
+    cfg.oneshot.center = o["center_file"]
+    with pytest.raises(ValueError, match="sha256 differs"):
+        load_oneshot_classifier(cfg, build_eval_transform(cfg), "cpu")
+
+
+def test_a_missing_center_file_is_named_before_loading(tmp_path):
+    from pipeline.oneshot_infer import require_oneshot_inputs
+
+    cfg = _cfg(tmp_path, "p1")
+    _encoder(cfg, _LO)
+    cfg.oneshot.center = str(tmp_path / "nope.pt")
+    with pytest.raises(FileNotFoundError, match="oneshot.center"):
+        require_oneshot_inputs(cfg)

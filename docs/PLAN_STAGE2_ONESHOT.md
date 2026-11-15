@@ -889,7 +889,7 @@ Hiện `fgc_infer` từ chối global encoder và `evaluation.compute_fgc_metric
 kiểm cả `seed`); kiểm chỉ-đọc data hiện có: 432/432 khớp. Vùng bỏ qua: category `__ignore__`
 (`utils.classmap.IGNORE_CATEGORY`, id cuối), `iscrowd: 1`, `ignore_kind` = `leader_arrow` | `flag`; mọi
 reader dựng dữ liệu bỏ qua; `export_summary.json` thay `dropped_not_in_coco` bằng `ignore_regions` ….
-**Còn**: export lại `data/iso_open100` (chờ user duyệt) rồi zip lại cho Colab.
+**Đã** export lại `data/iso_open100` (2026-11-14; symbol giống hệt, thêm 12,096 vùng bỏ qua). **Còn**: zip lại cho Colab.
 
 
 Hai việc từ V8_REVIEW, quan trọng hơn sau khi OPEN100-ISO thành đề thi chính:
@@ -1027,7 +1027,15 @@ lớp, head 0 hàng, `imagenet_only=True`). Leak guard P1 qua tự nhiên (encod
 S1/S17/S21/S24 như R1a; có `groups_ckpt` thì τ từ chối mọi lớp `oneshot.holdout`. Notebook §10
 (`cell-24g`..`cell-24l`): tạo ckpt + prototype, τ, P1 in cạnh R1a. Separation cục bộ (CPU):
 ImageNet mean 0.474 / max 0.978 (check_valve_globe–check_valve_swing), 36 cặp > 0.8 — so R1a lo
-0.315 / 0.957 (14 cặp), R1b full 0.245 / 0.989 (22 cặp). P1 chờ Colab.
+0.315 / 0.957 (14 cặp), R1b full 0.245 / 0.989 (22 cặp).
+
+**P1 Colab 2026-11-15**: ImageNet thô top-1 0.008 / top-3 0.116 / AUROC 0.49 (R1a 0.036 / 0.366 / 0.78) —
+dưới ngẫu nhiên vì hub (58.9% crop → `flow_direction`; feature ≥ 0 nên mọi cos cao). **Baseline công bằng =
+ImageNet + CL2N** (SimpleShot, arXiv 1911.04623): trừ tâm = TB embedding mọi view của crop train các lớp R1a
+đã thấy (trừ mọi lớp `oneshot.holdout`), rồi L2, cho cả crop lẫn prototype. Đo cục bộ (mẫu 1,500 crop):
+top-1 0.13, top-3 0.41 (> R1a 0.04 / 0.38), AUROC 0.44 (< R1a 0.78). **CODE ✅ 2026-11-15**:
+`++eval.oneshot.protocol=center` → `oneshot_center.pt`; `++oneshot.center=<file>` cho mọi đường one-shot
+(sha256 encoder phải khớp); τ chọn lại với tâm. Notebook 10d–10e. Chi tiết HANDOFF "CL2N".
 
 
 - `scripts/make_imagenet_encoder.py`: dựng `ArcFaceModel` với `fgc.pretrained=true`, KHÔNG
@@ -1139,7 +1147,9 @@ của detector; nếu lọt nhiều, thêm lề top-1/top-2.
 
 **Phase B — Chạy** (🧑 Colab, đúng thứ tự)
 - [x] (B4a) baseline ImageNet → separation "trước khi học" (cục bộ 2026-11-14: mean 0.474, max 0.978)
-- [ ] (B4a) P1 với encoder ImageNet — notebook §10, Colab
+- [x] (B4a) P1 với encoder ImageNet — notebook §10, Colab 2026-11-15 (thô: hub, dưới ngẫu nhiên)
+- [x] (B4a) CL2N code (`protocol=center`, `++oneshot.center`) — 2026-11-15
+- [ ] (B4a) P1 ImageNet + CL2N và R1a + CL2N — notebook 10d–10e, Colab
 - [ ] R1b = train `__global__.pt` (đủ 32 class, `AUG`), copy về Drive — chạy được khi H đã chốt
 - [ ] YOLO một-stage 32 lớp fine (`detector.label_level=fine`) — baseline cho C
 - [ ] (tuỳ chọn) YOLO một lớp (`label_level=agnostic`, B6e) — ablation Stage 1

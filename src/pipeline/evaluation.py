@@ -18,7 +18,8 @@ eval.mode:
     fgc_only      the FGC metrics alone, on ground-truth crops: needs no detector output,
                   so a freshly trained `__global__.pt` can be scored on its own.
     oneshot       crop-level one-shot evaluation against the ISO prototypes (protocols p1 /
-                  p2 / tau, eval.oneshot.protocol; pipeline.oneshot_eval, PLAN B6b).
+                  p2 / tau / p4, eval.oneshot.protocol; pipeline.oneshot_eval, PLAN B6b), and
+                  `center`, which builds the CL2N center file for ++oneshot.center.
 
 The crop-level modes (fgc_only, oneshot) read crops_fgc/val through eval.image_subset
 (all | val_sel | test, image ids from eval.splits_file): the 100 val images are split 50/50

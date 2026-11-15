@@ -37,6 +37,11 @@ What `best_cos` / `second_cos` are, per oneshot.aggregate:
         approximation of the real gated vote (exact whenever the views agree).
 Rows labelled `__unrefined__` carry nan cosines: they are not decisions and must be dropped
 (not counted as a tau-rejection) when sweeping.
+
+`oneshot.center` (optional, `++`): a CL2N center file (utils.oneshot.save_center, built by
+eval.mode=oneshot ++eval.oneshot.protocol=center). Every query view and every prototype is
+then centered and renormalized before the cosine, so the cosines (and the tau chosen on them)
+live in a different space: re-pick tau with the same center.
 """
 
 from __future__ import annotations
@@ -59,7 +64,9 @@ from utils.oneshot import (
     Encoder,
     PrototypeDirectory,
     ViewSpec,
+    center_embeddings,
     embed_images,
+    load_center,
     make_views,
 )
 from utils.types import BBox
@@ -204,6 +211,17 @@ class OneShotClassifier:
         self._warned: set[str] = set()
         # The encoder checkpoint's training classes; set by load_oneshot_classifier.
         self.encoder_classes: list[str] = []
+        # CL2N center (set_center); None = raw cosines.
+        self.center: torch.Tensor | None = None
+
+    def set_center(self, center: torch.Tensor) -> None:
+        """Match in CL2N space from now on: queries and prototypes minus `center`,
+        renormalized (utils.oneshot.center_embeddings). Once only."""
+        if self.center is not None:
+            raise ValueError("the classifier is already centered")
+        self.directory = self.directory.centered(center)
+        self._subsets.clear()
+        self.center = center
 
     def _candidates(self, coarse_class: str) -> PrototypeDirectory:
         if not self.route_by_coarse:
@@ -240,7 +258,8 @@ class OneShotClassifier:
     def embed_crop(self, crop: np.ndarray) -> torch.Tensor:
         """The (V, D) unit embeddings of a crop's query views (oneshot.query_views)."""
         views = make_views(Image.fromarray(crop), self.views, self.background)
-        return embed_images(self.encoder, views, self.transform, self.device)
+        emb = embed_images(self.encoder, views, self.transform, self.device)
+        return emb if self.center is None else center_embeddings(emb, self.center)
 
     def _second_cosine(
         self, directory: PrototypeDirectory, emb: torch.Tensor, best_name: str
@@ -291,6 +310,19 @@ def load_oneshot_classifier(cfg: DictConfig, transform, device) -> OneShotClassi
     check_encoder_matches_prototypes(directory, ckpt, fine_classes, cfg)
     classifier = OneShotClassifier(encoder, directory, cfg, transform, device)
     classifier.encoder_classes = fine_classes
+    center_path = cfg.oneshot.get("center", None)
+    if center_path:
+        center, meta = load_center(Path(str(center_path)))
+        if meta.get("encoder_sha256") != checkpoint_sha256(ckpt):
+            raise ValueError(
+                f"oneshot.center {center_path} was built with encoder "
+                f"{meta.get('encoder_checkpoint')}, not {ckpt} (sha256 differs)"
+            )
+        if center.shape[0] != directory.dim:
+            raise ValueError(
+                f"oneshot.center has dim {center.shape[0]}, the prototypes {directory.dim}"
+            )
+        classifier.set_center(center)
     return classifier
 
 
@@ -312,6 +344,8 @@ def require_oneshot_inputs(cfg: DictConfig) -> None:
             f"oneshot.prototypes does not exist: {osh.prototypes} "
             "(build it with pid-iso-prototypes)"
         )
+    if osh.get("center", None) and not Path(str(osh.center)).exists():
+        raise FileNotFoundError(f"oneshot.center does not exist: {osh.center}")
     if bool(osh.get("route_by_coarse", False)) and not osh.get("coarse_map", None):
         raise ValueError("oneshot.route_by_coarse=true needs oneshot.coarse_map")
 

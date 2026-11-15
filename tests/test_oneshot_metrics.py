@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 from omegaconf import OmegaConf
 
+from utils.classmap import IGNORE_CATEGORY
 from utils.oneshot_metrics import (
     OTHER_NAMES,
     assign_groups,
@@ -305,14 +306,15 @@ def _iso_by_group(real, fine, excluded, names=None):
 
 
 def _open100_names():
-    """Vocab categories with instances on OPEN100-ISO (skip when the export is not local)."""
+    """Vocab categories with instances on OPEN100-ISO (skip when the export is not local); the
+    ignore-region category (leader arrows / flags, B6d) is not a symbol."""
     path = _ROOT / "data" / "iso_open100" / "canonical" / "annotations.coco.json"
     if not path.exists():
         pytest.skip("OPEN100-ISO export not present")
     coco = json.loads(path.read_text())
     used = {a["category_id"] for a in coco["annotations"]}
     names = {c["name"] for c in coco["categories"] if c["id"] in used}
-    return names - set(OTHER_NAMES)
+    return names - set(OTHER_NAMES) - {IGNORE_CATEGORY}
 
 
 def test_iso_groups_match_the_plan_table(real):

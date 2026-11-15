@@ -176,7 +176,9 @@ def test_imagenet_baseline_runs_tau_on_r1a_classes_then_p1_after_section_9(code_
     cells = [
         c
         for c in _oneshot_cells(code_cells)
-        if "__imagenet__" in c and "protocol=p4" not in _active([c])
+        if "__imagenet__" in c
+        and "protocol=p4" not in _active([c])
+        and "center" not in _active([c])  # 10d (CL2N) has its own test
     ]
     by = {p: [c for c in cells if f"protocol={p}" in _active([c])] for p in ("tau", "p1")}
     assert all(len(v) == 1 for v in by.values()) and len(cells) == 2
@@ -199,6 +201,40 @@ def test_imagenet_baseline_runs_tau_on_r1a_classes_then_p1_after_section_9(code_
     }
     last_9 = max(i for i, c in enumerate(code_cells) if "protocol=p2" in _active([c]))
     assert last_9 < idx["make"] < idx["tau"] < idx["p1"]
+
+
+def test_cl2n_builds_a_center_per_encoder_then_reruns_tau_and_p1_with_it(code_cells):
+    """10d (CL2N): the center comes from train crops of R1a's classes (protocol=center, groups
+    from __global_lo__.pt), is copied next to the encoder, and every centered run (tau on
+    val_sel, then P1) passes it; run dirs never collide with the raw ones §9 / §10 read."""
+    (run,) = [c for c in _oneshot_cells(code_cells) if "protocol=center" in _active([c])]
+    code = _active([run])
+    assert "('imagenet', '__imagenet__.pt', 'iso_prototypes_imagenet.pt')" in code
+    assert "('lo', '__global_lo__.pt', 'iso_prototypes_lo.pt')" in code
+    assert "GROUPS = f'++eval.oneshot.groups_ckpt={ENC_DIR}/__global_lo__.pt'" in code
+    assert "CENTER = f'{ENC_DIR}/center_{tag}.pt'" in code
+    assert "shutil.copy2(c['center_file'], CENTER)" in code
+    assert "('' if p == 'center' else '_cl2n')" in code
+    lines = [ln for ln in code.split("\n") if "protocol=" in ln]
+    proto = {p: next(ln for ln in lines if f"protocol={p}" in ln) for p in ("center", "tau", "p1")}
+    assert "++oneshot.center" not in proto["center"] and "$RUN_C" in proto["center"]
+    assert "++eval.image_subset=val_sel" in code and "$RUN_T" in proto["tau"]
+    assert code.count("++oneshot.center=$CENTER") == 2 and "$RUN_P" in proto["p1"]
+    assert code.index("protocol=center") < code.index("protocol=tau") < code.index("protocol=p1")
+    assert "oneshot.aggregate=mean" in code and "data_root={LOCAL_DATA_ROOT}" in code
+    assert "latest('eval_tau_lo')['classes']" in code
+
+    (report,) = [c for c in code_cells if "eval_p1_imagenet_cl2n" in _active([c]) and c is not run]
+    rep = _active([report])
+    for r, t in (("eval_p1_imagenet", "imagenet"), ("eval_p1_imagenet_cl2n", "imagenet_cl2n"),
+                 ("eval_p1", "lo"), ("eval_p1_lo_cl2n", "lo_cl2n")):  # fmt: skip
+        assert f"'{r}', '{t}')" in rep
+    assert "len({o['n_crops'] for _, o, _ in have}) == 1" in rep
+    assert "at_chosen_taus(o, t, {'H_chon'}, {'OOV_heldout'})" in rep
+    i = [next(k for k, c in enumerate(code_cells) if c is x) for x in (run, report)]
+    raw_p1 = max(k for k, c in enumerate(code_cells) if "run_dir=$RUNS_DIR/eval_p1_imagenet " in c)
+    first_11 = min(k for k, c in enumerate(code_cells) if "iso_open100_canonical.zip" in c)
+    assert raw_p1 < i[0] < i[1] < first_11
 
 
 def test_chosen_tau_report_adds_the_margin_gate_from_the_same_tau_run(code_cells):

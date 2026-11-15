@@ -29,6 +29,14 @@ eval.oneshot.protocol:
          the sheets. Selects nothing: tau is oneshot.other_min_cosine, recorded.
          eval.oneshot.max_per_class (null = all) samples that many boxes per (category,
          degraded) with eval.oneshot.seed, for cheap CPU runs.
+    center  the CL2N center (SimpleShot; utils.oneshot "CL2N centering") of this encoder: the
+         mean unit embedding of every query view of crops_fgc/train crops of the classes the
+         groups checkpoint trained on, minus every oneshot.holdout class (so no class P1
+         tests, and the same class set for each encoder pointed at the same groups_ckpt).
+         eval.oneshot.max_per_class / seed sample crops per class. Writes
+         oneshot_center.pt next to metrics.json; pass it as ++oneshot.center=<file> to
+         every later run of this encoder (tau first: the cosines change). Refuses an
+         already-centered classifier.
 
 p1 / p2 also report `margin_auroc` (threshold-free, like `auroc`); the tau + delta gate
 itself is recomputed from the CSV (best_cos, second_cos), as every other threshold.
@@ -69,7 +77,7 @@ from utils.dataset import (
     scan_crops,
 )
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256
-from utils.oneshot import PrototypeDirectory, aggregate_views, holdout_classes
+from utils.oneshot import PrototypeDirectory, aggregate_views, holdout_classes, save_center
 from utils.oneshot_metrics import (
     DEFAULT_SYMBOL_MAP,  # noqa: F401  (re-exported: oneshot.symbol_map's default)
     ISO_GROUPS,
@@ -95,7 +103,7 @@ from utils.paths import DataPaths
 
 logger = logging.getLogger(__name__)
 
-PROTOCOLS = ("p1", "p2", "tau", "p4")
+PROTOCOLS = ("p1", "p2", "tau", "p4", "center")
 _SWEEP_TAUS = np.round(np.linspace(0.0, 1.0, 101), 2)
 _GROUP_SWEEP_TAUS = np.round(np.linspace(0.0, 1.0, 21), 2)
 _CSV_FIELDS = (
@@ -393,8 +401,12 @@ class OneShotEvaluation:
             "query_views": clf.views.as_dict(),
             "image_subset": self.subset,
             "other_min_cosine": self.other_tau,
+            "center": self.cfg.oneshot.get("center", None) or None,
         }
-        run = {"p1": self._p1, "p2": self._p2, "tau": self._tau, "p4": self._p4}[self.protocol]
+        run = {
+            "p1": self._p1, "p2": self._p2, "tau": self._tau, "p4": self._p4,
+            "center": self._center,
+        }[self.protocol]  # fmt: skip
         result.update(run(clf, groups, holdout))
         return result
 
@@ -496,6 +508,78 @@ class OneShotEvaluation:
             summary["oscr_area"],
         )
         return out
+
+    # -- center ---------------------------------------------------------- #
+
+    def _center(self, clf, groups, holdout) -> dict:
+        if clf.center is not None:
+            raise ValueError(
+                "eval.oneshot.protocol=center builds the center of the RAW embeddings: drop "
+                "oneshot.center"
+            )
+        if self.subset != "all":
+            raise ValueError(
+                "eval.oneshot.protocol=center reads crops_fgc/train only, so "
+                f"eval.image_subset={self.subset!r} cannot apply; leave it `all`"
+            )
+        seen = self._seen_classes(clf)[0]
+        held = sorted(set(seen) & set(holdout.excluded))
+        classes = sorted(set(seen) - set(holdout.excluded))
+        if not classes:
+            raise ValueError(
+                "no trained class outside oneshot.holdout to center on: an encoder trained on "
+                "no class needs ++eval.oneshot.groups_ckpt (the leave-out encoder)"
+            )
+        if held:
+            logger.info("[oneshot/center] held-out classes left out of the center: %s", held)
+        root = self.paths.crops_fgc / "train"
+        samples, stored = scan_crops(root, classes, None)
+        by_class: dict[tuple[str, bool], list[int]] = defaultdict(list)
+        for n, (_, idx) in enumerate(samples):
+            by_class[(classes[idx], False)].append(n)
+        picked = sample_per_class(by_class, self.max_per_class, self.seed)
+        order = sorted(n for ns in picked.values() for n in ns)
+        if not order:
+            raise ValueError(f"no crop of {classes} under {root}")
+        total, n_views = None, 0
+        for k, n in enumerate(order, 1):
+            path = samples[n][0]
+            img = Image.open(path).convert("RGB")
+            if path in stored:
+                img = view(img, stored[path])
+            emb = clf.embed_crop(np.array(img))
+            total = emb.sum(0) if total is None else total + emb.sum(0)
+            n_views += emb.shape[0]
+            if k % 500 == 0:
+                logger.info("[oneshot/center] %d / %d crops", k, len(order))
+        center = total / n_views
+        ckpt = Path(str(self.cfg.oneshot.encoder_ckpt))
+        per_class = {name: len(ns) for (name, _), ns in sorted(picked.items())}
+        meta = {
+            "encoder_checkpoint": str(ckpt),
+            "encoder_sha256": checkpoint_sha256(ckpt),
+            "groups_checkpoint": None if self.groups_ckpt is None else str(self.groups_ckpt),
+            "split": "train",
+            "classes": classes,
+            "per_class": per_class,
+            "n_crops": len(order),
+            "n_views": n_views,
+            "query_views": clf.views.as_dict(),
+            "max_per_class": self.max_per_class,
+            "seed": self.seed,
+        }
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        path = save_center(self.output_dir / "oneshot_center.pt", center, meta)
+        logger.info(
+            "[oneshot/center] %d crops (%d views) of %d classes -> %s (|center|=%.3f)",
+            len(order), n_views, len(classes), path, float(center.norm()),
+        )  # fmt: skip
+        return {
+            "center_file": str(path),
+            "center_norm": float(center.norm()),
+            "held_out_dropped": held,
+            **{k: meta[k] for k in ("split", "classes", "per_class", "n_crops", "n_views")},
+        }
 
     # -- p2 -------------------------------------------------------------- #
 

@@ -57,6 +57,9 @@ from utils.classmap import OTHER_CLASS_NAME
 # instead of being silently misread.
 PROTOTYPE_FORMAT_VERSION = 1
 
+# Same, for the saved CL2N center (save_center / load_center).
+CENTER_FORMAT_VERSION = 1
+
 # P&ID artwork is black-on-white, so padding a looser box means adding white.
 WHITE = (255, 255, 255)
 
@@ -314,6 +317,17 @@ class PrototypeDirectory:
             meta={**self.meta, "excluded": sorted(drop)},
         )
 
+    def centered(self, center: torch.Tensor) -> PrototypeDirectory:
+        """The directory in CL2N space (center_embeddings): every row minus `center`,
+        renormalized. Exact for a single template view; with several template views it
+        centers their (renormalized) mean, an approximation."""
+        return PrototypeDirectory(
+            names=list(self.names),
+            embeddings=center_embeddings(self.embeddings, center),
+            coarse=list(self.coarse),
+            meta={**self.meta, "centered": True},
+        )
+
     def cosines(self, embedding: torch.Tensor) -> torch.Tensor:
         """cos to every prototype. (D,) -> (N,); (V, D) -> (V, N). Inputs are
         renormalized defensively so a caller passing raw embeddings still gets cosines."""
@@ -450,6 +464,60 @@ class PrototypeDirectory:
             coarse=list(payload.get("coarse", [])),
             meta=dict(payload.get("meta", {})),
         )
+
+
+# --------------------------------------------------------------------------- #
+# CL2N centering (SimpleShot, Wang et al. 2019, arXiv 1911.04623)
+# --------------------------------------------------------------------------- #
+# Pooled ResNet features are post-ReLU, so every embedding lies in the positive orthant and
+# all cosines are high; the prototype nearest the mean query direction then wins most crops
+# (a hub: the ImageNet-only encoder sent 59% of the P1 crops to flow_direction). Subtracting
+# the mean embedding of SEEN-class training crops before the L2 normalization removes that
+# shared direction. The center comes from DigitizePID train crops of classes the protocol
+# never tests (pipeline.oneshot_eval protocol `center`), so it carries no label of a tested
+# class. The mean of the prototypes is NOT a substitute: it is the template domain's mean,
+# not the query domain's (measured 2026-11-15: it made the hub worse).
+
+
+def center_embeddings(embeddings: torch.Tensor, center: torch.Tensor) -> torch.Tensor:
+    """(x - center) renormalized along the last dim; (D,) or (N, D) -> same shape."""
+    if center.ndim != 1 or embeddings.shape[-1] != center.shape[0]:
+        raise ValueError(
+            f"center of shape {tuple(center.shape)} does not fit embeddings of shape "
+            f"{tuple(embeddings.shape)}"
+        )
+    return F.normalize(embeddings - center.to(embeddings), dim=-1)
+
+
+def save_center(path: str | Path, center: torch.Tensor, meta: dict) -> Path:
+    """Write a CL2N center; `meta` must carry `encoder_sha256` (checked by load_center's
+    caller against the encoder actually loaded)."""
+    if "encoder_sha256" not in meta:
+        raise ValueError("center meta needs encoder_sha256")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {"format_version": CENTER_FORMAT_VERSION, "center": center.detach().cpu(), "meta": meta},
+        path,
+    )
+    return path
+
+
+def load_center(path: str | Path) -> tuple[torch.Tensor, dict]:
+    """(center (D,), meta) from save_center."""
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"No center file at {path} (build it with eval.mode=oneshot "
+            "++eval.oneshot.protocol=center)"
+        )
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    version = int(payload.get("format_version", 0))
+    if version != CENTER_FORMAT_VERSION:
+        raise ValueError(
+            f"{path}: center format_version={version}, this code expects {CENTER_FORMAT_VERSION}"
+        )
+    return payload["center"].float(), dict(payload["meta"])
 
 
 def build_prototypes(

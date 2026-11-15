@@ -224,13 +224,19 @@ Cần `encoders/__global_lo__.pt` trên Drive (10b lấy nhóm S của R1a). Nê
 | 10a | tạo `__imagenet__.pt` (không train, ~1 phút) + `iso_prototypes_imagenet.pt` | separation mean/max cạnh lo/full |
 | 10b | τ trên `val_sel`, `++eval.oneshot.groups_ckpt=$ENC_DIR/__global_lo__.pt` | lớp dùng = S1/S17/S21/S24 như R1a (notebook assert) |
 | 10c | P1 với encoder ImageNet | AUROC, OSCR, `h_in` top-1/top-3, từng lớp — in cạnh R1a |
+| 10d | CL2N (2026-11-15): tâm (`protocol=center`, crop train, 200/lớp) cho ImageNet và R1a → `encoders/center_<tag>.pt`; τ lại (`val_sel`) + P1 lại với `++oneshot.center` | lớp τ = như 9a (assert); "bỏ lớp giữ ra" = [] với groups R1a |
+| 10e | bảng 4 cột ImageNet / +CL2N / R1a / +CL2N, τ chọn lại, từng lớp | cùng `n_crops` (assert); hub ImageNet thô ~0.59 |
 
-**Gửi lại**: in ra 10a–10c + `eval_p1_imagenet/*/oneshot_p1_crops.csv` (+ CSV τ nếu tiện).
+10a–10c đã chạy 2026-11-15: chỉ cần mục 1–4 rồi 10d → 10e (10d đọc `eval_tau_lo` của 9a; 10e dùng
+`at_chosen_taus` của 9a: chạy phần def đầu cell 9a, không cần chạy lại τ). Code mới: push trước khi mở Colab.
+
+**Gửi lại**: in ra 10a–10e + `eval_p1_imagenet/*/oneshot_p1_crops.csv`, `eval_p1_imagenet_cl2n/*/oneshot_p1_crops.csv`
+(+ CSV τ nếu tiện).
 
 ## 5g. P4 + Stage 1 trên OPEN100-ISO — notebook §11 + §12 (2026-11-14)
 
 **Trước khi mở Colab**:
-1. (Nếu user duyệt export lại để có vùng bỏ qua) export lại OPEN100-ISO trên máy.
+1. Export lại OPEN100-ISO trên máy để có vùng bỏ qua: **đã làm 2026-11-14**.
 2. Zip: `cd data/iso_open100 && zip -r -0 iso_open100_canonical.zip canonical` (~1.9 GB) → đặt ở
    `<DRIVE_ROOT>/data/iso_open100_canonical.zip`.
 3. Commit + push code B6.

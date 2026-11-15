@@ -676,9 +676,13 @@ cos 0.676 (R1a) → 0.473 (R1b) như bằng chứng "R1b tốt hơn": hai encode
 - **B6d ✅**: export kiểm tham số ảnh suy giảm (sinh lại từ seed + config hiện tại; lệch → lỗi, không
   export); kiểm chỉ-đọc trên `data/iso_open100` hiện có: **432/432 khớp**. Mũi tên dẫn + cờ ghi vào COCO
   là vùng bỏ qua (`iscrowd: 1`, category `__ignore__` cuối danh sách, `ignore_kind`); build_classes /
-  build_manifest / coco_to_yolo / extract_crops bỏ qua; DigitizePID ra giống hệt từng byte. **Chưa
-  export lại `data/iso_open100`** (ghi đè, chờ user duyệt; ~3–4 phút; symbol không đổi — thử tờ 0).
-  Sau export lại phải zip lại cho Colab (cell 11a đang kiểm cứng 93,800 annotation).
+  build_manifest / coco_to_yolo / extract_crops bỏ qua; DigitizePID ra giống hệt từng byte. **Đã
+  export lại `data/iso_open100` 2026-11-14** (user duyệt; 1 phút 42 giây): 864 ảnh, 93,800 symbol +
+  12,096 vùng bỏ qua (leader_arrow 5,184, flag 6,912; 2–27 vùng/ảnh, cả 864 ảnh). Đối chiếu với bản
+  cũ: images, 45 category đầu, 93,800 symbol (id, box, nhãn) giống hệt; chỉ thêm category 46
+  `__ignore__` và các vùng bỏ qua ở cuối; classes.yaml / manifest.csv / splits.json không đổi.
+  `scripts/check_export.py` khớp. **Còn**: zip lại `canonical` lên Drive cho Colab (cell 11a đếm
+  93,800 annotation không iscrowd).
 - **B6e ✅**: `++detector.agnostic_merge=true` (mặc định tắt): `agnostic_nms` mỗi tile + WBF không phân
   nhãn, nhãn theo box thành phần điểm cao nhất. Bỏ `data.label_level=agnostic` (dùng `single_cls`
   nếu cần detector một lớp).
@@ -704,6 +708,57 @@ cos 0.676 (R1a) → 0.473 (R1b) như bằng chứng "R1b tốt hơn": hai encode
   dùng gộp theo nhãn.
 - **Phase A (code) XONG 2026-11-14**: 766 test pass. Còn lại là chạy (Colab §9 lại 9a, §10, §11, §12)
   + export lại OPEN100-ISO (chờ duyệt).
+
+### B4a §10 trên Colab — 2026-11-15 (P1, cùng 17,379 crop với 9b; `aggregate=mean`)
+Tính lại từ `runs/oneshot_p1_crops_imagenet.csv`: khớp log từng số.
+
+| P1 (`h_in` 6 lớp / `h_out` 4 lớp) | ImageNet thô | R1a | ngẫu nhiên |
+|---|---|---|---|
+| macro top-1 / top-3 | 0.008 / 0.116 | 0.036 / 0.366 | 0.024 / 0.071 |
+| AUROC cos / lề | 0.490 / 0.434 | 0.777 / 0.705 | 0.5 |
+| OSCR | 0.006 | 0.030 | |
+
+- 10a: prototype ImageNet mean cos 0.474, max 0.978 (check_valve_globe–swing), 36 cặp > 0.8.
+- 10b: τ ImageNet (lớp S1/S17/S21/S24 của R1a) A 0.6840, B 0.7717 (J 0.108, R1a 0.673), δ 0.0022.
+- **ImageNet thô dưới mức ngẫu nhiên vì HUB**: 58.9% mọi crop (biết + lạ) → `flow_direction`. Feature sau
+  average-pool ≥ 0 (min đúng 0.0) → mọi cos cao (5–95%: 0.66–0.84, lề trung vị 0.025); prototype gần hướng
+  trung bình của crop DigitizePID thắng. Không phải `flow_direction` gần trung bình *prototype* (gần nhất
+  là valve_ball 0.834) → hub đến từ lệch miền crop ↔ template. Dự đoán ghi 2026-11-14 "ImageNet có thể
+  không kém R1a trên P1" → **SAI với bản thô**, nhưng ĐÚNG về top-1/top-3 sau CL2N (dưới).
+- **Cổng lề δ không chuyển sang lớp chưa thấy (giới hạn, ghi vào luận văn)**: δ của R1a = 0.1301 chọn trên
+  4 lớp R1a ĐÃ TRAIN (lề lớn). Trên P1 chỉ 1.2% crop `h_in` có lề ≥ δ (trung vị 0.063; `h_out` 0.3%) → cổng
+  "τ_A hoặc δ" loại gần hết: nhận+đúng 0.000, Other R 0.997, P 0.400 (= tỉ lệ crop lạ). Cổng cos τ_A =
+  0.4699 thì tốt: nhận 99.9% `h_in`, loại 46.7% lạ, P 0.997. → δ chỉ dùng cho lớp đã thấy (P2: vẫn có
+  ích, xem trên); P1 chỉ báo cổng τ.
+
+### CL2N (căn giữa) — đo 2026-11-15, CODE ✅ (user: "nếu đổi đáng kể thì thêm code")
+SimpleShot (Wang et al. 2019, arXiv 1911.04623): trừ vector trung bình rồi mới L2. Đo cục bộ trên mẫu P1
+1,500 crop (150/lớp, seed 0) + 570 crop train của 19 lớp R1a đã thấy (30/lớp) làm tâm; mẫu thô tái lập
+Colab (top-1 0.010, hub 59%). Script: scratchpad `cl2n/` (không trong repo).
+
+| P1 mẫu | top-1 | top-3 | AUROC cos | AUROC lề | hub |
+|---|---|---|---|---|---|
+| ImageNet thô | 0.010 | 0.119 | 0.477 | 0.422 | flow_direction 59% |
+| **ImageNet + CL2N** (tâm = TB crop train lớp đã thấy) | **0.131** | **0.407** | 0.444 | 0.337 | valve_three_way 13% |
+| ImageNet, tâm = TB 42 prototype | 0.001 | 0.123 | 0.471 | 0.426 | flow_direction 78% |
+| R1a thô | 0.044 | 0.384 | 0.776 | 0.698 | valve_control 20% |
+| R1a + CL2N | 0.040 | 0.382 | 0.803 | 0.655 | valve_control 20% |
+
+(Dòng CL2N tính qua đúng đường code mới: tâm = TB mọi view, căn từng view rồi gộp `mean`; bản tạm căn sau
+khi gộp ra 0.133 / 0.410 / 0.433 — cùng kết luận.)
+- **Đọc**: ImageNet + CL2N **hơn R1a về top-1 (0.13 vs 0.04) và top-3 (0.41 vs 0.38)** trên lớp chưa thấy,
+  nhưng **kém xa về tách lạ** (AUROC 0.44 vs 0.78). → train DigitizePID đổi khả năng gọi đúng tên lớp mới
+  lấy khả năng nhận ra "lạ" (khớp Kornblith et al. 2021). Đây là đối chứng phải dùng cho P1, không phải
+  ImageNet thô (thô = baseline bị làm yếu bởi hub).
+- Tâm phải từ miền crop (DigitizePID), không từ template. CL2N gần như không đổi R1a (top-1), +0.03 AUROC.
+- Code: `utils.oneshot.center_embeddings` / `PrototypeDirectory.centered` / `save_center` / `load_center`;
+  `OneShotClassifier.set_center`; khóa `++oneshot.center=<file>` (mọi đường one-shot: eval p1/p2/tau/p4 và
+  `fgc.oneshot=true`; sha256 encoder phải khớp file tâm); `++eval.oneshot.protocol=center` ghi
+  `oneshot_center.pt` (crop `crops_fgc/train` của lớp đã train theo `groups_ckpt`, LUÔN trừ mọi lớp
+  `oneshot.holdout`; `++eval.oneshot.max_per_class`). metrics.json ghi `center`. τ phải chọn lại với tâm.
+  Notebook 10d (tâm + τ + P1 cho ImageNet và R1a) / 10e (bảng 4 cột). RUNBOOK §5f. 777 test pass.
+- **Chờ Colab 10d–10e** (số đủ 17,379 crop + τ chọn lại). P4 với CL2N: chưa nối vào §11 (tâm có sẵn
+  `encoders/center_<tag>.pt`, thêm `++oneshot.center=` là chạy được) — quyết sau khi có 10e.
 
 ### Chờ user quyết (PLAN "Vấn đề mở 2026-11-12")
 - Điểm 4: bỏ ★ `pipeline` (và template thuần đường kẻ) khỏi thư mục prototype?
@@ -731,8 +786,9 @@ cos 0.676 (R1a) → 0.473 (R1b) như bằng chứng "R1b tốt hơn": hai encode
    (RUNBOOK §5e). Còn: B6b-2 (P4) + B6d.
 8. ✅ B4a code (2026-11-14, user chốt làm): `scripts/make_imagenet_encoder.py`, `++eval.oneshot.groups_ckpt`,
    notebook §10 (RUNBOOK §5f). Separation cục bộ: ImageNet mean 0.474 / max 0.978 (lo 0.315, full
-   0.245) → train DigitizePID kéo prototype xa nhau. **Chạy §10 trên Colab** — P1 ImageNet vs R1a là
-   đối chứng quyết định cho kết quả P1 âm.
+   0.245) → train DigitizePID kéo prototype xa nhau. ✅ §10 chạy Colab 2026-11-15 (ImageNet thô bị hub,
+   xem "B4a §10 trên Colab"); ✅ CL2N code. **Chạy 10d–10e trên Colab** — ImageNet + CL2N vs R1a là đối
+   chứng quyết định cho kết quả P1 âm.
 9. Chưa đụng `test` cho tới khi chốt checkpoint, τ, lề template, (d).
 
 Đã xong: tách val; S6 = VARIANT (có sẵn); loại giả thuyết "vạch = ống"; R2; P2 thu nhỏ.

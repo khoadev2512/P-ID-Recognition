@@ -571,3 +571,38 @@ def test_match_result_is_an_immutable_record():
     assert match.name == "valve_gate" and not match.is_other and match.n_votes == 1
     with pytest.raises(dataclasses.FrozenInstanceError):
         match.cosine = 0.1  # type: ignore[misc]
+
+
+def test_center_embeddings_subtracts_and_renormalizes():
+    from utils.oneshot import center_embeddings
+
+    x = torch.tensor([[1.0, 1.0], [1.0, 0.0]])
+    c = torch.tensor([1.0, 0.5])
+    out = center_embeddings(x, c)
+    assert torch.allclose(out, torch.tensor([[0.0, 1.0], [0.0, -1.0]]))
+    assert torch.allclose(center_embeddings(x[0], c), out[0])
+    with pytest.raises(ValueError, match="does not fit"):
+        center_embeddings(x, torch.zeros(3))
+
+
+def test_centered_directory_keeps_names_and_marks_meta():
+    from utils.oneshot import PrototypeDirectory
+
+    d = PrototypeDirectory(["a", "b"], torch.eye(2), coarse=["v", "v"], meta={"x": 1})
+    c = d.centered(torch.tensor([0.5, 0.5]))
+    assert c.names == ["a", "b"] and c.coarse == ["v", "v"]
+    assert c.meta == {"x": 1, "centered": True} and "centered" not in d.meta
+    assert torch.allclose(c.embeddings.norm(dim=1), torch.ones(2))
+    assert float(c.embeddings[0] @ c.embeddings[1]) == pytest.approx(-1.0)  # was 0 before
+
+
+def test_center_file_round_trip_and_needs_the_encoder_hash(tmp_path):
+    from utils.oneshot import load_center, save_center
+
+    with pytest.raises(ValueError, match="encoder_sha256"):
+        save_center(tmp_path / "c.pt", torch.ones(4), {})
+    path = save_center(tmp_path / "c.pt", torch.arange(4.0), {"encoder_sha256": "ab"})
+    center, meta = load_center(path)
+    assert torch.equal(center, torch.arange(4.0)) and meta == {"encoder_sha256": "ab"}
+    with pytest.raises(FileNotFoundError, match="protocol=center"):
+        load_center(tmp_path / "missing.pt")
