@@ -22,6 +22,13 @@ resnet34 (512 features) and fgc.arcface.embed_dim=512, ArcFaceModel.proj is Iden
 backbone whose width differs from embed_dim would get an untrained random Linear projection,
 which is not "ImageNet features"; that is refused, naming the embed_dim to pass instead.
 
+Also the frozen DINOv2 encoder of PLAN_PHASE_C Bước 2B (self-supervised ViT-S/14, LVD-142M, no
+labels): the same checkpoint layout with
+    fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384
+(384 = its width, so proj stays Identity; utils.model.backbone_kwargs builds the ViT for 224 px).
+Pass the same three overrides to every stage that reads that checkpoint. `pretrained_only` is
+True for both; `imagenet_only` only for weights from ImageNet labels (not DINOv2).
+
 Run from the repo root; Hydra overrides as for src/run_pipeline.py:
     .venv/bin/python scripts/make_imagenet_encoder.py --out runs/__imagenet__.pt
     python scripts/make_imagenet_encoder.py --out "$ENC_DIR/__imagenet__.pt" \
@@ -79,7 +86,10 @@ def build_imagenet_checkpoint(cfg: DictConfig) -> dict:
         "fine_classes": [],
         "excluded_classes": list(classes),
         "class_centers": model.class_centers().cpu(),
-        "imagenet_only": True,
+        # pretrained_only: no P&ID training step at all. imagenet_only (the B4a name): the
+        # pretrained weights come from ImageNet labels; DINOv2 is self-supervised, not that.
+        "pretrained_only": True,
+        "imagenet_only": "dinov2" not in str(cfg.fgc.backbone),
         "pretrained_weights": str(pretrained.get("hf_hub_id") or cfg.fgc.backbone),
     }
 

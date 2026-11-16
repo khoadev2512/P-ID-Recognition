@@ -345,3 +345,55 @@ def test_closed_set_path_is_untouched_when_oneshot_is_off(tmp_path):
     with pytest.raises(ValueError, match="fgc.ckpt_dir"):
         FGCInferPipeline(cfg).validate()
     assert ViewSpec().n_views == 1
+
+
+# ------------------------------------------------------------------ #
+# oneshot.input_norm (PLAN_PHASE_C A4)
+# ------------------------------------------------------------------ #
+
+
+def _boxed_symbol():
+    """A dark bar on a grey scan-like background with a wide margin."""
+    px = np.full((40, 60, 3), 200, dtype=np.uint8)
+    px[15:25, 10:50] = 30
+    return Image.fromarray(px)
+
+
+def test_input_norm_is_applied_to_every_query_crop(tmp_path):
+    from utils.input_norm import ink_letterbox
+    from utils.oneshot import embed_images, make_views
+
+    img = _boxed_symbol()
+    on = _classifier(_cfg(tmp_path, oneshot={"input_norm": "ink_letterbox"}))
+    spec = ViewSpec(scales=(1.0,), orientations=(0,))
+    want = embed_images(_FakeEncoder(), make_views(ink_letterbox(img), spec), _tf())
+    assert on.input_norm == "ink_letterbox"
+    assert torch.allclose(on.embed_crop(_arr(img)), want)
+    off = _classifier(_cfg(tmp_path))
+    assert off.input_norm is None
+    assert not torch.allclose(off.embed_crop(_arr(img)), want)
+
+
+def test_an_unknown_input_norm_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="oneshot.input_norm"):
+        _classifier(_cfg(tmp_path, oneshot={"input_norm": "otsu"}))
+
+
+@pytest.mark.parametrize("built_with,run_with", [(None, "ink_letterbox"), ("ink_letterbox", None)])
+def test_prototypes_and_run_must_agree_on_input_norm(tmp_path, built_with, run_with):
+    _stage(tmp_path)
+    ckpt = tmp_path / "enc.pt"
+    cfg = _cfg(tmp_path, oneshot={"encoder_ckpt": str(ckpt), "input_norm": run_with})
+    _save_ckpt(cfg, ckpt)
+    _real_prototypes(cfg, ckpt, input_norm=built_with)
+    with pytest.raises(ValueError, match="input_norm"):
+        FGCInferPipeline(cfg).validate()
+
+
+def test_matching_input_norm_loads(tmp_path):
+    _stage(tmp_path)
+    ckpt = tmp_path / "enc.pt"
+    cfg = _cfg(tmp_path, oneshot={"encoder_ckpt": str(ckpt), "input_norm": "ink_letterbox"})
+    _save_ckpt(cfg, ckpt)
+    _real_prototypes(cfg, ckpt, input_norm="ink_letterbox")
+    assert FGCInferPipeline(cfg).validate() is True

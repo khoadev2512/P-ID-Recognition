@@ -281,6 +281,11 @@ R2/R4 xong ─► chạy chẩn đoán §2 (D1–D6)
 
 ---
 
+**Trạng thái 2026-11-16**: đã qua "điểm quyết định chính". Kết quả: F1 trên P1, F2 trên P4, F3 một phần
+(τ không chuyển miền). A4 / B2 / A1 (§6) chưa từng làm. Nhánh đã chọn → `docs/PLAN_PHASE_C.md`
+(Bước 1: A4 + A1 + B2 + thí nghiệm ảnh mẫu cùng phong cách, không train; Bước 2 chỉ khi đạt luật đã
+chốt; E2 + E3 nếu không).
+
 ## 6. Đề xuất đưa vào plan chính NGAY BÂY GIỜ (chờ user chốt)
 
 Ba việc dưới đây rẻ, có ích **dù hướng chính thành công hay không** (làm bảng baseline đầy đủ

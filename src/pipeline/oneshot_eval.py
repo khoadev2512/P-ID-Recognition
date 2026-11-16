@@ -402,6 +402,7 @@ class OneShotEvaluation:
             "image_subset": self.subset,
             "other_min_cosine": self.other_tau,
             "center": self.cfg.oneshot.get("center", None) or None,
+            "input_norm": clf.input_norm,
         }
         run = {
             "p1": self._p1, "p2": self._p2, "tau": self._tau, "p4": self._p4,
@@ -567,6 +568,7 @@ class OneShotEvaluation:
             "query_views": clf.views.as_dict(),
             "max_per_class": self.max_per_class,
             "seed": self.seed,
+            "input_norm": clf.input_norm,
         }
         self.output_dir.mkdir(parents=True, exist_ok=True)
         path = save_center(self.output_dir / "oneshot_center.pt", center, meta)

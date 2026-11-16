@@ -6,6 +6,8 @@ những gì đã thất bại). File này chỉ nói **làm gì, theo thứ tự
 Ký hiệu: 🧑 = việc của user (Colab / chuyên môn P&ID) · 🤖 = việc code · ⛔ = chặn bước sau.
 
 Nếu hướng này thất bại: xem `docs/BACKUP_PLAN.md` (tiêu chí thất bại, chẩn đoán, hướng thay thế).
+**Từ 2026-11-16: vòng cải tiến cuối → `docs/PLAN_PHASE_C.md`** (F1 trên P1, F2 trên P4; Bước 1 thăm
+dò rẻ, luật quyết định chốt trước, Bước 2 nếu đạt, đóng băng 2026-12-15).
 
 ---
 
@@ -1149,7 +1151,7 @@ của detector; nếu lọt nhiều, thêm lề top-1/top-2.
 - [x] (B4a) baseline ImageNet → separation "trước khi học" (cục bộ 2026-11-14: mean 0.474, max 0.978)
 - [x] (B4a) P1 với encoder ImageNet — notebook §10, Colab 2026-11-15 (thô: hub, dưới ngẫu nhiên)
 - [x] (B4a) CL2N code (`protocol=center`, `++oneshot.center`) — 2026-11-15
-- [ ] (B4a) P1 ImageNet + CL2N và R1a + CL2N — notebook 10d–10e, Colab
+- [x] (B4a) P1 ImageNet + CL2N và R1a + CL2N — notebook 10d–10e, Colab 2026-11-15 (HANDOFF "CL2N")
 - [ ] R1b = train `__global__.pt` (đủ 32 class, `AUG`), copy về Drive — chạy được khi H đã chốt
 - [ ] YOLO một-stage 32 lớp fine (`detector.label_level=fine`) — baseline cho C
 - [ ] (tuỳ chọn) YOLO một lớp (`label_level=agnostic`, B6e) — ablation Stage 1

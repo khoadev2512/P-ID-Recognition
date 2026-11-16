@@ -38,6 +38,10 @@ What `best_cos` / `second_cos` are, per oneshot.aggregate:
 Rows labelled `__unrefined__` carry nan cosines: they are not decisions and must be dropped
 (not counted as a tau-rejection) when sweeping.
 
+`oneshot.input_norm` (optional, `++`; null = off): canonical input form of every query crop
+(utils.input_norm, e.g. `ink_letterbox` = PLAN_PHASE_C A4); the prototypes and the CL2N center
+must have been built with the same value (checked).
+
 `oneshot.center` (optional, `++`): a CL2N center file (utils.oneshot.save_center, built by
 eval.mode=oneshot ++eval.oneshot.protocol=center). Every query view and every prototype is
 then centered and renormalized before the cosine, so the cosines (and the tau chosen on them)
@@ -59,6 +63,7 @@ from PIL import Image
 from utils import bbox_utils
 from utils.classmap import OTHER_CLASS_NAME
 from utils.crop_box import cut
+from utils.input_norm import input_norm_fn
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256, load_arcface_encoder
 from utils.oneshot import (
     Encoder,
@@ -149,6 +154,11 @@ def check_encoder_matches_prototypes(
         for key, value in recorded.items()
         if key in meta and meta[key] != value
     ]
+    norm = cfg.oneshot.get("input_norm", None) or None
+    if (meta.get("input_norm") or None) != norm:  # absent = built before the key = off
+        problems.append(
+            f"input_norm: prototypes={meta.get('input_norm')!r} vs oneshot.input_norm={norm!r}"
+        )
     sha = meta.get("encoder_sha256")
     if sha is not None and sha != checkpoint_sha256(encoder_ckpt):
         problems.append("encoder_sha256: the checkpoint file differs from the one used")
@@ -194,6 +204,9 @@ class OneShotClassifier:
         exclude = list(osh.get("exclude_prototypes", None) or [])
         self.directory = directory.without(exclude) if exclude else directory
         self.views = ViewSpec.from_cfg(osh.query_views)
+        # Canonical input form (utils.input_norm), the same the prototypes were built with.
+        self.input_norm = osh.get("input_norm", None) or None
+        self._prep = input_norm_fn(self.input_norm)
         self.background = tuple(int(c) for c in osh.get("background", (255, 255, 255)))
         self.min_cosine = float(osh.other_min_cosine)
         self.aggregate = str(osh.get("aggregate", "vote"))
@@ -257,7 +270,10 @@ class OneShotClassifier:
 
     def embed_crop(self, crop: np.ndarray) -> torch.Tensor:
         """The (V, D) unit embeddings of a crop's query views (oneshot.query_views)."""
-        views = make_views(Image.fromarray(crop), self.views, self.background)
+        img = Image.fromarray(crop)
+        if self._prep is not None:
+            img = self._prep(img)
+        views = make_views(img, self.views, self.background)
         emb = embed_images(self.encoder, views, self.transform, self.device)
         return emb if self.center is None else center_embeddings(emb, self.center)
 
@@ -317,6 +333,12 @@ def load_oneshot_classifier(cfg: DictConfig, transform, device) -> OneShotClassi
             raise ValueError(
                 f"oneshot.center {center_path} was built with encoder "
                 f"{meta.get('encoder_checkpoint')}, not {ckpt} (sha256 differs)"
+            )
+        norm = cfg.oneshot.get("input_norm", None) or None
+        if (meta.get("input_norm") or None) != norm:
+            raise ValueError(
+                f"oneshot.center {center_path} was built with input_norm="
+                f"{meta.get('input_norm')!r}, this run has oneshot.input_norm={norm!r}"
             )
         if center.shape[0] != directory.dim:
             raise ValueError(

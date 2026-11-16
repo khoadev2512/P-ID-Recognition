@@ -255,6 +255,24 @@ Cần `encoders/__global_lo__.pt` trên Drive (10b lấy nhóm S của R1a). Nê
 Detection lưu trên Drive (`runs/stage1_iso/`, `runs/stage1_dpid/`) — phiên sau dùng lại, không chạy lại
 detector. 864 tờ × mỗi lượt detector / encoder: lâu, nên chạy §12 trong phiên riêng.
 
+## 5h. PHASE C Bước 2B — DINOv2 + A4 + CL2N — notebook §13 (2026-11-16)
+
+**Trước khi mở Colab**: commit + push (`src/utils/input_norm.py`, `utils/model.py`, `oneshot_infer.py`, `iso_prototypes.py`,
+`oneshot_eval.py`, `scripts/make_imagenet_encoder.py`, `scripts/oneshot_probe.py`, notebook). Cần trên Drive: `encoders/__global_lo__.pt`,
+`center_imagenet.pt`, `center_lo.pt` (10d), lượt τ `eval_tau_lo`, `eval_tau_imagenet_cl2n`, `eval_tau_lo_cl2n`, và zip OPEN100-ISO (11a).
+Không train: phiên chủ yếu là nhúng crop (P1 ~17k crop, P4 ~94k crop × 3 lượt). DINOv2 tải trọng số HF (~90 MB) lần đầu.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4, def 9a | mount, clone, crop, H; phần def đầu cell 9a (`at_chosen_taus`) | như §5d |
+| 13a | `__dinov2__.pt` (không train) + `iso_prototypes_dinov2_a4.pt` | assert `input_norm`, `imgsz=224`, 42 prototype; separation |
+| 13b | tâm (`protocol=center`, nhóm R1a) → τ trên `val_sel` → P1 đủ, bảng cạnh R1a / ImageNet + CL2N | lớp τ = như 9a (assert); cùng `n_crops` |
+| 11a | giải nén OPEN100-ISO (nếu phiên mới) | 864 ảnh, 93,800 ký hiệu |
+| 13c–13d | P4: DINOv2 + A4 + CL2N, ImageNet + CL2N, R1a + CL2N; bảng 5 cột cạnh R1a / ImageNet | cùng số crop (assert) |
+| 13e | (tuỳ chọn) end-to-end DINOv2 — cần cell 12a trong phiên (`DET_CKPT`), rồi chạy lại 12b (bảng) | khối `oneshot_e2e` |
+
+**Gửi lại**: toàn bộ in ra của 13a–13e + `eval_p1_dinov2/*/oneshot_p1_crops.csv`, `eval_p4_{dinov2,imagenet_cl2n,lo_cl2n}/*/oneshot_p4_crops.csv`.
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

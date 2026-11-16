@@ -3,7 +3,11 @@
 File này để **tiếp tục ở session sau** mà không phải làm lại những gì đã thử. Đọc file này
 + `docs/RENDER_RULES.md` + `~/.claude/projects/.../memory/*.md` là nắm toàn bộ.
 
-> **VIỆC TIẾP THEO → `docs/PLAN_STAGE2_ONESHOT.md`** (lập 2026-10-14). User chốt: **code
+> **VIỆC TIẾP THEO (từ 2026-11-16) → `docs/PLAN_PHASE_C.md`**: vòng cải tiến cuối. Bước 1 thăm dò rẻ
+> (A4 chuẩn hoá đầu vào, DINOv2, HOG, ảnh mẫu cùng phong cách) trên tập quyết định "P1-val" (`val_sel`,
+> không đụng P1); luật Bước 1 → Bước 2 chốt trước khi có số; đóng băng thí nghiệm 2026-12-15.
+>
+> **Plan gốc → `docs/PLAN_STAGE2_ONESHOT.md`** (lập 2026-10-14). User chốt: **code
 > hết trước (Phase A: B0, B1, B2, B6a, B6b, B7-code, B4a), rồi mới chạy từng GĐ trên Colab
 > (Phase B: R1 train → R2 prototypes → R3 fine-tune nếu cần → R4 eval + chốt số).**
 > **Protocol chính = leave-classes-out (P1)**: giữ một nhóm class H ra khỏi train encoder và
@@ -757,8 +761,125 @@ khi gộp ra 0.133 / 0.410 / 0.433 — cùng kết luận.)
   `oneshot_center.pt` (crop `crops_fgc/train` của lớp đã train theo `groups_ckpt`, LUÔN trừ mọi lớp
   `oneshot.holdout`; `++eval.oneshot.max_per_class`). metrics.json ghi `center`. τ phải chọn lại với tâm.
   Notebook 10d (tâm + τ + P1 cho ImageNet và R1a) / 10e (bảng 4 cột). RUNBOOK §5f. 777 test pass.
-- **Chờ Colab 10d–10e** (số đủ 17,379 crop + τ chọn lại). P4 với CL2N: chưa nối vào §11 (tâm có sẵn
-  `encoders/center_<tag>.pt`, thêm `++oneshot.center=` là chạy được) — quyết sau khi có 10e.
+- **Colab 10d–10e — 2026-11-15** (đủ 17,379 crop, 10,470 biết / 6,909 lạ; ngẫu nhiên top-1 0.024, top-3 0.071):
+
+  | P1 | ImageNet | ImageNet+CL2N | R1a | R1a+CL2N |
+  |---|---|---|---|---|
+  | AUROC cos / lề | 0.490 / 0.434 | 0.438 / 0.363 | 0.777 / 0.705 | 0.803 / 0.660 |
+  | OSCR | 0.006 | 0.054 | 0.030 | 0.024 |
+  | `h_in` macro top-1 / top-3 | 0.008 / 0.116 | 0.105 / 0.383 | 0.036 / 0.366 | 0.031 / 0.361 |
+  | hub | flow_direction 0.59 | valve_needle 0.15 | valve_control 0.20 | valve_control 0.20 |
+
+  Khớp đo cục bộ (mẫu: ImageNet+CL2N 0.131 / 0.407 / AUROC 0.444; R1a+CL2N AUROC 0.803).
+  τ chọn lại trên `val_sel`: ImageNet+CL2N A 0.1471 / B 0.4079, δ 0.0022; R1a+CL2N A 0.3377 / B 0.2696, δ 0.1786.
+  Tại τ_A: ImageNet+CL2N nhận+đúng 0.097, Other P 0.22 R 0.07 F1 0.10 (P **dưới** tỉ lệ lạ 0.40 — cổng
+  ngược chiều, đúng với AUROC < 0.5); R1a+CL2N nhận+đúng 0.028, Other P 0.89 R 0.57 F1 0.69 (R1a thô τ_A:
+  0.037, P 0.997 R 0.467 F1 0.64). Cổng lề lại sụp ở R1a+CL2N (δ 0.179 → nhận+đúng 0, R 0.998).
+  Từng lớp top-1 (ImageNet | +CL2N | R1a | +CL2N): S3 0 | 0 | 0.071 | 0.064; **S10 0.048 | 0.310 | 0 | 0**;
+  S5 0 | 0.020 | 0.146 | 0.119; S4 0 | 0.050 | 0 | 0; S18 0 | 0 | 0 | 0; **S19 0.001 | 0.248 | 0.001 | 0.001**.
+  **Đọc (chốt cho báo cáo sơ bộ)**:
+  1. P1 âm với **cả bốn** encoder: macro top-1 ≤ 0.105. One-shot từ một template ISO sang lớp DigitizePID
+     chưa thấy không đạt mức dùng được — không phải do chọn encoder.
+  2. So baseline công bằng (ImageNet+CL2N): train DigitizePID **không** giúp gọi tên lớp mới (top-1 0.036 vs
+     0.105; top-3 ngang 0.366 vs 0.383) nhưng **giúp mạnh** nhận ra lạ (AUROC 0.78 vs 0.44, ImageNet+CL2N
+     còn ngược chiều). → Đóng góp của train = cổng Other, không phải chuyển giao (Kornblith et al. 2021).
+  3. Lợi thế top-1 của ImageNet+CL2N dồn vào **2/6 lớp** (S10, S19); 6 lớp `h_in` là ít → chỉ nói "R1a không
+     hơn", không nói "ImageNet hơn". **Bootstrap 2026-11-15** (CSV đủ trong `runs/oneshot_p1_crops*_cl2n.csv`,
+     tái lập 10e tới 4 chữ số; B=2000, theo cặp trên cùng crop; script scratchpad `cl2n/boot.py`). Hai mức:
+     "theo ảnh" = lấy lại ảnh trong từng lớp (crop cùng tờ tương quan) → câu hỏi "khác nhau trên ĐÚNG 10 lớp
+     này?"; "theo lớp" = lấy lại 6 lớp `h_in` + 4 lớp `h_out` → câu hỏi "khái quát sang lớp chưa thấy khác?".
+
+     | chênh (95% CI) | theo ảnh | theo lớp | dấu, 6 lớp (chính xác) |
+     |---|---|---|---|
+     | ImageNet+CL2N − R1a, top-1 +0.068 | [+0.061, +0.076] | [−0.054, +0.203] | p = 0.44 |
+     | ImageNet+CL2N − R1a, top-3 +0.018 | [+0.008, +0.027] | [−0.370, +0.456] | p = 0.94 |
+     | ImageNet+CL2N − R1a, AUROC −0.340 | [−0.354, −0.325] | [−0.676, +0.015] | — |
+     | R1a+CL2N − R1a, AUROC +0.026 | [+0.023, +0.028] | [−0.041, +0.130] | — |
+     | ImageNet+CL2N − ImageNet, top-1 +0.097 | [+0.090, +0.103] | [+0.012, +0.184] | p = 0.125 |
+     | ImageNet+CL2N − ImageNet, top-3 +0.267 | [+0.258, +0.278] | [+0.130, +0.436] | p = 0.031 (6/6 lớp tăng) |
+
+     → Gọi tên lớp mới: chênh ImageNet+CL2N vs R1a **không khái quát** (CI theo lớp chứa 0, p 0.44 / 0.94);
+     hai encoder giỏi lớp KHÁC nhau (top-3 từng lớp: S10 R1a 0.00 vs CL2N ~1.00; S19 R1a 0.999 vs CL2N 0.65;
+     S3 R1a 0.85 vs CL2N 0.22) → bổ sung nhau, không cái nào trội. Tách lạ: R1a hơn rõ (theo lớp, cận trên
+     chỉ +0.015 — gần biên vì chỉ 4 lớp lạ). CL2N chữa ImageNet thật (top-3 tăng ở cả 6 lớp). R1a+CL2N vs
+     R1a: không khác có thể khái quát. Mức lớp với 6 + 4 lớp là thô: p nhỏ nhất đạt được của phép đổi dấu
+     là 2/64 = 0.031.
+  4. CL2N chỉ chữa hub kiểu "hướng trung bình" (ImageNet 0.59 → 0.15); hub valve_control của R1a là học ra
+     (S4, S10 → valve_control), CL2N không đổi. R1a+CL2N: AUROC +0.03 nhưng top-1 −0.006 → giữ R1a thô
+     làm số chính (đã định trước), R1a+CL2N là ablation.
+  5. Báo cáo P1: R1a thô (chính) + ImageNet thô và ImageNet+CL2N (baseline; thô kèm chẩn đoán hub) +
+     R1a+CL2N (ablation). Chỉ cổng τ; cổng lề không dùng cho lớp chưa thấy.
+- P4 với CL2N: chưa nối vào §11 (tâm có sẵn `encoders/center_<tag>.pt`, thêm `++oneshot.center=` là chạy
+  được) — chờ user quyết.
+
+### PHASE C Bước 1 — 2026-11-16 (chi tiết + bảng: `docs/PLAN_PHASE_C.md` §1.3)
+Chạy cục bộ `scripts/oneshot_probe.py` → `runs/phase_c/probe/`. Luật §1.2 (chốt trước, tập P1-val trên `val_sel`):
+**1b A4 trên ImageNet + CL2N KHÔNG ĐẠT** (3/10 lớp, Δtop-1 −0.018) → không train lại R1a; **1c DINOv2 + A4 + CL2N
+ĐẠT** (6/10 lớp, Δtop-1 +0.302, ΔAUROC +0.265) → **Bước 2B**. Tham khảo trên mẫu P1 (test, không quyết định):
+DINOv2 + A4 + CL2N top-1 0.579 / top-3 0.829 (R1a 0.044) nhưng AUROC 0.351 (cổng Other ngược chiều).
+**1e xác nhận chẩn đoán khác phong cách**: chỉ đổi ảnh mẫu ISO → 1 crop DigitizePID, R1a 0.044 → 0.781 (28 lớp,
+ngẫu nhiên 0.036); ImageNet + CL2N 0.562; DINOv2 + A4 + CL2N 0.815. HOG ≈ ngẫu nhiên.
+
+**Bước 2B CODE ✅ 2026-11-16** (PLAN_PHASE_C §2B): khóa `++oneshot.input_norm=ink_letterbox` (A4 cho ảnh mẫu + mọi crop;
+lệch giữa prototype / tâm / lượt chạy → lỗi), ViT backbone (`utils.model.backbone_kwargs`), checkpoint DINOv2 qua
+`scripts/make_imagenet_encoder.py` + `fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384`.
+Kiểm cục bộ: prototype pipeline = prototype probe (sai khác 0), embedding classifier = probe (< 1e-6). Notebook §13 (RUNBOOK §5h),
+gộp luôn P4 + CL2N (ImageNet, R1a). 800 test pass. **Chờ chạy Colab §13.**
+
+### P4 + Stage 1 + end-to-end trên Colab (§11–§12) — 2026-11-15
+CSV `runs/oneshot_p4_crops_{full,lo,imagenet}.csv` (93,800 crop = 46,900 × sạch/suy giảm): tái lập 11c (top-1 trong
+11c là **macro theo lớp** trong nhóm). Số dưới: suy giảm (số chính) trừ khi ghi khác.
+
+**1. Phân bố lớp lệch nặng → mọi số micro / end-to-end bị hai lớp chi phối.** `flow_direction` = 28.9% GT,
+`other_isa` = 23.7%. R1b nhóm S: macro 0.534 nhưng micro 0.139 (flow_direction 13,572 crop sai hết). End-to-end
+R1a "τ hoặc δ" P 0.619 / R 0.625: 92% số đúng là flow_direction (S) + other_isa (Other) — V 0.013, H_chon 0.001,
+H_tu_nhien 0.019 (bị đẩy hết sang Other). → Luận văn báo **theo nhóm / macro theo lớp**; P/R end-to-end gộp chỉ
+kèm phân rã theo nhóm.
+
+**2. Hai lỗi hệ thống của R1b (đã thấy trên P2, val):** flow_direction → `pipeline` 100% (top-2 = flow_direction
+99.7%; cos 0.883 vs 0.806), flanged_connection → agitator_general 100%. R1a KHÔNG mắc (0.980 / 1.000) dù cùng
+đã train S21/S24 → lệch giữa hai lượt train, không phải hình học. ★ `pipeline` không có GT trên OPEN100.
+Đây là "Điểm 4" đang chờ quyết — **bằng chứng để quyết phải là P2 (val), không phải P4**: P4 đã xem rồi, nếu bỏ
+`pipeline` thì P4 chỉ được báo như ablation hậu kiểm (ghi rõ), số chính giữ nguyên.
+
+**3. Cổng Other trên OPEN100 hỏng ở τ (τ chọn trên DigitizePID không chuyển miền):** τ_A loại 0.5% (R1b) /
+0.1% (R1a) `other_iso`, ~1% `other_isa`. AUROC cos 0.675 / 0.697 / 0.522 (R1b / R1a / ImageNet). Lề tốt hơn
+hẳn cho R1a: AUROC lề 0.878 (R1b 0.699, ImageNet 0.374); cổng "τ hoặc δ" của R1a bắt 90% other_iso và 100%
+other_isa nhưng loại gần hết V / H. Cos của crop OPEN100 (render từ đúng kiểu template) cao hơn crop DigitizePID
+→ τ quá thấp. Chọn τ đúng miền cần tờ OPEN100 để hiệu chỉnh (export có `split.mode=by_source`) — hiện cả 12 tờ
+là test và đã xem.
+
+**4. So encoder (bootstrap theo tờ, 12 tờ, 600 lần, cặp; lớp cố định):**
+| chênh (suy giảm) | giá trị | 95% CI |
+|---|---|---|
+| H_tu_nhien top-1 R1b − R1a | +0.115 | [+0.055, +0.163] |
+| H_tu_nhien top-1 R1a − ImageNet | +0.177 | [+0.077, +0.281] |
+| V top-1 R1b − R1a | +0.271 | [+0.235, +0.313] |
+| V top-1 R1a − ImageNet | **−0.135** | [−0.168, −0.095] |
+| H_chon top-1 R1a − ImageNet | +0.224 | [+0.204, +0.246] |
+| AUROC cos R1a − R1b | +0.023 | [−0.001, +0.044] |
+| AUROC lề R1a − R1b | +0.179 | [+0.158, +0.204] |
+| AUROC cos R1a − ImageNet | +0.175 | [+0.114, +0.240] |
+Khác P1: trên P4 (crop cùng kiểu vẽ với template) train DigitizePID **có** giúp gọi tên (H, H_chon) và tách lạ;
+riêng V thì ImageNet hơn R1a. R1b > R1a ở H_tu_nhien / V (thấy nhiều lớp hơn).
+Từng lớp đáng chú ý: valve_needle → valve_gate, valve_globe → butterfly / check_valve_swing (cả ba encoder,
+như P2); `other_isa` → pump_gear 93% (R1a) / motor_electric 60% (R1b); `other_generic` → tank 99% (R1b).
+
+**5. Suy giảm kiểu scan: encoder có augment bền, ImageNet sụp.** Sạch → suy giảm, top-1 macro: ImageNet H_chon
+0.241 → 0.009, V 0.548 → 0.306; R1a H_chon 0.346 → 0.233, V 0.314 → 0.171; R1b H_tu_nhien 0.531 → 0.500, V
+0.459 → 0.442. Bằng chứng cho augment suy giảm khi train (quyết định 2026-11-11).
+
+**6. Stage 1 (12a), chấm không phân lớp:** P 0.811 R 0.837 mAP50 0.782 (suy giảm; sạch R 0.820 — suy giảm
+nhỉnh hơn, nhất là other_generic 0.49 vs 0.27). Recall nhóm: S 0.92, V 0.78, H_chon 0.85, H_tu_nhien 0.61,
+other_iso 0.46, other_isa 1.00, other_generic 0.49. Recall 0: agitator_* (3 lớp), column; safety_valve_spring
+0.12, blind_disc 0.25 → giới hạn trên của end-to-end. 2,452 dự đoán rơi vào vùng bỏ qua (1,553 mũi tên dẫn,
+899 cờ): nếu tính FP thì P 0.811 → ~0.772 → vùng bỏ qua cần thiết. `agnostic_merge`: recall giữ nguyên, FP
+9,125 → 8,135 (P 0.811 → 0.828) → dùng cho end-to-end OPEN100 (đúng mặc định đã chọn).
+
+**7. Cổng Other KHÔNG lọc được box sai của detector (12c, DigitizePID val_sel, 50 ảnh):** box sai (IoU < 0.3)
+= 8.9% dự đoán. Tại τ: loại 3.0% box sai nhưng 21.0% box đúng (R1b); 1.6% vs 5.8% (R1a). "τ hoặc δ": 31.8% vs
+28.7% (R1b), 54.4% vs 58.5% (R1a) → không phân biệt. Kết quả âm: giả thuyết "cổng Other = bộ lọc FP Stage 1"
+không đứng; ghi vào luận văn như giới hạn.
 
 ### Chờ user quyết (PLAN "Vấn đề mở 2026-11-12")
 - Điểm 4: bỏ ★ `pipeline` (và template thuần đường kẻ) khỏi thư mục prototype?
@@ -767,6 +888,8 @@ khi gộp ra 0.133 / 0.410 / 0.433 — cùng kết luận.)
 - Có chấm C trên ảnh DigitizePID suy giảm không; có làm P3 (ASU) không.
 
 ### Việc tiếp theo (thứ tự)
+0. **2026-11-16 → `docs/PLAN_PHASE_C.md`** (Bước 1 thăm dò → luật quyết định → Bước 2 nếu ĐẠT →
+   đóng băng 2026-12-15). Các mục dưới là lịch sử; mục còn mở được gom vào PLAN_PHASE_C §4.
 1. Commit HANDOFF + PLAN mới, hai file split (`digitizepid_splits.json`, `digitizepid_val_test.json`)
    và `p2_mini.py` (đề xuất `scripts/`).
 2. Thử prototype trung bình hai scale: `'oneshot.template_views.scales=[1.0,1.2]'` →

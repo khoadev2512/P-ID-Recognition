@@ -421,3 +421,34 @@ def test_validate_reports_a_missing_symbols_dir(tmp_path):
     cfg.oneshot.encoder_ckpt = str(_write_arcface_ckpt(cfg, tmp_path / "enc.pt"))
     with pytest.raises(FileNotFoundError, match="symbols_dir"):
         IsoPrototypePipeline(cfg).validate()
+
+
+@requires_iso_library
+def test_input_norm_normalizes_the_templates_and_is_recorded(tmp_path):
+    """oneshot.input_norm (PLAN_PHASE_C A4): every template goes through the same
+    normalization the query crops get, and the directory says so."""
+    from utils.dataset import build_eval_transform
+    from utils.input_norm import ink_letterbox
+    from utils.oneshot import ViewSpec, build_prototypes
+
+    cfg = _cfg(tmp_path, input_norm="ink_letterbox", coarse_filter=["valve"])
+    cfg.oneshot.encoder_ckpt = str(_write_arcface_ckpt(cfg, tmp_path / "enc.pt"))
+    IsoPrototypePipeline(cfg).run()
+    directory = PrototypeDirectory.load(cfg.oneshot.prototypes)
+    assert directory.meta["input_norm"] == "ink_letterbox"
+
+    encoder, _ = load_arcface_encoder(cfg, cfg.oneshot.encoder_ckpt)
+    rows = read_vocab(ISO_VOCAB_CSV, coarse_filter=["valve"])
+    templates, _ = load_templates(ISO_SYMBOLS_DIR, rows)
+    tf = build_eval_transform(cfg)
+    norm = build_prototypes(
+        encoder, {n: ink_letterbox(t) for n, t in templates.items()}, tf, ViewSpec()
+    )
+    raw = build_prototypes(encoder, templates, tf, ViewSpec())
+    assert torch.allclose(directory.embeddings, norm.embeddings, atol=1e-5)
+    assert not torch.allclose(directory.embeddings, raw.embeddings, atol=1e-3)
+
+    cfg_off = _cfg(tmp_path, coarse_filter=["valve"])
+    cfg_off.oneshot.encoder_ckpt = cfg.oneshot.encoder_ckpt
+    IsoPrototypePipeline(cfg_off).run()
+    assert PrototypeDirectory.load(cfg_off.oneshot.prototypes).meta["input_norm"] is None

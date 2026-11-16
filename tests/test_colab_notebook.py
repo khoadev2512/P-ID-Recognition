@@ -31,6 +31,13 @@ def _oneshot_cells(cells: list[str]) -> list[str]:
     return [c for c in cells if "eval.mode=oneshot" in _active([c])]
 
 
+def _before_13(cells: list[str]) -> list[str]:
+    """Code cells before §13 (PHASE C 2B): the section tests below select cells by the
+    commands they issue, and §13 reruns the same protocols for the DINOv2 encoder."""
+    first = next((i for i, c in enumerate(cells) if "__dinov2__" in _active([c])), len(cells))
+    return cells[:first]
+
+
 def test_never_reads_an_old_crop_zip(code_cells):
     """crops_fgc.zip: 28 classes. crops_fgc_global.zip: crops without _boxes.csv (before
     utils.crop_box), which box jitter cannot use."""
@@ -133,6 +140,7 @@ def test_finalize_is_defined_apart_from_its_calls(code_cells):
 def test_oneshot_eval_section_runs_tau_on_val_sel_then_p1_and_p2_on_the_right_data(code_cells):
     """B6b-1: tau on val_sel for both encoders, P1 on the leave-out encoder over crops it never
     trained on (no image subset), P2 on the full encoder over the test half; mean aggregate."""
+    code_cells = _before_13(code_cells)
     cells = [
         c
         for c in _oneshot_cells(code_cells)
@@ -164,6 +172,7 @@ def test_imagenet_baseline_runs_tau_on_r1a_classes_then_p1_after_section_9(code_
     """B4a: the untrained ImageNet encoder gets its own prototypes, tau on val_sel crops of the
     classes R1a's tau run used (groups from __global_lo__.pt), and P1 on the same crops as 9b,
     in run dirs §9's "latest metrics.json" globs never pick up."""
+    code_cells = _before_13(code_cells)
     code = _active(code_cells)
     assert "scripts/make_imagenet_encoder.py --out $ENC_DIR/__imagenet__.pt" in code
     (make,) = [c for c in code_cells if "make_imagenet_encoder.py" in _active([c])]
@@ -207,6 +216,7 @@ def test_cl2n_builds_a_center_per_encoder_then_reruns_tau_and_p1_with_it(code_ce
     """10d (CL2N): the center comes from train crops of R1a's classes (protocol=center, groups
     from __global_lo__.pt), is copied next to the encoder, and every centered run (tau on
     val_sel, then P1) passes it; run dirs never collide with the raw ones §9 / §10 read."""
+    code_cells = _before_13(code_cells)
     (run,) = [c for c in _oneshot_cells(code_cells) if "protocol=center" in _active([c])]
     code = _active([run])
     assert "('imagenet', '__imagenet__.pt', 'iso_prototypes_imagenet.pt')" in code
@@ -251,6 +261,7 @@ def test_p4_section_runs_the_three_encoders_on_open100_iso_after_section_10(code
     """§11 (PLAN B6b P4): OPEN100-ISO unpacked from Drive into its own data root, P4 for R1b, R1a
     and ImageNet (grouped like R1a, as in 10b) with no image subset and nothing selected on it:
     tau / delta come from 9a / 10b, and the report filters the CSV by view (never pooled)."""
+    code_cells = _before_13(code_cells)
     (unpack,) = [c for c in code_cells if "iso_open100_canonical.zip" in _active([c])]
     assert "LOCAL_ISO_ROOT = '/content/iso_open100'" in unpack and "unzip" in _active([unpack])
     assert "== 864" in unpack and "93800" in unpack
@@ -292,6 +303,7 @@ def test_section_12_stage1_and_end_to_end_on_open100_iso_then_wrong_boxes(code_c
     agnostic_merge, scored class-agnostically with recall per group; end to end with the one-shot
     Stage 2 of R1b and R1a at the tau / delta of 9a (gated at eval time, never chosen on
     OPEN100-ISO); the wrong-box rate on DigitizePID val_sel only."""
+    code_cells = _before_13(code_cells)
     cells = _detection_cells(code_cells)
     det = [c for c in cells if "eval.mode=det_only" in _active([c])]
     e2e = [c for c in cells if "eval.mode=det_plus_fgc" in _active([c])]
@@ -349,3 +361,43 @@ def test_unpack_counts_symbols_not_ignore_regions(code_cells):
 def test_notebook_round_trips_byte_for_byte():
     raw = _NB.read_text(encoding="utf-8")
     assert json.dumps(json.loads(raw), indent=1, ensure_ascii=False) + "\n" == raw
+
+
+def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cells):
+    """PHASE C 2B: every command reading __dinov2__.pt carries the DINOv2 overrides and A4; the
+    center comes from protocol=center (R1a groups) and every later run passes it; tau on
+    val_sel; P1 with no subset; P4 for DINOv2 plus the two CL2N rows, tags matching their tau
+    runs (chosen_taus(tag) reads eval_tau_<tag>)."""
+    s13 = [c for c in code_cells if "__dinov2__" in _active([c])]
+    assert len(s13) == 4  # 13a, 13b, 13c, 13e (13d only reads metrics)
+    make, run, p4, e2e = (_active([c]) for c in s13)
+    dino = "fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384"
+    assert f"DINO = '{dino}'" in make
+    assert "A4 = '++oneshot.input_norm=ink_letterbox'" in make
+    assert (
+        "scripts/make_imagenet_encoder.py --out $ENC_DIR/__dinov2__.pt" in make
+        and "$DINO $A4" in make
+    )
+    assert "{DINO} {A4}" in run and "BASE_D" in run
+    for p in ("center", "tau", "p1"):
+        assert f"protocol={p}" in run
+    assert run.index("protocol=center") < run.index("protocol=tau") < run.index("protocol=p1")
+    assert run.count("++oneshot.center=$CENTER_D") == 2 and "++eval.image_subset=val_sel" in run
+    assert "GROUPS = f'++eval.oneshot.groups_ckpt={ENC_DIR}/__global_lo__.pt'" in run
+    assert "run_dir=$RUNS_DIR/eval_tau_dinov2" in run and "run_dir=$RUNS_DIR/eval_p1_dinov2" in run
+    assert "latest('eval_tau_lo')['classes']" in run
+    for tag in ("'dinov2'", "'imagenet_cl2n'", "'lo_cl2n'"):
+        assert f"({tag}, " in p4
+    assert "{DINO} {A4} ++oneshot.center={ENC_DIR}/center_dinov2_a4.pt" in p4
+    assert "center_imagenet.pt" in p4 and "center_lo.pt" in p4 and "image_subset" not in p4
+    assert "run_dir=$RUNS_DIR/eval_p4_$tag" in p4 and "data_root=$LOCAL_ISO_ROOT" in p4
+    assert "{DINO} {A4} ++oneshot.center=" in e2e and "chosen_taus(tag)" in e2e
+    assert not any(
+        "protocol=tau" in _active([c]) and "LOCAL_ISO_ROOT" in _active([c]) for c in code_cells
+    )
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s13]
+    assert idx == sorted(idx)
+    last_12 = max(
+        i for i, c in enumerate(code_cells) if "eval_e2e_iso_" in _active([c]) and c not in s13
+    )
+    assert last_12 < idx[0]

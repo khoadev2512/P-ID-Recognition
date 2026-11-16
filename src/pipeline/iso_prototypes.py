@@ -38,6 +38,7 @@ from PIL import Image
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
 from utils.dataset import build_eval_transform
+from utils.input_norm import input_norm_fn
 from utils.model import (
     checkpoint_excluded_classes,
     checkpoint_sha256,
@@ -203,6 +204,11 @@ class IsoPrototypePipeline(BasePipeline):
             coarse_filter=coarse_filter,
         )
         templates, coarse_of = load_templates(Path(str(cfg.oneshot.symbols_dir)), rows)
+        input_norm = cfg.oneshot.get("input_norm", None) or None
+        prep = input_norm_fn(input_norm)
+        if prep is not None:  # the same normalization every query crop gets (oneshot_infer)
+            templates = {name: prep(img) for name, img in templates.items()}
+            logger.info("[oneshot] templates normalized with oneshot.input_norm=%s", input_norm)
         spec = ViewSpec.from_cfg(cfg.oneshot.template_views)
         logger.info(
             "[oneshot] %d ISO templates x %d view(s) (scales=%s, orientations=%s)",
@@ -237,6 +243,7 @@ class IsoPrototypePipeline(BasePipeline):
                 "symbols_dir": str(cfg.oneshot.symbols_dir),
                 "fgc_groups_only": bool(cfg.oneshot.get("fgc_groups_only", False)),
                 "coarse_filter": coarse_filter,
+                "input_norm": input_norm,
             },
         )
 

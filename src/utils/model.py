@@ -83,6 +83,18 @@ class ArcMarginProduct(nn.Module):
         return output * self.s
 
 
+VIT_PREFIXES = ("vit_", "deit", "eva")
+
+
+def backbone_kwargs(cfg: DictConfig) -> dict:
+    """Extra timm.create_model arguments for cfg.fgc.backbone. A vision transformer fixes its
+    patch grid when built (timm's DINOv2 default is 518 px) and refuses any other input size,
+    so it is built for cfg.fgc.imgsz, the square the eval transform resizes to; timm resamples
+    the pretrained position embeddings. CNNs (resnet*) take any size: nothing extra."""
+    name = str(cfg.fgc.backbone)
+    return {"img_size": int(cfg.fgc.imgsz)} if name.startswith(VIT_PREFIXES) else {}
+
+
 class ArcFaceModel(nn.Module):
     """timm backbone -> embedding -> ArcMarginProduct head.
 
@@ -95,7 +107,10 @@ class ArcFaceModel(nn.Module):
     def __init__(self, cfg: DictConfig, num_fine: int) -> None:
         super().__init__()
         self.backbone = timm.create_model(
-            str(cfg.fgc.backbone), pretrained=bool(cfg.fgc.pretrained), num_classes=0
+            str(cfg.fgc.backbone),
+            pretrained=bool(cfg.fgc.pretrained),
+            num_classes=0,
+            **backbone_kwargs(cfg),
         )
         backbone_dim = int(self.backbone.num_features)
         embed_dim = int(cfg.fgc.arcface.embed_dim)

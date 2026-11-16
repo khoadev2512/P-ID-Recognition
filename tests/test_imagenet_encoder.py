@@ -103,3 +103,33 @@ def test_main_composes_the_repo_config_with_overrides(tmp_path, trunk):
     state = torch.load(out, map_location="cpu", weights_only=False)
     assert state["fine_classes"] == [] and len(state["excluded_classes"]) == 3
     assert state["pretrained_weights"].startswith("timm/resnet34")
+
+
+def test_a_dinov2_checkpoint_is_built_for_the_configured_size(tmp_path, monkeypatch):
+    """PLAN_PHASE_C 2B: the same layout for frozen DINOv2 (no download here: random weights
+    stand in). The ViT is built for fgc.imgsz (utils.model.backbone_kwargs), proj stays
+    Identity at its 384 width, and it is pretrained-only but not ImageNet-labelled."""
+    real_create = timm.create_model
+
+    def no_download(name, pretrained=False, **kw):
+        return real_create(name, pretrained=False, **kw)
+
+    monkeypatch.setattr(model_mod.timm, "create_model", no_download)
+    cfg = _cfg(
+        tmp_path,
+        backbone="vit_small_patch14_dinov2.lvd142m",
+        imgsz=28,
+        arcface={"m": 0.5, "s": 30.0, "embed_dim": 384},
+    )
+    assert model_mod.backbone_kwargs(cfg) == {"img_size": 28}
+    state = make_imagenet_encoder.build_imagenet_checkpoint(cfg)
+    assert state["pretrained_only"] is True and state["imagenet_only"] is False
+    path = tmp_path / "dino.pt"
+    torch.save(state, path)
+    encoder, fine = load_arcface_encoder(cfg, path)
+    assert fine == [] and isinstance(encoder.proj, torch.nn.Identity)
+    assert encoder.embed(torch.zeros(2, 3, 28, 28)).shape == (2, 384)
+
+
+def test_cnn_backbones_get_no_extra_arguments(tmp_path):
+    assert model_mod.backbone_kwargs(_cfg(tmp_path)) == {}
