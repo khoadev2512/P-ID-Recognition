@@ -820,6 +820,44 @@ DINOv2 + A4 + CL2N top-1 0.579 / top-3 0.829 (R1a 0.044) nhưng AUROC 0.351 (c�
 **1e xác nhận chẩn đoán khác phong cách**: chỉ đổi ảnh mẫu ISO → 1 crop DigitizePID, R1a 0.044 → 0.781 (28 lớp,
 ngẫu nhiên 0.036); ImageNet + CL2N 0.562; DINOv2 + A4 + CL2N 0.815. HOG ≈ ngẫu nhiên.
 
+**C1 / C2 — 2026-11-17** (PLAN_PHASE_C §2C.2): C1 (R1a làm cổng + DINOv2 đặt tên) tốt hơn DINOv2 một mình trên P1
+(AUROC 0.777 vs 0.360, nhận + đúng 0.574 vs 0.514) nhưng kém hơn trên P4 (nhận + đúng −0.033, cổng không loại `other_iso`)
+→ theo luật không được gọi là tốt hơn, không vào pipeline; ghi như phân tích "cổng Other phụ thuộc miền". C2 (Mahalanobis /
+làm trắng) KHÔNG ĐẠT trên P1-val (DINOv2 top-1 0.477 → 0.098). User: tạm không lo deadline. Tiếp: C3 (DINOv2 reg4 / ViT-B).
+
+**C3 — 2026-11-17** (PLAN_PHASE_C §2C.3b): DINOv2-S + registers, ViT-B, ViT-B + registers (timm, không train, cùng crop /
+tâm với Bước 1) **KHÔNG ĐẠT** trên P1-val — encoder lớn hơn không gọi tên tốt hơn (top-1 0.42–0.46 vs 0.477), chỉ tách lạ tốt
+hơn (AUROC tới 0.84 vs 0.69, ghi ablation). Giữ DINOv2-S / A4 / CL2N; §13 không đổi. 1e của mọi ứng viên ≈ 0.82 → nút thắt là
+khác phong cách ảnh mẫu, không phải encoder. Tiếp: H2 (§2D.1, ảnh mẫu ISO "giống bản vẽ", encoder DINOv2-S).
+
+**H2 — 2026-11-17** (PLAN_PHASE_C §2D.2): ảnh mẫu ISO + 8 biến thể "bẩn" (ống ở cổng thật, nét ±1 px, suy giảm scan; user duyệt
+contact sheet) **KHÔNG ĐẠT** trên P1-val: top-1 0.477 → 0.421, 3/10 lớp tăng, AUROC −0.022 (mất nhiều ở `flow_direction`
+1.00 → 0.73). Không vào pipeline. Code giữ lại: `utils/template_variants.py`, `scripts/h2_template_variants.py`. Sau C3 + H2:
+cải tiến đã đạt duy nhất là DINOv2-S + A4 + CL2N (2B); hướng còn số là H1 (ảnh mẫu = crop thật, 1e 0.82).
+
+**H1 k-shot — 2026-11-17** (PLAN_PHASE_C §2D.3, `scripts/h1_kshot.py` → `runs/phase_c/h1/`): ảnh mẫu = k crop DigitizePID / lớp
+(28 lớp, mẫu P1, 5 lần rút). Top-1 trên 6 lớp `h_in`: R1a 0.78 / 0.89 / **0.90** (k = 1 / 3 / 5; ảnh mẫu ISO 0.04), DINOv2-S
++ A4 0.79 / 0.89 / 0.90 (ISO 0.58); AUROC 0.78–0.88. → R1a chuyển giao tốt sang lớp mới khi ảnh mẫu cùng phong cách; nút thắt
+duy nhất là khác phong cách ISO ↔ bản vẽ. Cận trên "legend cùng bộ bản vẽ", chỉ 6 + 4 lớp.
+
+**F0 căn chỉnh tuyến tính — 2026-11-18** (PLAN_PHASE_C §2E.1–2E.2, `scripts/f0_linear_align.py` → `runs/phase_c/f0/`; chỉ biến
+đổi ảnh mẫu trên cache DINOv2-S / A4 / CL2N). F0-a (tâm riêng từng miền, không nhãn): ĐẠT theo chữ luật nhưng chỉ nhờ AUROC lề
+(+0.058), AUROC cos −0.073 (cổng mặc định dùng cos), top-1 0.474 vs 0.477; mẫu P1 top-1 0.579 → 0.717 (không quyết định).
+F0-b (ridge trên 10 cặp thật, LOCO): KHÔNG ĐẠT (top-1 0.416, S20 sụp về 0) dù AUROC cos +0.153; mẫu P1 AUROC 0.351 → 0.841.
+→ cặp thật giúp tách lạ, không giúp gọi tên; S6 / S8 / S14 = 0 ở mọi dòng. F1 không được đề xuất tiếp.
+
+**F0 trên Colab — CODE ✅ 2026-11-18, chờ chạy** (user chọn; luật PLAN_PHASE_C §2E.3, RUNBOOK §5i, notebook §14): hai dòng `f0a`
+(`++oneshot.template_align=domain_center`) và `shift` (`=pair_shift ++oneshot.template_pairs=…/pairs_dinov2_a4.pt`, b tính lúc nạp
+với tâm của lượt chạy) trên encoder / prototype / tâm 2B; τ → P1 đủ → P4; quyết định cục bộ bằng `scripts/f0_colab_compare.py`.
+Thay 2B chỉ khi P1 ΔAUROC cos ≥ +0.05 (top-1 giảm ≤ 0.01) và P4 không kém hơn (CI theo tờ). Cần tải
+`runs/phase_c/f0/pairs_dinov2_a4.pt` lên Drive `encoders/`.
+
+**Bước 2B KẾT QUẢ Colab 2026-11-17** (chi tiết + luật: PLAN_PHASE_C "2B — Kết quả Colab"): DINOv2 + A4 + CL2N gọi tên lớp
+chưa thấy tốt nhất ở mọi đề thi — P1 top-1 0.576 / top-3 0.827 (R1a 0.036 / 0.366; 6/6 lớp tăng), P4 H_tu_nhien 0.646 (R1a
+0.385, R1b 0.500; CI theo tờ không chứa 0), H_chon 0.547, e2e H_tu_nhien 0.431 (R1a 0.209) — nhưng tách lạ kém: P1 AUROC
+0.360 (< 0.5), P4 AUROC cos không khác R1a, lề kém hơn, e2e không loại `other_*`. Theo luật đã chốt: P1 không được gọi là
+"cải thiện" (AUROC giảm); P4 cải thiện gọi tên ở V / H, S kém hơn. R1a vẫn là encoder tách lạ tốt nhất.
+
 **Bước 2B CODE ✅ 2026-11-16** (PLAN_PHASE_C §2B): khóa `++oneshot.input_norm=ink_letterbox` (A4 cho ảnh mẫu + mọi crop;
 lệch giữa prototype / tâm / lượt chạy → lỗi), ViT backbone (`utils.model.backbone_kwargs`), checkpoint DINOv2 qua
 `scripts/make_imagenet_encoder.py` + `fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384`.

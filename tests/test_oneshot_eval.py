@@ -877,3 +877,100 @@ def test_a_missing_center_file_is_named_before_loading(tmp_path):
     cfg.oneshot.center = str(tmp_path / "nope.pt")
     with pytest.raises(FileNotFoundError, match="oneshot.center"):
         require_oneshot_inputs(cfg)
+
+
+# --------------------------------------------------------------------------- #
+# oneshot.template_align (PLAN_PHASE_C §2E.3)
+# --------------------------------------------------------------------------- #
+
+
+def _aligned(tmp_path, align, **osh):
+    cfg, o = _center_file(tmp_path, fine=_LO, excluded=["Symbol_3", "Symbol_7"])
+    cfg.oneshot.center = o["center_file"]
+    cfg = OmegaConf.merge(cfg, {"oneshot": {"template_align": align, **osh}})
+    return cfg
+
+
+def _pairs_file(tmp_path, cfg, names, views=None, nudge=0.0):
+    import torch
+
+    from utils.linear_align import save_pairs
+
+    protos = PrototypeDirectory.load(cfg.oneshot.prototypes)
+    rows = protos.embeddings[[protos.names.index(n) for n in names]] + nudge
+    g = torch.Generator().manual_seed(0)
+    views = views or [torch.randn(3, 2, protos.dim, generator=g) for _ in names]
+    meta = {"input_norm": cfg.oneshot.get("input_norm", None)}
+    return save_pairs(tmp_path / "pairs.pt", names, rows, views, meta), views
+
+
+def test_domain_center_moves_only_the_prototypes(tmp_path):
+    import torch.nn.functional as F
+
+    from pipeline.oneshot_infer import load_oneshot_classifier
+
+    cfg = _aligned(tmp_path, "domain_center")
+    clf = load_oneshot_classifier(cfg, build_eval_transform(cfg), "cpu")
+    raw = PrototypeDirectory.load(cfg.oneshot.prototypes).embeddings
+    assert torch_allclose(clf.directory.embeddings, F.normalize(raw - raw.mean(0), dim=-1))
+    assert clf.template_align == {"kind": "domain_center"} and clf.center is not None
+    cfg.eval.oneshot.protocol = "p1"
+    out = OneShotEvaluation(cfg, tmp_path / "f0a").run()
+    assert out["template_align"] == {"kind": "domain_center"}
+
+
+def test_pair_shift_adds_the_mean_pair_residual_computed_with_the_run_center(tmp_path):
+    import torch
+    import torch.nn.functional as F
+
+    from pipeline.oneshot_infer import load_oneshot_classifier
+    from utils.oneshot import load_center
+
+    cfg = _aligned(tmp_path, "pair_shift")
+    names = PrototypeDirectory.load(cfg.oneshot.prototypes).names[:2]
+    path, views = _pairs_file(tmp_path, cfg, names)
+    cfg.oneshot.template_pairs = str(path)
+    clf = load_oneshot_classifier(cfg, build_eval_transform(cfg), "cpu")
+    center, _ = load_center(cfg.oneshot.center)
+    raw = PrototypeDirectory.load(cfg.oneshot.prototypes)
+    x = F.normalize(raw.embeddings - center, dim=-1)
+    y = []
+    for v in views:
+        q = F.normalize(F.normalize(v - center, dim=-1).mean(1), dim=-1)
+        y.append(F.normalize(q.mean(0), dim=-1))
+    b = (torch.stack(y) - x[:2]).mean(0)
+    assert torch_allclose(clf.directory.embeddings, F.normalize(x + b, dim=-1))
+    assert clf.template_align["pairs"] == names and clf.template_align["n_crops"] == [3, 3]
+    assert abs(clf.template_align["shift_norm"] - float(b.norm())) < 1e-5
+
+
+def test_pair_shift_refuses_pairs_of_other_templates(tmp_path):
+    from pipeline.oneshot_infer import load_oneshot_classifier
+
+    cfg = _aligned(tmp_path, "pair_shift")
+    names = PrototypeDirectory.load(cfg.oneshot.prototypes).names[:2]
+    path, _ = _pairs_file(tmp_path, cfg, names, nudge=0.01)
+    cfg.oneshot.template_pairs = str(path)
+    with pytest.raises(ValueError, match="differ from the prototypes"):
+        load_oneshot_classifier(cfg, build_eval_transform(cfg), "cpu")
+
+
+def test_template_align_needs_a_center_a_known_kind_and_its_pairs(tmp_path):
+    from pipeline.oneshot_infer import load_oneshot_classifier, require_oneshot_inputs
+
+    cfg = _aligned(tmp_path, "domain_center")
+    no_center = OmegaConf.merge(cfg, {"oneshot": {"center": None}})
+    with pytest.raises(ValueError, match="needs oneshot.center"):
+        load_oneshot_classifier(no_center, build_eval_transform(cfg), "cpu")
+    bad = OmegaConf.merge(cfg, {"oneshot": {"template_align": "rotate"}})
+    with pytest.raises(ValueError, match="template_align"):
+        require_oneshot_inputs(bad)
+    shift = OmegaConf.merge(cfg, {"oneshot": {"template_align": "pair_shift"}})
+    with pytest.raises(ValueError, match="template_pairs"):
+        require_oneshot_inputs(shift)
+
+
+def torch_allclose(a, b, atol=1e-6):
+    import torch
+
+    return torch.allclose(a.float(), b.float(), atol=atol)

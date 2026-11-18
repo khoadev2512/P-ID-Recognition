@@ -273,6 +273,30 @@ Không train: phiên chủ yếu là nhúng crop (P1 ~17k crop, P4 ~94k crop × 
 
 **Gửi lại**: toàn bộ in ra của 13a–13e + `eval_p1_dinov2/*/oneshot_p1_crops.csv`, `eval_p4_{dinov2,imagenet_cl2n,lo_cl2n}/*/oneshot_p4_crops.csv`.
 
+## 5i. PHASE C §2E.3 — kiểm lại F0 (căn chỉnh ảnh mẫu) — notebook §14 (2026-11-18)
+
+**Trước khi mở Colab**:
+- Commit + push: `src/utils/linear_align.py`, `src/pipeline/oneshot_infer.py`, `src/pipeline/oneshot_eval.py`, notebook,
+  `scripts/f0_linear_align.py`, `scripts/f0_colab_compare.py`, các test.
+- **Tải lên Drive** `encoders/pairs_dinov2_a4.pt`, chép từ máy `runs/phase_c/f0/pairs_dinov2_a4.pt` (3.7 MB; `runs/` không vào git).
+- Trên Drive phải còn từ §13: `__dinov2__.pt`, `iso_prototypes_dinov2_a4.pt`, `center_dinov2_a4.pt`, `__global_lo__.pt`, các lượt
+  `eval_{tau,p1,p4}_dinov2`.
+
+Không train, không dựng lại encoder / prototype / tâm. Chi phí ≈ 2 × (τ + P1 + P4) của 13b–13c.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4, def 9a, 11a | mount, clone, crop, H; OPEN100-ISO | như §5h |
+| 14a | `f0a` và `shift`: τ trên `val_sel` → P1 đủ | `template_align.kind` đúng (assert); cùng `n_crops` với 2B; in `shift_norm`, `max_template_diff` |
+| 14b | P4 cho hai dòng | `template_align.kind` đúng (assert) |
+| 14c | bảng nhanh cạnh 2B | — |
+
+Nếu 14a dừng với "template_pairs templates differ from the prototypes", prototype trên Drive đã được dựng khác (lệch > 1e-3) so với
+file cặp. Khi đó **không** nới ngưỡng: gửi lại thông báo lỗi.
+
+**Gửi lại**: in ra của 14a–14c + 4 file trong `runs/f0_csv/` (`oneshot_{p1,p4}_crops_dinov2_{f0a,shift}.csv`). Đặt 4 file vào `runs/`
+trên máy rồi chạy `python scripts/f0_colab_compare.py --out runs/phase_c/f0_colab` (luật §2E.3, bootstrap).
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

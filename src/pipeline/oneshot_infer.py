@@ -46,6 +46,13 @@ must have been built with the same value (checked).
 eval.mode=oneshot ++eval.oneshot.protocol=center). Every query view and every prototype is
 then centered and renormalized before the cosine, so the cosines (and the tau chosen on them)
 live in a different space: re-pick tau with the same center.
+
+`oneshot.template_align` (optional, `++`; null = off; needs `oneshot.center`): move only the
+prototypes in the CL2N space (utils.linear_align, PLAN_PHASE_C §2E.3). `domain_center`: each
+prototype minus the mean of the directory's raw prototypes (queries still minus the center).
+`pair_shift`: the CL2N prototypes plus the mean (crop-class mean - template) shift of the pairs in
+`oneshot.template_pairs` (utils.linear_align.save_pairs), computed with this run's center; the
+pairs' templates must match this directory's rows. Re-pick tau with the same setting.
 """
 
 from __future__ import annotations
@@ -64,6 +71,13 @@ from utils import bbox_utils
 from utils.classmap import OTHER_CLASS_NAME
 from utils.crop_box import cut
 from utils.input_norm import input_norm_fn
+from utils.linear_align import (
+    PAIR_TEMPLATE_TOL,
+    TEMPLATE_ALIGNS,
+    align_templates,
+    load_pairs,
+    pair_shift,
+)
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256, load_arcface_encoder
 from utils.oneshot import (
     Encoder,
@@ -226,13 +240,36 @@ class OneShotClassifier:
         self.encoder_classes: list[str] = []
         # CL2N center (set_center); None = raw cosines.
         self.center: torch.Tensor | None = None
+        # oneshot.template_align applied by set_center (None = plain CL2N prototypes).
+        self.template_align: dict | None = None
 
-    def set_center(self, center: torch.Tensor) -> None:
+    def set_center(
+        self, center: torch.Tensor, align: str | None = None, pairs: dict | None = None
+    ) -> None:
         """Match in CL2N space from now on: queries and prototypes minus `center`,
-        renormalized (utils.oneshot.center_embeddings). Once only."""
+        renormalized (utils.oneshot.center_embeddings). Once only. `align` (with `pairs` for
+        pair_shift, a utils.linear_align.load_pairs payload) moves the prototypes instead of
+        centering them (module docstring, oneshot.template_align)."""
         if self.center is not None:
             raise ValueError("the classifier is already centered")
-        self.directory = self.directory.centered(center)
+        if align is None:
+            self.directory = self.directory.centered(center)
+        else:
+            info: dict = {"kind": align}
+            shift = None
+            if align == "pair_shift":
+                if pairs is None:
+                    raise ValueError("template_align=pair_shift needs oneshot.template_pairs")
+                shift, info = _pairs_shift(self.directory, pairs, center)
+            rows = align_templates(self.directory.embeddings, center, align, shift)
+            self.directory = PrototypeDirectory(
+                names=list(self.directory.names),
+                embeddings=rows,
+                coarse=list(self.directory.coarse),
+                meta={**self.directory.meta, "centered": True, "template_align": align},
+            )
+            self.template_align = info
+            logger.info("[oneshot] template_align=%s %s", align, info)
         self._subsets.clear()
         self.center = center
 
@@ -317,6 +354,32 @@ class OneShotClassifier:
         return OneShotDetection(label, best_name, box, score, best_cos, second_cos, coarse_id)
 
 
+def _pairs_shift(directory: PrototypeDirectory, pairs: dict, center: torch.Tensor):
+    """(shift b, info) of a pairs payload, after checking its templates are this directory's."""
+    names, templates = list(pairs["names"]), pairs["templates"]
+    if templates.shape[1] != directory.dim:
+        raise ValueError(f"template_pairs dim {templates.shape[1]}, prototypes {directory.dim}")
+    missing = [n for n in names if n not in directory.names]
+    if missing:
+        raise ValueError(f"template_pairs names not in the prototype directory: {missing}")
+    rows = directory.embeddings[[directory.names.index(n) for n in names]]
+    diff = float((rows.float() - templates.float()).abs().max())
+    if diff > PAIR_TEMPLATE_TOL:
+        raise ValueError(
+            f"template_pairs templates differ from the prototypes by {diff:.2e} "
+            f"(> {PAIR_TEMPLATE_TOL}): other encoder / input_norm / templates?"
+        )
+    shift = pair_shift(rows.float(), pairs["crop_views"], center.float())
+    info = {
+        "kind": "pair_shift",
+        "pairs": names,
+        "n_crops": [int(len(v)) for v in pairs["crop_views"]],
+        "max_template_diff": diff,
+        "shift_norm": float(shift.norm()),
+    }
+    return shift, info
+
+
 def load_oneshot_classifier(cfg: DictConfig, transform, device) -> OneShotClassifier:
     """Encoder + prototype directory from cfg.oneshot.{encoder_ckpt,prototypes}, with the
     encoder/prototype mismatch guard."""
@@ -344,7 +407,18 @@ def load_oneshot_classifier(cfg: DictConfig, transform, device) -> OneShotClassi
             raise ValueError(
                 f"oneshot.center has dim {center.shape[0]}, the prototypes {directory.dim}"
             )
-        classifier.set_center(center)
+        align = cfg.oneshot.get("template_align", None) or None
+        pairs = None
+        if align == "pair_shift":
+            pairs = load_pairs(Path(str(cfg.oneshot.get("template_pairs"))))
+            if (pairs["meta"].get("input_norm") or None) != norm:
+                raise ValueError(
+                    f"oneshot.template_pairs was built with input_norm="
+                    f"{pairs['meta'].get('input_norm')!r}, this run has {norm!r}"
+                )
+        classifier.set_center(center, align, pairs)
+    elif cfg.oneshot.get("template_align", None):
+        raise ValueError("oneshot.template_align needs oneshot.center (it works in CL2N space)")
     return classifier
 
 
@@ -368,6 +442,15 @@ def require_oneshot_inputs(cfg: DictConfig) -> None:
         )
     if osh.get("center", None) and not Path(str(osh.center)).exists():
         raise FileNotFoundError(f"oneshot.center does not exist: {osh.center}")
+    align = osh.get("template_align", None) or None
+    if align is not None and align not in TEMPLATE_ALIGNS:
+        raise ValueError(f"oneshot.template_align={align!r}; expected one of {TEMPLATE_ALIGNS}")
+    if align == "pair_shift":
+        pairs = osh.get("template_pairs", None)
+        if not pairs:
+            raise ValueError("oneshot.template_align=pair_shift needs ++oneshot.template_pairs")
+        if not Path(str(pairs)).exists():
+            raise FileNotFoundError(f"oneshot.template_pairs does not exist: {pairs}")
     if bool(osh.get("route_by_coarse", False)) and not osh.get("coarse_map", None):
         raise ValueError("oneshot.route_by_coarse=true needs oneshot.coarse_map")
 

@@ -38,6 +38,12 @@ def _before_13(cells: list[str]) -> list[str]:
     return cells[:first]
 
 
+def _is_14(cell: str) -> bool:
+    """§14 (PHASE C §2E.3, F0 on Colab): reruns §13's protocols with oneshot.template_align."""
+    code = _active([cell])
+    return "template_align" in code or "ROWS14" in code or "in F0:" in code
+
+
 def test_never_reads_an_old_crop_zip(code_cells):
     """crops_fgc.zip: 28 classes. crops_fgc_global.zip: crops without _boxes.csv (before
     utils.crop_box), which box jitter cannot use."""
@@ -368,7 +374,7 @@ def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cel
     center comes from protocol=center (R1a groups) and every later run passes it; tau on
     val_sel; P1 with no subset; P4 for DINOv2 plus the two CL2N rows, tags matching their tau
     runs (chosen_taus(tag) reads eval_tau_<tag>)."""
-    s13 = [c for c in code_cells if "__dinov2__" in _active([c])]
+    s13 = [c for c in code_cells if "__dinov2__" in _active([c]) and not _is_14(c)]
     assert len(s13) == 4  # 13a, 13b, 13c, 13e (13d only reads metrics)
     make, run, p4, e2e = (_active([c]) for c in s13)
     dino = "fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384"
@@ -401,3 +407,34 @@ def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cel
         i for i, c in enumerate(code_cells) if "eval_e2e_iso_" in _active([c]) and c not in s13
     )
     assert last_12 < idx[0]
+
+
+def test_section_14_reruns_tau_p1_p4_with_each_template_align_and_keeps_the_csvs(code_cells):
+    """PHASE C §2E.3: f0a / shift on §13's encoder, prototypes and center (nothing rebuilt);
+    tau on val_sel with R1a groups, P1 with no subset and no groups (as 13b, same crops), P4 on
+    OPEN100-ISO with groups (as 13c); every run carries the alignment, checked in metrics; the
+    per-crop CSVs are copied under the names scripts/f0_colab_compare.py reads."""
+    s14 = [c for c in code_cells if _is_14(c)]
+    assert len(s14) == 3  # 14a tau + P1, 14b P4, 14c table
+    run, p4cell, table = (_active([c]) for c in s14)
+    both = run + "\n" + p4cell
+    assert "make_imagenet_encoder" not in both and "protocol=center" not in both
+    assert "prototypes run_dir" not in both
+    assert "('f0a', 'domain_center', '')" in run
+    assert "('shift', 'pair_shift', f'++oneshot.template_pairs={PAIRS}')" in run
+    assert "++oneshot.center={CENTER_D}" in run and "{DINO} {A4}" in run
+    lines = [ln for ln in both.splitlines() if "protocol=" in ln]
+    tau, p1, p4 = (next(ln for ln in lines if f"protocol={p}" in ln) for p in ("tau", "p1", "p4"))
+    assert all("$ENC_D $ALIGN" in ln for ln in (tau, p1, p4))
+    assert "image_subset=val_sel" in tau and "$GROUPS" in tau and "LOCAL_DATA_ROOT" in tau
+    assert "image_subset" not in p1 and "$GROUPS" not in p1 and "LOCAL_DATA_ROOT" in p1
+    assert "LOCAL_ISO_ROOT" in p4 and "$GROUPS" in p4 and "protocol=p4" in p4cell
+    assert run.index("protocol=tau") < run.index("protocol=p1")
+    check = "o['template_align']['kind'] == kind"
+    assert check in run and check in p4cell
+    assert "f'{CSV_DIR}/oneshot_p1_crops_dinov2_{v}.csv'" in run
+    assert "f'{CSV_DIR}/oneshot_p4_crops_dinov2_{v}.csv'" in p4cell
+    assert "('2B', 'dinov2')" in table
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s14]
+    last_13 = max(i for i, c in enumerate(code_cells) if "__dinov2__" in c and not _is_14(c))
+    assert last_13 < idx[0] < idx[1] < idx[2]

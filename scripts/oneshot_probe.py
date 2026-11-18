@@ -90,6 +90,14 @@ P1VAL_PER_CLASS = 150
 P1_TEST_PER_CLASS, P1_SEEN_PER_CLASS = 150, 30
 EXEMPLAR_SEEDS = (0, 1, 2, 3, 4)
 DINOV2 = "vit_small_patch14_dinov2.lvd142m"
+# frozen timm encoders by probe name: 1c (dinov2) and PLAN_PHASE_C C3 (registers, ViT-B)
+TIMM_ENCODERS = {
+    "dinov2": DINOV2,
+    "dinov2reg": "vit_small_patch14_reg4_dinov2.lvd142m",
+    "dinov2b": "vit_base_patch14_dinov2.lvd142m",
+    "dinov2breg": "vit_base_patch14_reg4_dinov2.lvd142m",
+}
+C3_ENCODERS = ("dinov2reg", "dinov2b", "dinov2breg")
 DINOV2_IMGSZ = 224
 HOG_SIZE, HOG_CELL, HOG_BINS = 64, 8, 9
 ENCODERS = ("imagenet", "lo", "dinov2")
@@ -221,7 +229,7 @@ def load_encoder(name: str, cfg, device):
     from utils.dataset import _IMAGENET_MEAN, _IMAGENET_STD, build_eval_transform
     from utils.model import load_arcface_encoder
 
-    if name == "dinov2":
+    if name in TIMM_ENCODERS:
         tf = transforms.Compose(
             [
                 transforms.Resize((DINOV2_IMGSZ, DINOV2_IMGSZ)),
@@ -229,7 +237,7 @@ def load_encoder(name: str, cfg, device):
                 transforms.Normalize(mean=_IMAGENET_MEAN, std=_IMAGENET_STD),
             ]
         )
-        return TimmEncoder(DINOV2, DINOV2_IMGSZ, device), tf
+        return TimmEncoder(TIMM_ENCODERS[name], DINOV2_IMGSZ, device), tf
     ckpt = ROOT / "runs" / {"imagenet": "__imagenet__.pt", "lo": "__global_lo__.pt"}[name]
     encoder, _ = load_arcface_encoder(cfg, ckpt, device)
     encoder.eval()
@@ -581,6 +589,25 @@ def report(results: dict, out: Path) -> None:
             lines.append(
                 f"  {tag} {name:22s} lớp tăng {d['n_up']}/10  Δtop1 {d['d_macro_top1']:+.3f}"
                 f"  ΔAUROC {d['d_auroc']:+.3f}  -> {'ĐẠT' if d['pass'] else 'KHÔNG ĐẠT'}"
+            )
+    c3 = [k for k in C3_ENCODERS if any(key.startswith(f"{k}/") for key in results)]
+    if c3 and "dinov2/a4" in results:
+        base = results["dinov2/a4"]["cl2n"]["p1val"]
+        lines.append("")
+        lines.append("C3 (PLAN_PHASE_C §2C.3) trên p1val, mốc = dinov2/a4/cl2n:")
+        for k in c3:
+            variants = [
+                (f"{key}/{c}", r["p1val"])
+                for key, res in results.items()
+                if key.startswith(f"{k}/")
+                for c, r in res.items()
+            ]
+            name, r = max(variants, key=lambda x: x[1]["macro_top1"])
+            d = decide(base, r)
+            lines.append(
+                f"  {name:24s} top1 {r['macro_top1']:.3f} lớp tăng {d['n_up']}/10  "
+                f"Δtop1 {d['d_macro_top1']:+.3f}  ΔAUROC {d['d_auroc']:+.3f}  "
+                f"-> {'ĐẠT' if d['pass'] else 'KHÔNG ĐẠT'}"
             )
     text = "\n".join(lines)
     (out / "report.txt").write_text(text + "\n")

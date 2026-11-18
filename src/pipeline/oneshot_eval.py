@@ -403,6 +403,7 @@ class OneShotEvaluation:
             "other_min_cosine": self.other_tau,
             "center": self.cfg.oneshot.get("center", None) or None,
             "input_norm": clf.input_norm,
+            "template_align": clf.template_align,
         }
         run = {
             "p1": self._p1, "p2": self._p2, "tau": self._tau, "p4": self._p4,
