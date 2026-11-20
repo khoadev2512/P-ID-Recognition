@@ -28,6 +28,7 @@ from PIL import Image  # noqa: E402
 
 from pipeline.iso_prototypes import (  # noqa: E402
     IsoPrototypePipeline,
+    load_extra_forms,
     load_templates,
     read_vocab,
 )
@@ -73,9 +74,7 @@ def _row(reg: str, fine: str, coarse: str = "valve", fgc: str = "yes") -> dict[s
 def test_read_vocab_preserves_file_order(tmp_path):
     """Row order is the prototype row order, so it must come from the file and not from
     any incidental sorting -- a reordered directory would invalidate a saved one."""
-    path = _write_vocab(
-        tmp_path / "v.csv", [_row("X2", "zebra_valve"), _row("X1", "alpha_valve")]
-    )
+    path = _write_vocab(tmp_path / "v.csv", [_row("X2", "zebra_valve"), _row("X1", "alpha_valve")])
     assert [r["fine_name"] for r in read_vocab(path)] == ["zebra_valve", "alpha_valve"]
 
 
@@ -229,6 +228,7 @@ def test_the_real_iso_library_is_complete():
 # ------------------------------------------------------------------ #
 # load_arcface_encoder + the full build, end to end
 # ------------------------------------------------------------------ #
+
 
 def _cfg(tmp_path: Path, **oneshot_overrides):
     """Config with only the fields this stage reads. imgsz is deliberately tiny and the
@@ -452,3 +452,50 @@ def test_input_norm_normalizes_the_templates_and_is_recorded(tmp_path):
     cfg_off.oneshot.encoder_ckpt = cfg.oneshot.encoder_ckpt
     IsoPrototypePipeline(cfg_off).run()
     assert PrototypeDirectory.load(cfg_off.oneshot.prototypes).meta["input_norm"] is None
+
+
+# ------------------------------------------------------------------ #
+# Extra drawn forms (oneshot.extra_forms_dir, PLAN_PHASE_C §2K.4 (i))
+# ------------------------------------------------------------------ #
+
+
+def _png(path: Path) -> Path:
+    Image.new("RGB", (8, 8), "white").save(path)
+    return path
+
+
+def test_load_extra_forms_names_prototypes_by_form_and_copies_the_class_coarse(tmp_path):
+    _png(tmp_path / "valve_butterfly@B.png")
+    forms, coarse = load_extra_forms(tmp_path, {"valve_butterfly": "valve", "tank": "vessel"})
+    assert list(forms) == ["valve_butterfly@B"] and coarse == {"valve_butterfly@B": "valve"}
+
+
+@pytest.mark.parametrize("bad", ["valve_butterfly.png", "@B.png", "valve_butterfly@.png"])
+def test_load_extra_forms_rejects_a_bad_name(tmp_path, bad):
+    _png(tmp_path / bad)
+    with pytest.raises(ValueError, match="expected"):
+        load_extra_forms(tmp_path, {"valve_butterfly": "valve"})
+
+
+def test_load_extra_forms_rejects_a_class_outside_the_vocabulary_and_an_empty_dir(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        load_extra_forms(tmp_path, {"a": "valve"})
+    _png(tmp_path / "zz@B.png")
+    with pytest.raises(ValueError, match="not in this run's vocabulary"):
+        load_extra_forms(tmp_path, {"a": "valve"})
+
+
+@requires_iso_library
+def test_the_real_form_b_of_the_butterfly_joins_the_directory(tmp_path):
+    forms_dir = REPO_ROOT / "data" / "raw" / "iso_symbols_forms"
+    if not (forms_dir / "valve_butterfly@B.png").exists():
+        pytest.skip("run scripts/make_iso_forms.py first")
+    cfg = _cfg(tmp_path)
+    cfg.oneshot.encoder_ckpt = str(_write_arcface_ckpt(cfg, tmp_path / "enc.pt"))
+    cfg.oneshot.extra_forms_dir = str(forms_dir)
+    IsoPrototypePipeline(cfg).run()
+    directory = PrototypeDirectory.load(cfg.oneshot.prototypes)
+    assert len(directory) == 43 and directory.names[-1] == "valve_butterfly@B"
+    assert len(directory.classes) == 42
+    assert directory.coarse[-1] == directory.coarse[directory.names.index("valve_butterfly")]
+    assert directory.meta["extra_forms"] == ["valve_butterfly@B"]

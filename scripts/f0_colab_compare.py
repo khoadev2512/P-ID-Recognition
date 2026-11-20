@@ -207,16 +207,21 @@ def main(argv=None) -> None:
     results = {}
     for v in VARIANTS:
         c1, c4 = load(args.dir, "p1", v), load(args.dir, "p4", v)
-        if c1 is None or c4 is None:
-            print(f"[{v}] thiếu CSV P1 / P4 -> bỏ qua")
+        if c1 is None:
+            print(f"[{v}] thiếu CSV P1 -> bỏ qua")
             continue
         assert c1.path.equals(base1.path) and (c1["class"] == base1["class"]).all(), v
-        assert c4[["split", "ann_id"]].equals(base4[["split", "ann_id"]]), v
         p1 = p1_compare(base1, c1)
+        if c4 is None:  # P1 only: reported, no decision (§2E.3 needs P4)
+            print(f"[{v}] chưa có CSV P4 -> chỉ báo P1, CHƯA quyết")
+            results[v] = {"p1": p1, "p4": None, "adopt": None, "p4_worse_groups": None}
+            continue
+        assert c4[["split", "ann_id"]].equals(base4[["split", "ann_id"]]), v
         p4 = p4_compare(base4, c4)
         results[v] = {"p1": p1, "p4": p4, **decide(p1, p4)}
     adopted = [v for v in VARIANTS if results.get(v, {}).get("adopt")]
-    results["chosen"] = adopted[0] if adopted else None
+    pending = any(results.get(v, {}).get("p4", 0) is None for v in VARIANTS if v in results)
+    results["chosen"] = "pending" if pending else (adopted[0] if adopted else None)
     (args.out / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False))
     report(results, args.out)
 
@@ -244,6 +249,9 @@ def report(r: dict, out: Path) -> None:
             f"   gọi tên cải thiện ({p1['n_up']}/6 lớp tăng): "
             f"{'CÓ' if p1['naming_improved'] else 'KHÔNG'}",
         ]
+        if p4 is None:
+            lines += ["P4: chưa có -> CHƯA quyết (luật §2E.3 cần cả P4)", ""]
+            continue
         for view in ("degraded", "clean"):
             lines.append(f"P4 {view}{' (SỐ CHÍNH)' if view == 'degraded' else ' (tham chiếu)'}:")
             for k, x in p4[view].items():
@@ -256,7 +264,10 @@ def report(r: dict, out: Path) -> None:
             f"  (nhóm P4 kém hơn: {r[v]['p4_worse_groups'] or 'không'})"
         )
         lines.append("")
-    lines.append(f"Chọn: {r['chosen'] or 'không dòng nào — giữ 2B'}")
+    chosen = r["chosen"]
+    if chosen == "pending":
+        chosen = "chưa quyết — thiếu P4"
+    lines.append(f"Chọn: {chosen or 'không dòng nào — giữ 2B'}")
     text = "\n".join(lines)
     (out / "report.txt").write_text(text + "\n")
     print(text)

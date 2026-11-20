@@ -77,7 +77,13 @@ from utils.dataset import (
     scan_crops,
 )
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256
-from utils.oneshot import PrototypeDirectory, aggregate_views, holdout_classes, save_center
+from utils.oneshot import (
+    AGGREGATES,
+    PrototypeDirectory,
+    aggregate_views,
+    holdout_classes,
+    save_center,
+)
 from utils.oneshot_metrics import (
     DEFAULT_SYMBOL_MAP,  # noqa: F401  (re-exported: oneshot.symbol_map's default)
     ISO_GROUPS,
@@ -131,26 +137,34 @@ def rank_names(
 ) -> list[tuple[str, float]]:
     """The k best (name, cosine) for one crop's (V, D) view embeddings, best first, un-gated.
 
-    mean  the aggregated embedding's k nearest prototypes.
+    mean  the aggregated embedding's k nearest classes.
+    max   classes ranked by their best cosine over the views.
     vote  names ranked by votes (ties: summed cosine), the cosine of a name being the mean
           over the views that voted for it (as OneShotClassifier's best_cos); names no view
           voted for fill the remaining places by their mean cosine over all views.
+    Names are CLASSES: a class drawn in several forms (`name@form`) is one candidate scoring
+    the best of its forms (PrototypeDirectory.class_cosines).
     """
     if aggregate == "mean":
         return directory.topk(aggregate_views(emb), k)
-    if aggregate != "vote":
-        raise ValueError(f"unknown aggregate={aggregate!r}; expected 'vote' or 'mean'")
-    cos = directory.cosines(emb)  # (V, N)
+    if aggregate not in AGGREGATES:
+        raise ValueError(f"unknown aggregate={aggregate!r}; expected one of {AGGREGATES}")
+    classes = directory.classes
+    cos = directory.class_cosines(emb)  # (V, C)
+    if aggregate == "max":
+        per_class = cos.max(dim=0).values
+        values, idx = torch.topk(per_class, min(k, len(classes)))
+        return [(classes[int(i)], float(v)) for v, i in zip(values, idx, strict=True)]
     best_cos, best_idx = cos.max(dim=1)
     voted: dict[int, list[float]] = defaultdict(list)
     for v in range(len(best_idx)):
         voted[int(best_idx[v])].append(float(best_cos[v]))
     order = sorted(voted.items(), key=lambda kv: (len(kv[1]), sum(kv[1])), reverse=True)
-    ranked = [(directory.names[i], sum(c) / len(c)) for i, c in order]
+    ranked = [(classes[i], sum(c) / len(c)) for i, c in order]
     if len(ranked) < k:
         mean_cos = cos.mean(dim=0)
         rest = [i for i in torch.argsort(mean_cos, descending=True).tolist() if i not in voted]
-        ranked += [(directory.names[i], float(mean_cos[i])) for i in rest]
+        ranked += [(classes[i], float(mean_cos[i])) for i in rest]
     return ranked[:k]
 
 
@@ -639,7 +653,7 @@ class OneShotEvaluation:
         for name, info in groups.items():
             if info.group != "S":
                 continue
-            (classes if info.template in directory.names else skipped).append(name)
+            (classes if info.template in directory.classes else skipped).append(name)
         validate_tau_classes(classes, self._seen_classes(clf)[0], holdout)
         held = sorted(set(classes) & set(holdout.excluded))
         if self.groups_ckpt is not None and held:
@@ -781,7 +795,7 @@ class OneShotEvaluation:
         keep = {i for kept in sample_per_class(ids, self.max_per_class, self.seed).values()
                 for i in kept}  # fmt: skip
         present = sorted({name for name, _ in ids if name in iso_groups})
-        missing = sorted(set(present) - set(clf.directory.names))
+        missing = sorted(set(present) - set(clf.directory.classes))
         if missing:
             logger.warning(
                 "[oneshot/p4] no prototype for %s (oneshot.exclude_prototypes?): their crops "

@@ -44,7 +44,7 @@ from utils.model import (
     checkpoint_sha256,
     load_arcface_encoder,
 )
-from utils.oneshot import ViewSpec, build_prototypes
+from utils.oneshot import FORM_SEP, ViewSpec, build_prototypes
 
 logger = logging.getLogger(__name__)
 
@@ -151,6 +151,31 @@ def load_templates(
     return templates, coarse_of
 
 
+def load_extra_forms(
+    forms_dir: Path, coarse_of: dict[str, str]
+) -> tuple[dict[str, Image.Image], dict[str, str]]:
+    """Second (third, ...) drawn forms of vocab classes: `<forms_dir>/<fine_name>@<form>.png`
+    (PLAN_PHASE_C §2K.4 (i); e.g. `valve_butterfly@B.png` = BK-2020 X8075 form B, made by
+    scripts/make_iso_forms.py). Each becomes its own prototype `<fine_name>@<form>` with the
+    class's coarse; matching then scores a class by its best form (utils.oneshot.class_of).
+    A file whose class is not in this run's vocabulary is an error, as is a bad file name."""
+    forms: dict[str, Image.Image] = {}
+    coarse: dict[str, str] = {}
+    files = sorted(Path(forms_dir).glob("*.png"))
+    if not files:
+        raise FileNotFoundError(f"oneshot.extra_forms_dir={forms_dir} holds no PNG")
+    for png in files:
+        name = png.stem
+        base, sep, form = name.partition(FORM_SEP)
+        if not sep or not base or not form:
+            raise ValueError(f"{png}: expected <fine_name>{FORM_SEP}<form>.png")
+        if base not in coarse_of:
+            raise ValueError(f"{png}: class {base!r} is not in this run's vocabulary")
+        forms[name] = Image.open(png).convert("RGB")
+        coarse[name] = coarse_of[base]
+    return forms, coarse
+
+
 class IsoPrototypePipeline(BasePipeline):
     """Embed the ISO symbol library with a frozen ArcFace encoder -> prototype directory."""
 
@@ -204,6 +229,16 @@ class IsoPrototypePipeline(BasePipeline):
             coarse_filter=coarse_filter,
         )
         templates, coarse_of = load_templates(Path(str(cfg.oneshot.symbols_dir)), rows)
+        forms_dir = cfg.oneshot.get("extra_forms_dir", None) or None
+        extra_forms: list[str] = []
+        if forms_dir is not None:
+            forms, forms_coarse = load_extra_forms(Path(str(forms_dir)), coarse_of)
+            templates.update(forms)
+            coarse_of.update(forms_coarse)
+            extra_forms = list(forms)
+            logger.info(
+                "[oneshot] + %d extra form(s) from %s: %s", len(forms), forms_dir, extra_forms
+            )
         input_norm = cfg.oneshot.get("input_norm", None) or None
         prep = input_norm_fn(input_norm)
         if prep is not None:  # the same normalization every query crop gets (oneshot_infer)
@@ -244,6 +279,8 @@ class IsoPrototypePipeline(BasePipeline):
                 "fgc_groups_only": bool(cfg.oneshot.get("fgc_groups_only", False)),
                 "coarse_filter": coarse_filter,
                 "input_norm": input_norm,
+                "extra_forms_dir": None if forms_dir is None else str(forms_dir),
+                "extra_forms": extra_forms,
             },
         )
 

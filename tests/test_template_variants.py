@@ -99,3 +99,26 @@ def test_pick_template_takes_the_closest_aspect():
     a, b = T(11.3, 6.1), T(11.3, 6.2)
     assert pick_template([a, b], 11.3 / 6.2) is b
     assert pick_template([], 1.0) is None
+
+
+def test_switches_off_leave_the_padded_clean_template():
+    img = _valve()
+    axes = [PipeAxis("L", 0.5, 0.0), PipeAxis("R", 0.5, 1.0)]
+    out = dirty_view(img, axes, random.Random(3), pipes=False, morph=False, degrade=False)
+    ink = _ink(out)
+    h, w = ink.shape
+    my, mx = (h - 60) // 2, (w - 120) // 2
+    assert (ink[my : my + 60, mx : mx + 120] == _ink(img)).all()
+    assert ink.sum() == _ink(img).sum()  # nothing outside the template: no pipe, no morph
+
+
+def test_pipes_only_adds_a_pipe_and_keeps_strokes():
+    img = _valve()
+    out = dirty_view(
+        img, [PipeAxis("L", 0.5, 0.0)], random.Random(4), pipes=True, morph=False, degrade=False
+    )
+    ink = _ink(out)
+    h, w = ink.shape
+    my, mx = (h - 60) // 2, (w - 120) // 2
+    assert ink[:, :mx].any()
+    assert (ink[my : my + 60, mx : mx + 120] >= _ink(img)).all()

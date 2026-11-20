@@ -846,11 +846,69 @@ duy nhất là khác phong cách ISO ↔ bản vẽ. Cận trên "legend cùng b
 F0-b (ridge trên 10 cặp thật, LOCO): KHÔNG ĐẠT (top-1 0.416, S20 sụp về 0) dù AUROC cos +0.153; mẫu P1 AUROC 0.351 → 0.841.
 → cặp thật giúp tách lạ, không giúp gọi tên; S6 / S8 / S14 = 0 ở mọi dòng. F1 không được đề xuất tiếp.
 
+**Phân tích lỗi S6 / S8 / S14 — 2026-11-18** (PLAN_PHASE_C §2F, `runs/phase_c/variants/variant_sheet.png`): cả ba là VARIANT
+trong `symbol_map` (DigitizePID vẽ theo chuẩn khác ISO) → ảnh mẫu ISO là hình khác hẳn, không encoder nào khớp được; đoán sai giải
+thích được bằng hình. P1-val có 6/10 lớp VARIANT, P1 test toàn ISO → giới hạn của tập quyết định (ghi luận văn, không đổi quyết
+định cũ). User xác nhận: mọi VARIANT = cùng nghĩa, khác dạng hình; S17 = 511 + C0098, S18 / S19 = 511 + 2044 / 2045. Train trên
+VARIANT không giúp nhận dạng ISO cùng nghĩa (P4 nhóm V của R1a giảm so với ImageNet). Cách chấm VARIANT giữ nguyên (kiểu 1) vì không
+bước nào còn dùng P1-val; luận văn báo tách ISO(4) 0.80 / VARIANT(6) 0.26 (0.26 đúng nghĩa, 0.06 Other, 0.68 sai nghĩa).
+
+**Thư mục trộn phong cách — 2026-11-18** (PLAN_PHASE_C §2F.1–2F.2, `scripts/mixed_directory.py` → `runs/phase_c/mixed/`): P1-val,
+5 lần rút. 42 ISO: ISO(4) 0.80 / VARIANT(6) 0.26. + 6 ảnh bản vẽ cho lớp VARIANT: VARIANT 0.96 nhưng ISO 0.57 (S1 0.99 → 0.17, bị
+ảnh S14 hút). + 21 ảnh bản vẽ cho mọi lớp: 0.96 / 0.94, AUROC 0.93 ≈ chỉ ảnh bản vẽ. → "thêm 1 ảnh" đúng khi cả thư mục cùng
+phong cách; vá lẻ khác phong cách làm hỏng lớp khác.
+
 **F0 trên Colab — CODE ✅ 2026-11-18, chờ chạy** (user chọn; luật PLAN_PHASE_C §2E.3, RUNBOOK §5i, notebook §14): hai dòng `f0a`
 (`++oneshot.template_align=domain_center`) và `shift` (`=pair_shift ++oneshot.template_pairs=…/pairs_dinov2_a4.pt`, b tính lúc nạp
 với tâm của lượt chạy) trên encoder / prototype / tâm 2B; τ → P1 đủ → P4; quyết định cục bộ bằng `scripts/f0_colab_compare.py`.
 Thay 2B chỉ khi P1 ΔAUROC cos ≥ +0.05 (top-1 giảm ≤ 0.01) và P4 không kém hơn (CI theo tờ). Cần tải
 `runs/phase_c/f0/pairs_dinov2_a4.pt` lên Drive `encoders/`.
+**KẾT QUẢ Colab §14 — 2026-11-18** (PLAN_PHASE_C §2E.4): **không dòng nào thay 2B** theo luật. f0a: P1 top-1 0.576 → 0.696,
+AUROC 0.36 → 0.44, nhưng P4 S 0.847 → 0.662 (kém hơn). shift: P1 top-1 0.624, AUROC 0.36 → 0.66; P4 AUROC cos 0.73 → 0.85, V +0.14,
+nhưng S −0.014 và H_tu_nhien −0.030 (CI theo tờ không chứa 0) → ablation "đánh đổi: tách lạ tốt hơn hẳn, gọi tên mất nhẹ".
+
+**Điểm 4 QUYẾT 2026-11-19 — CODE ✅, chờ chạy Colab §15** (PLAN_PHASE_C §2G, RUNBOOK §5j): user (chuyên gia) — `pipeline` là nét
+nối, không phải ký hiệu → hệ thống đề xuất dùng 41 ảnh mẫu (`'++oneshot.exclude_prototypes=[pipeline]'`, cơ chế có sẵn; không sửa
+dữ liệu / config). 2B chưa từng chạy P2 → §15 chạy P2 (nhóm R1b) cho 42 và 41 = bằng chứng sạch; τ 41 trên val_sel; P1 / P4 41 =
+**hậu kiểm** (trước khi khoá đã đếm: P4 2216 crop top-1 = pipeline, 933 là flanged_connection suy giảm; P1 2). Số 42 giữ làm số
+ghi trước. `scripts/nopipe_compare.py` chặn nếu 41 ≠ "42 bỏ pipeline khỏi top-3" (top-1 không lớp nào giảm được về lý thuyết).
+Mô phỏng hậu kiểm từ CSV (PLAN §2G): P1 không đổi; P4 S +0.016 (chỉ flanged_connection 0.59 → 0.64), AUROC cos −0.002 → tác động
+nhỏ; user vẫn chọn 41 + chạy §15.
+
+**Hướng A — so khớp patch DINOv2 (2026-11-19, PLAN §2H): KHÔNG ĐẠT.** Tra paper: không paper P&ID nào đo "ảnh mẫu chuẩn ISO →
+bản vẽ khác phong cách" (OSSR-PID, Gupta 2024, Hain 2025 đều lấy ảnh mẫu từ chính bộ bản vẽ / legend) → khoảng trống = đóng góp.
+Thử FoundPose / DN4 (`scripts/patch_probe.py`, Chamfer đối xứng trên patch mực, tầng 9 / 12 × trừ tâm): tốt nhất tầng 12 + tâm
+top-1 0.450 (mốc 0.477), lề 0.644 (+0.078), AUROC điểm 0.32; tầng giữa kém hơn; S6 / S8 / S14 vẫn ≈ 0. Ablation.
+
+**Tầng giữa CNN ImageNet — Gan et al. 2023 (2026-11-19, PLAN §2I): KHÔNG ĐẠT.** Đề xuất "ghép layer3 với ArcFace theo α" bị
+bỏ (paper không ghép; R1b không còn là encoder chính); chỉ làm bản đúng paper (`scripts/midlevel_probe.py`: cả bản đồ tầng giữa
+trải phẳng, Euclid / cosine; ResNet-50, DenseNet-121, ResNet-34). Tốt nhất ResNet-34 / cosine top-1 0.251 (mốc 0.477): sụp về
+một ảnh mẫu (hub 0.72–0.997, phần lớn → `flanged_connection`); tầng giữa kém tầng cuối (ngược paper). Ablation; dừng "tầng giữa".
+
+**§2J — ba phần còn sót của đề xuất "4 hướng" (2026-11-19, PLAN §2J): KHÔNG ĐẠT.** Đối chiếu: 4 hướng user đưa gần hết đã đo
+(F0-a, A, C3, A4, H2). Phần còn sót chạy 1 vòng (`scripts/probe_2j.py`): Chamfer một chiều (crop → mẫu 0.440; mẫu → crop 0.423,
+AUROC 0.217), TB patch mực (0.445), ghép CLS tầng 9–12 + CL2N (0.471 ≈ mốc 0.477). **Đóng danh sách tối ưu cách đọc đặc trưng**;
+tiếp: Colab §15, Bước 3.
+
+**Mục tiêu mới — tách ảnh mẫu ISO giống nhau (2026-11-19, PLAN §2K).** Phân tích lỗi P4: 69% lỗi có đáp án ở top-2/3, 30% lỗi rơi vào
+ảnh mẫu cos ≥ 0.85 (globe → butterfly…). User duyệt thứ tự: (1) chẩn đoán + 448 px, (2) fine-tune "giữ ảnh mẫu ra". Bước 1
+(`scripts/viso_probe.py`, V-ISO = 30 truy vấn / ảnh mẫu từ bộ sinh H2): **V-ISO không đại diện P4** (ρ 0.15; tái hiện globe → butterfly
+nhưng không tái hiện butterfly / needle). R2 448 px KHÔNG ĐẠT (P1-val 0.477 → 0.423, AUROC 0.692 → 0.448). Chẩn đoán: gộp trung bình 8
+view (xoay) và ống nối làm mất chi tiết. Việc tiếp: chờ user — dựng "P4-val" bằng bộ render OPEN100-ISO trên khung xương khác.
+**P4-val (2026-11-19, PLAN §2K.2–2K.3)**: bộ render OPEN100-ISO trên 40 khung xương PID2Graph khác (`Dataset PID` + `Synthetic`, co về
+thang OPEN100, tờ 100–139) → 37 tờ / 73 ảnh suy giảm / 4,832 ký hiệu ở `data/iso_p4val/` (`scripts/p4val_prepare.py`, `make_variants`,
+`make_degraded`, `python -m pipeline.render_iso` với `PID_DATA_ROOT=data/iso_p4val`). **Cổng đại diện QUA** (ρ 0.815) → tập quyết định
+cho gọi tên (không cho cổng Other: AUROC 0.45 vs P4 0.73). Phát hiện: **valve_butterfly có 2 dạng trong BK-2020** (X8075 form A / B);
+form A đúng 1.00, form B 0.06. Chờ user chọn bước tiếp (form B / gộp view / fine-tune).
+**§2K.4–2K.5 (2026-11-19)**: trên P4-val (`scripts/k4_probe.py`, luật chốt trước): **(i) thêm ảnh mẫu form B của butterfly ĐẠT**
+(butterfly 0.50 → 0.99, không lớp nào giảm, P4-val 0.742 → 0.770); **(ii) gộp 8 view bằng `max` thay trung bình ĐẠT** (0.742 → 0.800,
+CI theo tờ [+0.040, +0.077], P1-val không hại, AUROC P1-val 0.692 → 0.755); kết hợp 0.827. Cảnh báo: `max` làm flanged_connection (nhóm S)
+0.61 → 0.38. `vote` (mặc định config) kém mean. Việc tiếp: code pipeline + τ mới + luật Colab — chờ user.
+**Code pipeline cho (i) + (ii) XONG 2026-11-19** (PLAN §2K.4 "Code pipeline"): nhiều dạng / lớp (`lớp@dạng`, chấm theo lớp),
+`oneshot.aggregate=max`, `++oneshot.extra_forms_dir=data/raw/iso_symbols_forms` (ảnh dạng B từ `scripts/make_iso_forms.py`, git theo
+dõi). Tái lập đúng số P4-val của probe. Việc tiếp: luật chấp nhận Colab (chờ user duyệt) → notebook §16.
+**Luật §2K.6 CHỐT 2026-11-20 + notebook §16 XONG** (RUNBOOK §5k): mốc = 2B 41 (§15); 3 dòng formB / max / formB_max; τ mới → P2 → P1
+→ P4; áp luật cục bộ `scripts/k4_colab_compare.py`. **Việc tiếp: user chạy Colab §15 rồi §16, gửi 12 CSV.**
 
 **Bước 2B KẾT QUẢ Colab 2026-11-17** (chi tiết + luật: PLAN_PHASE_C "2B — Kết quả Colab"): DINOv2 + A4 + CL2N gọi tên lớp
 chưa thấy tốt nhất ở mọi đề thi — P1 top-1 0.576 / top-3 0.827 (R1a 0.036 / 0.366; 6/6 lớp tăng), P4 H_tu_nhien 0.646 (R1a

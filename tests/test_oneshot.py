@@ -380,9 +380,7 @@ def test_only_views_clearing_the_gate_get_a_vote():
     a rotated asymmetric symbol would routinely lose to its own noise views.
     """
     directory = _directory(n=4)
-    weak = torch.nn.functional.normalize(
-        directory.embeddings[0] + directory.embeddings[2], dim=0
-    )
+    weak = torch.nn.functional.normalize(directory.embeddings[0] + directory.embeddings[2], dim=0)
     weak_cos = float(directory.cosines(weak).max())
     assert weak_cos < 0.95, "fixture must keep the decoy views genuinely unconfident"
 
@@ -606,3 +604,71 @@ def test_center_file_round_trip_and_needs_the_encoder_hash(tmp_path):
     assert torch.equal(center, torch.arange(4.0)) and meta == {"encoder_sha256": "ab"}
     with pytest.raises(FileNotFoundError, match="protocol=center"):
         load_center(tmp_path / "missing.pt")
+
+
+# ------------------------------------------------------------------ #
+# Several forms of one class (`name@form`) and aggregate=max (PLAN_PHASE_C §2K.4)
+# ------------------------------------------------------------------ #
+
+_E = torch.eye(4)
+
+
+def _forms_directory():
+    # b@B is a second form of b; c only has one form
+    return PrototypeDirectory(names=["a", "b", "b@B", "c"], embeddings=_E.clone())
+
+
+def test_class_of_and_classes_keep_first_appearance_order():
+    from utils.oneshot import class_of
+
+    assert class_of("valve_butterfly@B") == "valve_butterfly" and class_of("x") == "x"
+    assert _forms_directory().classes == ["a", "b", "c"]
+    assert _directory(n=3).classes == ["sym_0", "sym_1", "sym_2"]
+
+
+def test_class_cosines_take_the_best_form_and_are_plain_cosines_without_forms():
+    d = _forms_directory()
+    q = torch.nn.functional.normalize(torch.tensor([0.1, 0.2, 0.9, 0.0]), dim=0)
+    cc = d.class_cosines(q)
+    assert cc.shape == (3,) and cc[1] == pytest.approx(float(q[2]))  # b scores its form B
+    plain = _directory(n=4)
+    v = torch.randn(3, _DIM)
+    assert torch.equal(plain.class_cosines(v), plain.cosines(v))
+
+
+def test_a_query_like_the_second_form_is_named_the_class():
+    d = _forms_directory()
+    assert d.match(_E[2]).name == "b"
+    assert [n for n, _ in d.topk(_E[2], 3)][0] == "b"
+    assert len({n for n, _ in d.topk(_E[2], 3)}) == 3  # one entry per class
+    for strategy in ("vote", "mean", "max"):
+        assert d.match_views(_E[[2, 2]], None, strategy).name == "b"
+
+
+def test_votes_for_two_forms_of_one_class_count_together():
+    d = _forms_directory()
+    views = torch.nn.functional.normalize(_E[[1, 2, 0]] + 0.01, dim=1)  # b, b@B, a
+    m = d.match_views(views, None, "vote")
+    assert m.name == "b" and m.n_votes == 2
+
+
+def test_max_takes_the_best_view_and_gates_on_it():
+    d = PrototypeDirectory(names=["a", "b"], embeddings=_E[:2].clone())
+    # two views close to a, one exactly b: the mean leans to a, the best single view is b
+    views = torch.nn.functional.normalize(
+        torch.tensor([[1.0, 0.1, 0, 0], [1.0, 0.1, 0, 0], [0.0, 1.0, 0, 0]]), dim=1
+    )
+    assert d.match_views(views, None, "mean").name == "a"  # the mean leans to a
+    m = d.match_views(views, None, "max")
+    assert m.name == "b" and m.cosine == pytest.approx(1.0) and m.n_votes == 1
+    assert d.match_views(views, 1.01, "max").is_other
+    with pytest.raises(ValueError, match="strategy"):
+        d.match_views(views, None, "median")
+
+
+def test_without_a_class_drops_all_its_forms_and_a_form_drops_only_itself():
+    d = _forms_directory()
+    assert d.without(["b"]).names == ["a", "c"]
+    assert d.without(["b@B"]).names == ["a", "b", "c"]
+    with pytest.raises(ValueError, match="unknown"):
+        d.without(["zz"])

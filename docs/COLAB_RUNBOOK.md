@@ -297,6 +297,52 @@ file cặp. Khi đó **không** nới ngưỡng: gửi lại thông báo lỗi.
 **Gửi lại**: in ra của 14a–14c + 4 file trong `runs/f0_csv/` (`oneshot_{p1,p4}_crops_dinov2_{f0a,shift}.csv`). Đặt 4 file vào `runs/`
 trên máy rồi chạy `python scripts/f0_colab_compare.py --out runs/phase_c/f0_colab` (luật §2E.3, bootstrap).
 
+## 5j. PHASE C §2G — Điểm 4: bỏ `pipeline` (41 ảnh mẫu) — notebook §15 (2026-11-19)
+
+**Trước khi mở Colab**:
+- Commit + push: notebook, `scripts/nopipe_compare.py`, `tests/test_nopipe_compare.py`, `tests/test_colab_notebook.py`.
+- Trên Drive `encoders/` phải còn: `__dinov2__.pt`, `iso_prototypes_dinov2_a4.pt`, `center_dinov2_a4.pt` (§13), `__global__.pt`
+  (R1b, nhóm P2), `__global_lo__.pt` (R1a, nhóm τ / P4); và các lượt `eval_{tau,p1,p4}_dinov2` của §13 (bảng 15c đọc).
+
+Không train, không dựng lại gì; chỉ thêm `'++oneshot.exclude_prototypes=[pipeline]'` (có nháy đơn để shell không hiểu `[...]` là glob).
+Chi phí ≈ τ + 2 × P2 + P1 + P4 của 2B.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4, 11a | mount, clone, crop; OPEN100-ISO | như §5h |
+| 15a | τ 41 (val_sel) → P2 42 và 41 (val `test`, nhóm R1b) → P1 đủ 41 | `n_prototypes` 41 / 42 (assert); cùng `n_crops` |
+| 15b | P4 41 | `n_prototypes` 41 (assert) |
+| 15c | bảng nhanh 42 / 41 (* = hậu kiểm) | — |
+
+**Gửi lại**: in ra của 15a–15c + 4 file trong `runs/nopipe_csv/` (`oneshot_p2_crops_dinov2.csv`,
+`oneshot_{p1,p2,p4}_crops_dinov2_nopipe.csv`). Đặt vào `runs/` trên máy rồi chạy
+`python scripts/nopipe_compare.py --out runs/phase_c/nopipe` (luật §2G: kiểm nhất quán trước, rồi bootstrap).
+
+## 5k. PHASE C §2K.6 — dạng B của butterfly + gộp view `max` — notebook §16 (2026-11-20)
+
+**Trước khi mở Colab**:
+- **Chạy §15 trước** (mốc = 2B 41 ảnh mẫu, `dinov2_nopipe`); 16a dừng nếu thiếu.
+- Commit + push: notebook, `.gitignore` (un-ignore `data/raw/iso_symbols_forms/`), **`data/raw/iso_symbols_forms/valve_butterfly@B.png`**,
+  `src/utils/oneshot.py`, `src/pipeline/{oneshot_infer,oneshot_eval,iso_prototypes}.py`, `scripts/{make_iso_forms,k4_colab_compare}.py`
+  và các test. Ảnh dạng B đi qua git (như `iso_symbols_clean`); 16a dừng nếu thiếu.
+- Trên Drive `encoders/`: như §5j (`__dinov2__.pt`, `iso_prototypes_dinov2_a4.pt`, `center_dinov2_a4.pt`, `__global__.pt`,
+  `__global_lo__.pt`).
+
+Không train, không dựng lại encoder / tâm; chỉ dựng thêm một file prototype 43 hàng (`iso_prototypes_dinov2_a4_formB.pt`, vài giây).
+Chi phí ≈ 3 × (τ + P2 + P1 + P4) của 2B.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4, 11a | mount, clone, crop; OPEN100-ISO | như §5h |
+| 16a | dựng 43 prototype (`++oneshot.extra_forms_dir`) | 42 hàng đầu trùng file 13a (≤ 1e-5), `extra_forms` = `['valve_butterfly@B']` (assert) |
+| 16b | mỗi dòng `formB` / `max` / `formB_max`: τ (val_sel) → P2 (val `test`, nhóm R1b) → P1 đủ | `n_prototypes` 42 / 41 / 42 và `aggregate` mean / max / max (assert); P1 cùng `n_crops` với mốc |
+| 16c | P4 cho 3 dòng | như 16b (assert) |
+| 16d | bảng nhanh cạnh `base41` | — |
+
+**Gửi lại**: in ra của 16a–16d + 9 file trong `runs/k4_csv/` (`oneshot_{p1,p2,p4}_crops_dinov2_{formB,max,formB_max}.csv`) và 3 file
+mốc của §15 trong `runs/nopipe_csv/` (`oneshot_{p1,p2,p4}_crops_dinov2_nopipe.csv`). Đặt cả 12 vào `runs/` trên máy rồi chạy
+`python scripts/k4_colab_compare.py --out runs/phase_c/k4_colab` (luật §2K.6: kiểm nhất quán trước, rồi bootstrap và quyết định).
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

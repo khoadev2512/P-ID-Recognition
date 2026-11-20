@@ -44,6 +44,18 @@ def _is_14(cell: str) -> bool:
     return "template_align" in code or "ROWS14" in code or "in F0:" in code
 
 
+def _is_16(cell: str) -> bool:
+    """§16 (PHASE C §2K.6): form B of the butterfly and aggregate=max, against §15's base."""
+    code = _active([cell])
+    return "PROTO43" in code or "ROWS16" in code or "in K4:" in code
+
+
+def _is_15(cell: str) -> bool:
+    """§15 (PHASE C §2G, Điểm 4): reruns §13's protocols with `pipeline` excluded."""
+    code = _active([cell])
+    return not _is_16(cell) and ("NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code)
+
+
 def test_never_reads_an_old_crop_zip(code_cells):
     """crops_fgc.zip: 28 classes. crops_fgc_global.zip: crops without _boxes.csv (before
     utils.crop_box), which box jitter cannot use."""
@@ -374,7 +386,11 @@ def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cel
     center comes from protocol=center (R1a groups) and every later run passes it; tau on
     val_sel; P1 with no subset; P4 for DINOv2 plus the two CL2N rows, tags matching their tau
     runs (chosen_taus(tag) reads eval_tau_<tag>)."""
-    s13 = [c for c in code_cells if "__dinov2__" in _active([c]) and not _is_14(c)]
+    s13 = [
+        c
+        for c in code_cells
+        if "__dinov2__" in _active([c]) and not (_is_14(c) or _is_15(c) or _is_16(c))
+    ]
     assert len(s13) == 4  # 13a, 13b, 13c, 13e (13d only reads metrics)
     make, run, p4, e2e = (_active([c]) for c in s13)
     dino = "fgc.backbone=vit_small_patch14_dinov2.lvd142m fgc.imgsz=224 fgc.arcface.embed_dim=384"
@@ -436,5 +452,89 @@ def test_section_14_reruns_tau_p1_p4_with_each_template_align_and_keeps_the_csvs
     assert "f'{CSV_DIR}/oneshot_p4_crops_dinov2_{v}.csv'" in p4cell
     assert "('2B', 'dinov2')" in table
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s14]
-    last_13 = max(i for i, c in enumerate(code_cells) if "__dinov2__" in c and not _is_14(c))
+    last_13 = max(
+        i
+        for i, c in enumerate(code_cells)
+        if "__dinov2__" in c and not (_is_14(c) or _is_15(c) or _is_16(c))
+    )
     assert last_13 < idx[0] < idx[1] < idx[2]
+
+
+def test_section_15_reruns_2b_without_pipeline_and_runs_p2_with_r1b_groups(code_cells):
+    """PHASE C §2G (Điểm 4): §13's encoder, prototypes and center (nothing rebuilt) with
+    `pipeline` excluded (quoted: the brackets reach Hydra, not the shell glob); tau on val_sel
+    with R1a groups; P2 on val `test` with R1b groups for BOTH 42 and 41 (2B never ran P2); P1
+    with no subset and no groups; P4 on OPEN100-ISO with R1a groups; 41 / 42 prototypes checked
+    in metrics; CSVs copied under the names scripts/nopipe_compare.py reads."""
+    s15 = [c for c in code_cells if _is_15(c)]
+    assert len(s15) == 3  # 15a tau + P2 + P1, 15b P4, 15c table
+    run, p4cell, table = (_active([c]) for c in s15)
+    both = run + "\n" + p4cell
+    assert "make_imagenet_encoder" not in both and "protocol=center" not in both
+    assert "prototypes run_dir" not in both
+    assert "NOPIPE = \"'++oneshot.exclude_prototypes=[pipeline]'\"" in run
+    assert "++oneshot.center={CENTER_D}" in run and "{DINO} {A4}" in run
+    assert "GROUPS = f'++eval.oneshot.groups_ckpt={ENC_DIR}/__global_lo__.pt'" in run
+    assert "GROUPS_P2 = f'++eval.oneshot.groups_ckpt={ENC_DIR}/__global__.pt'" in run
+    lines = [ln for ln in both.splitlines() if "protocol=" in ln]
+    tau, p2, p1, p4 = (
+        next(ln for ln in lines if f"protocol={p}" in ln) for p in ("tau", "p2", "p1", "p4")
+    )
+    assert "image_subset=val_sel" in tau and "$GROUPS $ENC_D $NOPIPE" in tau
+    assert "image_subset=test" in p2 and "$GROUPS_P2 $ENC_D $extra" in p2
+    assert "(('dinov2', ''), ('dinov2_nopipe', NOPIPE))" in run
+    assert "image_subset" not in p1 and "GROUPS" not in p1 and "$ENC_D $NOPIPE" in p1
+    assert "LOCAL_ISO_ROOT" in p4 and "$GROUPS $ENC_D $NOPIPE" in p4
+    assert all("LOCAL_DATA_ROOT" in ln for ln in (tau, p2, p1))
+    assert run.index("protocol=tau") < run.index("protocol=p2") < run.index("protocol=p1")
+    assert "o['n_prototypes'] == n" in run and "o['n_prototypes'] == 41" in p4cell
+    assert "f'{CSV_DIR}/oneshot_{p}_crops_{tag}.csv'" in run
+    assert "f'{CSV_DIR}/oneshot_p4_crops_dinov2_nopipe.csv'" in p4cell
+    assert "CSV_DIR = f'{RUNS_DIR}/nopipe_csv'" in run
+    assert "('41', 'dinov2_nopipe')" in table and "nopipe_compare.py" in table
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s15]
+    last_14 = max(i for i, c in enumerate(code_cells) if _is_14(c))
+    assert last_14 < idx[0] < idx[1] < idx[2]
+
+
+def test_section_16_checks_form_b_and_max_against_the_41_template_base(code_cells):
+    """PHASE C §2K.6: §13's encoder and center (not rebuilt), a 43-prototype file built with
+    ++oneshot.extra_forms_dir and checked against the 42-row file; three lines (formB / mean,
+    max / 42 rows, formB_max), all without `pipeline`; per line tau (val_sel, R1a groups) ->
+    P2 (val test, R1b groups) -> P1 -> P4 (R1a groups), each metrics checked for its prototype
+    count and aggregate; CSVs copied under the names scripts/k4_colab_compare.py reads."""
+    s16 = [c for c in code_cells if _is_16(c)]
+    assert len(s16) == 4  # 16a build, 16b tau + P2 + P1, 16c P4, 16d table
+    build, run, p4cell, table = (_active([c]) for c in s16)
+    assert "make_imagenet_encoder" not in run + p4cell and "protocol=center" not in run + p4cell
+    assert (
+        "++oneshot.extra_forms_dir=$FORMS_DIR" in build and "oneshot.prototypes=$PROTO43" in build
+    )
+    assert "FORMS_DIR = f'{REPO_DATA}/iso_symbols_forms'" in build
+    assert "d43.embeddings[:42] - d42.embeddings" in build and "diff <= 1e-5" in build
+    assert "eval_p4_dinov2_nopipe" in build  # §15 first
+    assert "NOPIPE = \"'++oneshot.exclude_prototypes=[pipeline]'\"" in run
+    assert "++oneshot.center={CENTER_D} {NOPIPE}" in run
+    assert (
+        "K4 = (('formB', PROTO43, 'mean', 42), ('max', PROTO42, 'max', 41), "
+        "('formB_max', PROTO43, 'max', 42))"
+    ) in run
+    assert "oneshot.aggregate={agg}" in run and "oneshot.aggregate={agg}" in p4cell
+    lines = [ln for ln in (run + "\n" + p4cell).splitlines() if "protocol=" in ln]
+    tau, p2, p1, p4 = (
+        next(ln for ln in lines if f"protocol={p}" in ln) for p in ("tau", "p2", "p1", "p4")
+    )
+    assert "image_subset=val_sel" in tau and "$GROUPS $ENC_K" in tau
+    assert "image_subset=test" in p2 and "$GROUPS_P2 $ENC_K" in p2
+    assert "image_subset" not in p1 and "GROUPS" not in p1 and "$ENC_K" in p1
+    assert "LOCAL_ISO_ROOT" in p4 and "$GROUPS $ENC_K" in p4
+    assert run.index("protocol=tau") < run.index("protocol=p2") < run.index("protocol=p1")
+    assert "o['n_prototypes'] == n and o['aggregate'] == agg" in run
+    assert "o['n_prototypes'] == n and o['aggregate'] == agg" in p4cell
+    assert "CSV_DIR = f'{RUNS_DIR}/k4_csv'" in run
+    assert "f'{CSV_DIR}/oneshot_{p}_crops_dinov2_{tag}.csv'" in run
+    assert "f'{CSV_DIR}/oneshot_p4_crops_dinov2_{tag}.csv'" in p4cell
+    assert "('base41', 'dinov2_nopipe')" in table and "k4_colab_compare.py" in table
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s16]
+    last_15 = max(i for i, c in enumerate(code_cells) if _is_15(c))
+    assert last_15 < idx[0] < idx[1] < idx[2] < idx[3]

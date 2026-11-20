@@ -28,6 +28,8 @@ What `best_cos` / `second_cos` are, per oneshot.aggregate:
   mean  the query views are averaged into one vector; best_cos is its cosine to the nearest
         prototype and second_cos its cosine to the runner-up. The gate is best_cos < tau, so
         sweeping tau over best_cos reproduces `label` exactly.
+  max   every class scores its best cosine over the views; best_cos is the winner's, second_cos
+        the runner-up class's. The gate is best_cos < tau, so a tau sweep is exact (as mean).
   vote  every view names its nearest prototype, the most frequent name wins (best_name);
         best_cos is the MEAN, over the winning views, of their cosine to best_name, and
         second_cos the mean over the same views of their best cosine to a different
@@ -80,6 +82,7 @@ from utils.linear_align import (
 )
 from utils.model import checkpoint_excluded_classes, checkpoint_sha256, load_arcface_encoder
 from utils.oneshot import (
+    AGGREGATES,
     Encoder,
     PrototypeDirectory,
     ViewSpec,
@@ -224,6 +227,8 @@ class OneShotClassifier:
         self.background = tuple(int(c) for c in osh.get("background", (255, 255, 255)))
         self.min_cosine = float(osh.other_min_cosine)
         self.aggregate = str(osh.get("aggregate", "vote"))
+        if self.aggregate not in AGGREGATES:
+            raise ValueError(f"oneshot.aggregate={self.aggregate!r}; expected one of {AGGREGATES}")
         self.route_by_coarse = bool(osh.get("route_by_coarse", False))
         coarse_map = osh.get("coarse_map", None)
         if self.route_by_coarse and not coarse_map:
@@ -317,14 +322,19 @@ class OneShotClassifier:
     def _second_cosine(
         self, directory: PrototypeDirectory, emb: torch.Tensor, best_name: str
     ) -> float:
-        best = directory.names.index(best_name)
-        if len(directory) < 2:
+        # Per class, as the match itself (a class drawn in several forms is one candidate).
+        best = directory.classes.index(best_name)
+        if len(directory.classes) < 2:
             return math.nan
         if self.aggregate == "mean":
-            cos = directory.cosines(emb.mean(dim=0))
+            cos = directory.class_cosines(emb.mean(dim=0))
             cos[best] = -math.inf
             return float(cos.max())
-        cos = directory.cosines(emb)  # (V, N)
+        cos = directory.class_cosines(emb)  # (V, C)
+        if self.aggregate == "max":
+            per_class = cos.max(dim=0).values
+            per_class[best] = -math.inf
+            return float(per_class.max())
         winners = cos.argmax(dim=1) == best
         rest = cos.clone()
         rest[:, best] = -math.inf

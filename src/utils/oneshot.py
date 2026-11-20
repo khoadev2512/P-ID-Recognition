@@ -63,6 +63,19 @@ CENTER_FORMAT_VERSION = 1
 # P&ID artwork is black-on-white, so padding a looser box means adding white.
 WHITE = (255, 255, 255)
 
+# A class drawn in more than one form (ISO 10628-2 / BK-2020 X8075: butterfly valve form A and
+# form B) gets one prototype per form, named `<fine_name>@<form>` next to the plain
+# `<fine_name>` (PLAN_PHASE_C §2K.4 (i)). Every match is decided per CLASS: a class scores the
+# best of its forms, and what is reported is the class name. A directory with no `@` name
+# behaves exactly as before (class == prototype).
+FORM_SEP = "@"
+AGGREGATES = ("vote", "mean", "max")
+
+
+def class_of(name: str) -> str:
+    """The class a prototype name belongs to: `valve_butterfly@B` -> `valve_butterfly`."""
+    return name.split(FORM_SEP, 1)[0]
+
 
 class Encoder(Protocol):
     """What the one-shot path needs from a model: an embedding, not logits.
@@ -256,9 +269,7 @@ class PrototypeDirectory:
 
     def __post_init__(self) -> None:
         if self.embeddings.ndim != 2:
-            raise ValueError(
-                f"embeddings must be (N, D), got shape {tuple(self.embeddings.shape)}"
-            )
+            raise ValueError(f"embeddings must be (N, D), got shape {tuple(self.embeddings.shape)}")
         if len(self.names) != self.embeddings.shape[0]:
             raise ValueError(
                 f"{len(self.names)} names vs. {self.embeddings.shape[0]} embedding rows"
@@ -275,6 +286,27 @@ class PrototypeDirectory:
     @property
     def dim(self) -> int:
         return int(self.embeddings.shape[1])
+
+    @property
+    def classes(self) -> list[str]:
+        """Class names in first-appearance order (== `names` when no prototype has a form)."""
+        return list(dict.fromkeys(class_of(n) for n in self.names))
+
+    def _owner(self, device=None) -> torch.Tensor:
+        """(N,) index into `classes` of every prototype."""
+        index = {c: i for i, c in enumerate(self.classes)}
+        return torch.tensor([index[class_of(n)] for n in self.names], device=device)
+
+    def class_cosines(self, embedding: torch.Tensor) -> torch.Tensor:
+        """cos to every CLASS (the best of its forms). (D,) -> (C,); (V, D) -> (V, C)."""
+        cos = self.cosines(embedding)
+        if len(self.classes) == len(self.names):
+            return cos
+        owner = self._owner(cos.device).expand_as(cos)
+        out = torch.full(
+            (*cos.shape[:-1], len(self.classes)), -torch.inf, device=cos.device, dtype=cos.dtype
+        )
+        return out.scatter_reduce(-1, owner, cos, reduce="amax")
 
     def subset_by_coarse(self, coarse_classes: set[str] | list[str]) -> PrototypeDirectory:
         """A directory holding only prototypes whose coarse class is in `coarse_classes`.
@@ -304,10 +336,11 @@ class PrototypeDirectory:
         would absorb any crop containing a pipe). An unknown name is an error: a typo
         would otherwise leave the prototype in while looking like an exclusion."""
         drop = set(names)
-        unknown = drop - set(self.names)
+        unknown = drop - set(self.names) - set(self.classes)
         if unknown:
             raise ValueError(f"unknown prototype name(s) {sorted(unknown)}; have {self.names}")
-        keep = [i for i, n in enumerate(self.names) if n not in drop]
+        # A class name drops every form of it; a `name@form` drops that form only.
+        keep = [i for i, n in enumerate(self.names) if n not in drop and class_of(n) not in drop]
         if not keep:
             raise ValueError("excluding these prototypes would leave the directory empty")
         return PrototypeDirectory(
@@ -341,10 +374,11 @@ class PrototypeDirectory:
     def topk(self, embedding: torch.Tensor, k: int = 3) -> list[tuple[str, float]]:
         """(name, cosine) for the k nearest prototypes to a single (D,) embedding —
         the one-shot analogue of top-k accuracy, and useful for inspecting confusions."""
-        cos = self.cosines(embedding)
-        k = min(k, len(self))
+        cos = self.class_cosines(embedding)
+        classes = self.classes
+        k = min(k, len(classes))
         values, idx = torch.topk(cos, k)
-        return [(self.names[int(i)], float(v)) for v, i in zip(values, idx, strict=True)]
+        return [(classes[int(i)], float(v)) for v, i in zip(values, idx, strict=True)]
 
     def match(self, embedding: torch.Tensor, min_cosine: float | None = None) -> Match:
         """Nearest prototype to a single (D,) embedding, gated by `min_cosine`.
@@ -353,12 +387,12 @@ class PrototypeDirectory:
         nearest). Otherwise a best cosine below it is reported as OTHER_CLASS_NAME,
         carrying the cosine that triggered the rejection so it can be logged/calibrated.
         """
-        cos = self.cosines(embedding)
+        cos = self.class_cosines(embedding)
         best = int(torch.argmax(cos))
         best_cos = float(cos[best])
         if min_cosine is not None and best_cos < min_cosine:
             return Match(OTHER_CLASS_NAME, best_cos, is_other=True)
-        return Match(self.names[best], best_cos)
+        return Match(self.classes[best], best_cos)
 
     def match_views(
         self,
@@ -393,6 +427,14 @@ class PrototypeDirectory:
         when the views are mild scale jitter only — it is the ablation counterpart to
         voting, and the one to use if a future orientation-invariant encoder makes the
         per-view disagreement disappear.
+
+        strategy="max": a class scores its best cosine over the views (TI-pooling, Laptev et
+        al. CVPR 2016: max over transformed copies, invariance without blending them); the
+        best class wins, gated on that cosine (so a tau sweep over it is exact). n_votes is
+        the number of views whose own nearest class it is. PLAN_PHASE_C §2K.4 (ii).
+
+        Every strategy decides per class (`class_cosines`): a class drawn in several forms
+        scores the best of them, and the reported name is the class.
         """
         if view_embeddings.ndim != 2:
             raise ValueError(
@@ -400,10 +442,19 @@ class PrototypeDirectory:
             )
         if strategy == "mean":
             return self.match(aggregate_views(view_embeddings), min_cosine)
-        if strategy != "vote":
-            raise ValueError(f"unknown strategy={strategy!r}; expected 'vote' or 'mean'")
+        if strategy not in AGGREGATES:
+            raise ValueError(f"unknown strategy={strategy!r}; expected one of {AGGREGATES}")
 
-        cos = self.cosines(view_embeddings)  # (V, N)
+        cos = self.class_cosines(view_embeddings)  # (V, C)
+        if strategy == "max":
+            per_class = cos.max(dim=0).values
+            best = int(torch.argmax(per_class))
+            best_cos = float(per_class[best])
+            if min_cosine is not None and best_cos < min_cosine:
+                return Match(OTHER_CLASS_NAME, best_cos, is_other=True, n_votes=0)
+            n_best = int((cos.argmax(dim=1) == best).sum())
+            return Match(self.classes[best], best_cos, n_votes=n_best)
+
         best_cos, best_idx = cos.max(dim=1)
 
         voters = range(len(best_idx))
@@ -413,9 +464,7 @@ class PrototypeDirectory:
                 # Every view's best match is below the gate -> out-of-vocabulary. Report
                 # the strongest cosine any view reached, which is the quantity to
                 # calibrate oneshot.other_min_cosine against.
-                return Match(
-                    OTHER_CLASS_NAME, float(best_cos.max()), is_other=True, n_votes=0
-                )
+                return Match(OTHER_CLASS_NAME, float(best_cos.max()), is_other=True, n_votes=0)
 
         per_name: dict[int, list[float]] = defaultdict(list)
         for v in voters:
@@ -423,7 +472,7 @@ class PrototypeDirectory:
         # Most votes; tie -> larger summed cosine.
         proto_idx, winning_cosines = max(per_name.items(), key=lambda kv: (len(kv[1]), sum(kv[1])))
         mean_cos = sum(winning_cosines) / len(winning_cosines)
-        return Match(self.names[proto_idx], mean_cos, n_votes=len(winning_cosines))
+        return Match(self.classes[proto_idx], mean_cos, n_votes=len(winning_cosines))
 
     # -------------------------------------------------------------- #
     # Persistence

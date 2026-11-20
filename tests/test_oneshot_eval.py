@@ -270,7 +270,7 @@ def test_rank_names_agrees_with_match_views_for_both_aggregates():
     )
     for _ in range(20):
         emb = torch.nn.functional.normalize(torch.randn(8, 16, generator=g))
-        for agg in ("vote", "mean"):
+        for agg in ("vote", "mean", "max"):
             ranked = rank_names(directory, emb, agg, 3)
             match = directory.match_views(emb, None, agg)
             assert ranked[0][0] == match.name and ranked[0][1] == pytest.approx(
@@ -278,7 +278,18 @@ def test_rank_names_agrees_with_match_views_for_both_aggregates():
             )
             assert len({n for n, _ in ranked}) == 3
     with pytest.raises(ValueError, match="aggregate"):
-        rank_names(directory, emb, "max")
+        rank_names(directory, emb, "median")
+
+
+def test_rank_names_lists_classes_once_when_a_class_has_two_forms():
+    e = torch.eye(4)
+    directory = PrototypeDirectory(names=["a", "b", "b@B", "c"], embeddings=e.clone())
+    emb = torch.nn.functional.normalize(e[[2, 2, 1]] + 0.01, dim=1)
+    for agg in ("vote", "mean", "max"):
+        ranked = rank_names(directory, emb, agg, 3)
+        assert ranked[0][0] == "b" and [n for n, _ in ranked] == list(
+            dict.fromkeys(n for n, _ in ranked)
+        )
 
 
 # ------------------------------------------------------------------ #

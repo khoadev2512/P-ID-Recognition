@@ -139,8 +139,19 @@ def _pad(gray: np.ndarray, box) -> tuple[np.ndarray, tuple[int, int, int, int], 
     return canvas, (x0 + mx, y0 + my, x1 + mx, y1 + my), mx, my
 
 
-def dirty_view(img: Image.Image, axes: Sequence[PipeAxis], rng: random.Random) -> Image.Image:
-    """One drawing-like variant of a template (steps 1-4 of the module doc), RGB."""
+def dirty_view(
+    img: Image.Image,
+    axes: Sequence[PipeAxis],
+    rng: random.Random,
+    *,
+    pipes: bool = True,
+    morph: bool = True,
+    degrade: bool = True,
+) -> Image.Image:
+    """One drawing-like variant of a template (steps 1-4 of the module doc), RGB.
+
+    `pipes` / `morph` / `degrade` switch steps 2 / 3 / 4 off (PLAN_PHASE_C §2K diagnosis); with
+    all three on (the default) the output and the rng draws are exactly H2's."""
     gray = np.asarray(img.convert("L"))
     mask = ink_mask(gray)
     if not mask.any():
@@ -148,7 +159,7 @@ def dirty_view(img: Image.Image, axes: Sequence[PipeAxis], rng: random.Random) -
     w = stroke_width(gray) or max(1.0, max(gray.shape) / 60)
     canvas, box, mx, my = _pad(gray, ink_box(mask))
     cmask = ink_mask(canvas)
-    if axes:
+    if axes and pipes:
         on = [rng.random() < STUB_PROB for _ in axes]
         if not any(on):
             on[rng.randrange(len(axes))] = True
@@ -165,15 +176,17 @@ def dirty_view(img: Image.Image, axes: Sequence[PipeAxis], rng: random.Random) -
                 "B": y1 - 1 + int(round(reach * my)),
             }[axis.side]
             draw_pipe(canvas, (px, py), axis.side, end, max(1, int(round(w))))
-    morph = rng.choice(MORPH_PX)
-    if morph < 0 and w <= MIN_THIN_STROKE:
-        morph = 0
     if morph:
-        kernel = np.ones((2, 2), np.uint8)
-        # ink is dark: eroding the image thickens it, dilating thins it
-        canvas = cv2.erode(canvas, kernel) if morph > 0 else cv2.dilate(canvas, kernel)
-    degrade = ScanDegrade(p=1.0, ranges=DEGRADE_RANGES, seed=rng.getrandbits(32))
-    canvas = degrade.apply(canvas, w)
+        step = rng.choice(MORPH_PX)
+        if step < 0 and w <= MIN_THIN_STROKE:
+            step = 0
+        if step:
+            kernel = np.ones((2, 2), np.uint8)
+            # ink is dark: eroding the image thickens it, dilating thins it
+            canvas = cv2.erode(canvas, kernel) if step > 0 else cv2.dilate(canvas, kernel)
+    if degrade:
+        scan = ScanDegrade(p=1.0, ranges=DEGRADE_RANGES, seed=rng.getrandbits(32))
+        canvas = scan.apply(canvas, w)
     return Image.fromarray(canvas).convert("RGB")
 
 

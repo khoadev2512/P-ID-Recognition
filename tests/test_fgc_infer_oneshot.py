@@ -123,7 +123,7 @@ def _arr(img):
 # ------------------------------------------------------------------ #
 
 
-@pytest.mark.parametrize("aggregate", ["vote", "mean"])
+@pytest.mark.parametrize("aggregate", ["vote", "mean", "max"])
 def test_a_crop_equal_to_a_template_gets_that_name(tmp_path, aggregate):
     clf = _classifier(_cfg(tmp_path, oneshot={"aggregate": aggregate}))
     label, best, best_cos, second_cos = clf.classify(_arr(_glyph(2)), "valve")
@@ -169,6 +169,11 @@ def test_an_unmapped_coarse_class_falls_back_to_the_full_directory_and_warns_onc
         for _ in range(3):
             assert clf.classify(_arr(_glyph(2)), "flange")[0] == "pump"
     assert sum("flange" in r.message for r in caplog.records) == 1
+
+
+def test_an_unknown_aggregate_is_an_error(tmp_path):
+    with pytest.raises(ValueError, match="aggregate"):
+        _classifier(_cfg(tmp_path, oneshot={"aggregate": "median"}))
 
 
 def test_routing_without_a_coarse_map_is_an_error(tmp_path):
