@@ -20,7 +20,9 @@ The classification decision at inference stays softmax-argmax over the head's lo
 
 from __future__ import annotations
 
+import hashlib
 import math
+from pathlib import Path
 
 import timm
 import torch
@@ -81,6 +83,18 @@ class ArcMarginProduct(nn.Module):
         return output * self.s
 
 
+VIT_PREFIXES = ("vit_", "deit", "eva")
+
+
+def backbone_kwargs(cfg: DictConfig) -> dict:
+    """Extra timm.create_model arguments for cfg.fgc.backbone. A vision transformer fixes its
+    patch grid when built (timm's DINOv2 default is 518 px) and refuses any other input size,
+    so it is built for cfg.fgc.imgsz, the square the eval transform resizes to; timm resamples
+    the pretrained position embeddings. CNNs (resnet*) take any size: nothing extra."""
+    name = str(cfg.fgc.backbone)
+    return {"img_size": int(cfg.fgc.imgsz)} if name.startswith(VIT_PREFIXES) else {}
+
+
 class ArcFaceModel(nn.Module):
     """timm backbone -> embedding -> ArcMarginProduct head.
 
@@ -93,7 +107,10 @@ class ArcFaceModel(nn.Module):
     def __init__(self, cfg: DictConfig, num_fine: int) -> None:
         super().__init__()
         self.backbone = timm.create_model(
-            str(cfg.fgc.backbone), pretrained=bool(cfg.fgc.pretrained), num_classes=0
+            str(cfg.fgc.backbone),
+            pretrained=bool(cfg.fgc.pretrained),
+            num_classes=0,
+            **backbone_kwargs(cfg),
         )
         backbone_dim = int(self.backbone.num_features)
         embed_dim = int(cfg.fgc.arcface.embed_dim)
@@ -139,6 +156,77 @@ def build_model(cfg: DictConfig, group: str, num_fine: int) -> nn.Module:
     return timm.create_model(
         str(cfg.fgc.backbone), pretrained=bool(cfg.fgc.pretrained), num_classes=num_fine
     )
+
+
+def load_arcface_encoder(
+    cfg: DictConfig, ckpt_path: str | Path, device: torch.device | str = "cpu"
+) -> tuple[ArcFaceModel, list[str]]:
+    """Rebuild a trained ArcFaceModel from a pid-fgc-train checkpoint, ready to embed.
+
+    The one-shot path (utils.oneshot) needs the backbone as a FROZEN FEATURE EXTRACTOR,
+    not a classifier: the ISO prototypes replace the trained class centers as the
+    reference vectors. So the only thing the caller gets to care about is `.embed()`.
+
+    The architecture is recovered from the checkpoint rather than from cfg wherever the
+    checkpoint knows better: `head.weight` is (num_fine, embed_dim), so the number of
+    training classes needs no config field and can't drift out of sync with the file.
+    cfg still supplies the backbone name and embed_dim, and a mismatch between
+    cfg.fgc.arcface.embed_dim and the checkpoint's is raised here with both numbers
+    rather than surfacing later as an opaque state_dict size error.
+
+    Returns (model in eval mode on `device`, the checkpoint's fine_classes). The class
+    names are returned because they identify what the embedding space was trained to
+    separate — worth logging next to a prototype directory built on top of it.
+    """
+    ckpt_path = Path(ckpt_path)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"No ArcFace checkpoint at {ckpt_path}")
+    state = torch.load(ckpt_path, map_location=device, weights_only=False)
+    if "model" not in state:
+        raise ValueError(f"{ckpt_path}: not a pid-fgc-train checkpoint (no 'model' key)")
+
+    weight = state["model"].get("head.weight")
+    if weight is None:
+        raise ValueError(
+            f"{ckpt_path}: no 'head.weight' — this looks like a plain-linear-head "
+            "checkpoint (fgc.metric_learning=false), which has no embedding space to "
+            "build ISO prototypes in. Retrain with fgc.metric_learning=true."
+        )
+    num_fine, ckpt_embed_dim = int(weight.shape[0]), int(weight.shape[1])
+    cfg_embed_dim = int(cfg.fgc.arcface.embed_dim)
+    if ckpt_embed_dim != cfg_embed_dim:
+        raise ValueError(
+            f"{ckpt_path}: checkpoint embed_dim={ckpt_embed_dim} but "
+            f"cfg.fgc.arcface.embed_dim={cfg_embed_dim}. Override the config to match "
+            f"the checkpoint: fgc.arcface.embed_dim={ckpt_embed_dim}"
+        )
+
+    model = ArcFaceModel(cfg, num_fine).to(device)
+    model.load_state_dict(state["model"])
+    model.eval()
+    fine_classes = list(state.get("fine_classes", [f"class_{i}" for i in range(num_fine)]))
+    return model, fine_classes
+
+
+def checkpoint_excluded_classes(ckpt_path: str | Path) -> list[str]:
+    """Classes held out of training a pid-fgc-train checkpoint (fgc.exclude_classes).
+
+    Checkpoints written before leave-classes-out existed have no such key; nothing was
+    held out of those, so [] is the truth for them rather than a guess.
+    """
+    state = torch.load(Path(ckpt_path), map_location="cpu", weights_only=False)
+    return list(state.get("excluded_classes", []))
+
+
+def checkpoint_sha256(ckpt_path: str | Path) -> str:
+    """Hex sha256 of a checkpoint file: the only identity that tells two runs with the
+    same classes (R1b and its resumed continuation) apart. Recorded in a prototype
+    directory's meta so inference can refuse an encoder the prototypes were not built with."""
+    digest = hashlib.sha256()
+    with Path(ckpt_path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 class FocalLoss(nn.Module):

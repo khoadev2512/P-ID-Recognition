@@ -168,3 +168,34 @@ def test_maybe_resume_restores_epoch_and_best(tmp_path):
     # Weights actually loaded (match the source net).
     for p_loaded, p_src in zip(model.parameters(), src.parameters(), strict=True):
         assert torch.allclose(p_loaded, p_src)
+
+
+def test_maybe_resume_prefers_last_over_best(tmp_path):
+    """<group>.last.pt is written every epoch, <group>.pt only on a new best val_acc: after
+    a disconnect the newer one is last.pt, and its best_val_acc (not its own val_acc) is
+    what a later epoch has to beat."""
+    ckpt_dir = tmp_path / "fgc_checkpoints"
+    ckpt_dir.mkdir()
+    src = _TinyNet()
+    src_opt = torch.optim.Adam(src.parameters())
+    _save_ckpt(ckpt_dir / "valve.pt", epoch=1, val_acc=0.99, model=_TinyNet(), optimizer=src_opt)
+    torch.save(
+        {
+            "model": src.state_dict(),
+            "optimizer": src_opt.state_dict(),
+            "epoch": 4,
+            "val_acc": 0.95,
+            "best_val_acc": 0.99,
+        },
+        ckpt_dir / "valve.last.pt",
+    )
+
+    pipe = _fgc_pipeline(tmp_path, resume_from=str(ckpt_dir))
+    model = _TinyNet()
+    opt = torch.optim.Adam(model.parameters())
+    start_epoch, best = pipe._maybe_resume("valve", model, opt, torch.device("cpu"), -1.0)
+
+    assert start_epoch == 5
+    assert best == pytest.approx(0.99)
+    for p_loaded, p_src in zip(model.parameters(), src.parameters(), strict=True):
+        assert torch.allclose(p_loaded, p_src)

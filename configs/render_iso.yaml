@@ -1,0 +1,175 @@
+# V3 of docs/PLAN_ISO_RENDER_PID2GRAPH.md: which ISO symbol (or overlay) stands for a PID2Graph
+# node. Own file on purpose: configs/config.yaml belongs to Stage 1/2 and is not touched.
+# Read it with utils.iso_mapping.load_config(); the symbols inside a group come from the
+# taxonomy (docs/symbol_mapping/iso_taxonomy.csv), not from this file.
+render_iso:
+  scope: html          # html = the 51 drawable templates | all = all 63 (taxonomy `scope`)
+  p_replace: 0.3       # chance that a 1-port instrumentation bubble becomes a group-5 device
+  template_dir: data/raw/template_iso_svg
+  taxonomy_csv: docs/symbol_mapping/iso_taxonomy.csv
+
+  # PID2Graph node size classes, source-image px (before the sheet is scaled). `2_straight`
+  # nodes are measured across the pipe, all others by the longer side. Only rules with a `size`
+  # key look at it (here: `general`).
+  size_class:
+    small_max: 25      # <= small_max -> small
+    large_min: 120     # >= large_min -> large, in between -> medium
+
+  # V4 (utils.iso_layout): scale the sheet and vary row / column spacing, topology untouched.
+  layout:
+    scale: 3                 # S: source px -> output px
+    column_tol: 3            # source px; coordinates this close to a column's first one share it
+    gap_scale: [0.85, 1.15]  # extra factor on the gap between two columns (not across a symbol)
+    straight_max: 15         # source px; a straight fitting's two ports are put on one line when
+                             # they differ by at most this (measurement noise, not a real jog)
+
+  # V5 (utils.page_svg): one SVG per sheet, 1 SVG unit = 1 output px.
+  page:
+    stroke_px: 3             # one stroke width for pipes and symbols alike
+    junction_dot: false      # filled dot at 3-way crossings
+    shrink_steps: [0.9, 0.8] # an ISO symbol that newly overlaps another is shrunk, then boxed
+    nozzle_stub: 0.5         # a device at a line end that sits against a vessel (a link of no
+                             # length) moves this fraction of its size away; a pipe joins them
+    bridge_gap: 1.5          # two symbols linked with no pipe (a link of no length) that end up more
+                             # than this many px apart (a template narrower than its box, V6's size
+                             # factor) are joined by a short straight pipe; omit to leave the gap
+    replaced_size: 14        # source px: a group-5 device standing in for a bubble is sized like
+                             # one on a `general` node (median long side 14 px), not like the bubble
+
+  # V5c (utils.page_text): text in blank space only, after everything else is drawn; not COCO.
+  # Drawn only when the caller passes a text rng (V6 does, with its own "text" seed).
+  text:
+    cap_px: [13, 19]   # cap height drawn once per page, page px at layout.scale 3 (scaled with it)
+    min_cap_px: 8      # a label that only fits smaller than this is left out
+    gap: 0.5           # x cap height between a label and its pipe / symbol
+    margin: 0.35       # x cap height of blank paper round a label (at least one stroke)
+    bubbles: 1.0       # share of instrument bubbles given a tag (letters over loop number)
+    leaders: 1.0       # share of leader lines given a line number at their free end
+    lines: 0.35        # share of pipe runs given a line number beside their longest stretch
+    equipment: 1.0     # share of pumps, vessels, columns, ... given a tag
+    flags: 1.0         # share of off-page flags given a reference
+
+  # A disc or plate is held between two flanges and is often drawn so; the ISO symbol alone is
+  # just as correct. V3 rolls `p` per symbol of these classes and turns the `symbol` template to
+  # the disc's pipe axis; V5 draws it at the tip of the disc's stem with its own COCO box.
+  flanges:
+    p: 0.5
+    symbol: flanged_connection   # 511
+    classes: [orifice_plate, blind_disc, open_disc, interchangeable_disc,
+              interchangeable_disc_open]
+
+  # V5b: an agitator in a standing vessel. PID2Graph has no agitator node, so it is added to the
+  # picture and to the COCO file only (never to the GraphML; the annotation carries
+  # `added: true`). Only the `host` class (2062: a column and a lying heater never get one),
+  # only on a node of these `labels` (a large `general` drawn as 2062 is an air cooler or a
+  # detail frame in OPEN100, not a vessel), and only when height / width of the PID2Graph box
+  # is within `aspect`. No width limit: the agitator is drawn at the vessel's own scale.
+  # `clearance`: gap between the blade and the vessel's bottom, in vessel diameters, drawn
+  # uniformly (ISO 10628-2 X8006: 0.5; a real stirred tank has the blade's middle about 1/3
+  # diameter up); the shaft reaches down from the top as far as needed.
+  agitators:
+    p: 0.3
+    host: vessel_dished_ends
+    labels: [tank]
+    aspect: [1.2, 3.0]
+    clearance: [0.25, 0.65]
+    classes: [agitator_general, agitator_impeller, agitator_turbine]
+
+  # Flat, first match wins. Filters (all optional): label, size, ports (port_config kinds of
+  # the node: "0" "1" "2_straight" "2_angle" "2_same" "3" "4" "multi"), next_to / not_next_to
+  # (labels of the nodes its pipes lead to: at least one / none of them; a bubble on a valve
+  # is its actuator, not a branch; a fitting next to a tank stands at a vessel nozzle), tagged
+  # (true / false: a bubble, an `instrumentation` node, is linked to the node), min_aspect /
+  # max_aspect (height / width of the node's box, source px: >= min, < max), allow_empty (a
+  # `multi` vessel with no port at all), not_classes (the opposite of `classes`).
+  #   kind     iso (default) | arrow | leader | flag | bubble | generic
+  #   groups   taxonomy groups G1..G5 an iso rule draws from; configs narrows them to templates
+  #            with these taxonomy `port_config` values, classes to these `fine_name`s
+  #   replace  roll p_replace first; on a miss the next rule is tried
+  # A rule that finds no fitting template falls through to the next; no rule -> plain box.
+  rules:
+    # a 1-port arrow whose head touches a pipe (a crossing) is a leader: the head of a thin line
+    # from a tag (72 in OPEN100). One against a symbol or at a pipe end (7) is a flow arrow.
+    - {label: arrow, ports: ["1"], next_to: [crossing], kind: leader}  # leader_arrow
+    - {label: arrow, kind: arrow}              # flow_direction overlay along the pipe
+    - {label: inlet/outlet, kind: flag}        # simple flag arrow, no label
+    - {label: valve, groups: [G1, G2]}         # 2_straight -> G1; 2_angle, 3 -> G2
+    - {label: pump, groups: [G4], configs: ["2"]}
+    # a vessel at least three times as tall as wide is a column (X8100), else a vessel with dished
+    # ends (2062); one lying down (height < width) is drawn turned. Never a heat exchanger.
+    - {label: tank, groups: [G4], configs: [multi], classes: [column], min_aspect: 3,
+       allow_empty: true}
+    - {label: tank, groups: [G4], configs: [multi], classes: [vessel_dished_ends],
+       allow_empty: true}
+    # a small fitting with a tag (FO / RO) is a flange pair in OPEN100: all 11 of them, in the
+    # 12 sheets. Drawn as a bare flange pair, it is never a disc or any other fitting.
+    - {label: general, size: small, ports: ["2_straight"], tagged: true, groups: [G3],
+       classes: [flanged_connection]}
+    # at a vessel nozzle (in OPEN100 a flange pair): only what is fitted there; an orifice plate
+    # needs straight pipe both sides, strainers / sight glasses sit on the line
+    - {label: general, size: small, ports: ["2_straight"], next_to: [tank], groups: [G3],
+       classes: [flanged_connection, blind_disc, open_disc, interchangeable_disc,
+                 interchangeable_disc_open, compensator, reducer]}
+    - {label: general, size: small, ports: ["2_straight", "3"], groups: [G3]}
+    # at a pipe end (a vessel nozzle, a vent or drain behind a valve) a flange pair in OPEN100: 53
+    # of the 55 on the 12 sheets (the others: a vacuum breaker, a funnel). Not a G5 device: a
+    # flame arrestor on a vessel's bottom nozzle is wrong. G5 comes from replaced bubbles only.
+    - {label: general, size: small, ports: ["1"], groups: [G3], classes: [flanged_connection]}
+    - {label: general, size: small, ports: ["1"], groups: [G5]}
+    - {label: general, size: large, groups: [G4], configs: [multi], classes: [column],
+       min_aspect: 3}
+    - {label: general, size: large, groups: [G4], configs: [multi, "4"], not_classes: [column],
+       max_aspect: 3}
+    # not on a valve (its actuator) nor a `general` node: at a flange pair the tag (FO / RO) names
+    # the orifice, so a G5 device there would be a wrong symbol, and its line would lose the gap
+    - {label: instrumentation, ports: ["1"], not_next_to: [valve, general], groups: [G5],
+       replace: true}
+    - {label: instrumentation, kind: bubble}   # ISA bubble, labelled other_isa
+
+  # V6 (utils.iso_variants): many renderings of one source sheet. Every stage (V3 assignment, V4
+  # layout, stroke / size) draws from its own seed derived from (base_seed, sheet, variant, stage).
+  variants:
+    count: 36            # variants kept per sheet
+    max_attempts: 60     # candidates tried per sheet at most (dropped ones count)
+    base_seed: 0
+    stroke: [2, 4]       # stroke width w in units of layout.scale / 3 px, so [2, 4] px at scale 3
+    size: [0.85, 1.15]   # one factor per variant on every symbol's size
+    hash_size: 16        # ahash / dhash grid side: hashes have hash_size**2 bits (recorded, not filtered on)
+    min_node_diff: 0.05  # duplicate: fewer than this share of nodes got another symbol than in a kept variant
+    quality:             # Page.log counters that may not exceed these, else the variant is dropped
+      max_log: {bubbles_unsettled: 0, unmatched_ports: 0}
+    g1:                  # scripts/check_g1.py criteria (1 ports, 2 stroke, 3 overlaps, 5 edges,
+      drop: [1, 2, 3, 5, 6, 7, 8]  # 6 signal lines, 7 tags, 8 text on ink): failure drops the variant
+      flag: []                  # failure is recorded in the variant's json, the variant is kept
+
+  # V7 (utils.iso_degrade): whole-image degradation of a V6 variant, one image per variant. Every
+  # range is [low, high] and a draw is uniform inside it. Strength follows the variant's stroke
+  # width w so thin lines survive: |morph| x w/2 px of stroke-width change (< 0 erodes, > 0
+  # dilates), blur sigma = blur x w/2 px, pixelation block = 1 + pixelate x (w/2 - 1) px.
+  degrade:
+    rotate_deg: [-1.0, 1.0]   # clockwise, about the page centre
+    shear_deg: [-0.5, 0.5]
+    morph: [-1.0, 0.4]        # the high ends are what scripts/check_degrade_survival.py allows
+    blur: [0.0, 0.35]
+    pixelate: [0.0, 0.5]
+    lighting: [0.0, 0.2]      # depth of a smooth brightness falloff (1 = black corner)
+    noise_sigma: [0.0, 10.0]  # gray levels
+    jpeg_quality: [55, 90]    # [strongest, mildest]; the saved file is this JPEG
+
+  # V8 (pipeline.render_iso, utils.iso_export): export V6 / V7 as a data root the pipeline reads.
+  export:
+    data_root: ${oc.env:PID_DATA_ROOT,data/iso_open100}  # holds variants/ and degraded/ (inputs)
+    src_dir: data/raw/pid2graph/open100       # the source GraphML / PNG (read only)
+    vocab_csv: data/raw/iso_symbols/vocab.csv # Stage 2 vocabulary (read only)
+    images: both          # clean | degraded | both
+    link: hardlink        # hardlink | symlink | copy: how renderings enter canonical/images
+    other_labels: [other_iso, other_isa, other_generic]
+    other_coarse: other   # the coarse class of the three above
+    # no class: an annotation with no label (inlet / outlet flags) and these labels go to COCO as
+    # ignore regions (iscrowd: 1, category __ignore__), never as symbols
+    drop_labels: [leader_arrow]
+    split:
+      mode: all_test      # all_test | by_source (a seeded split of the 12 sources)
+      test_fraction: 0.5  # by_source only
+      seed: 0
+    workers: 4

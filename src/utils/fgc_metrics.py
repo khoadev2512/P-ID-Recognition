@@ -4,6 +4,9 @@
     within_group_accuracy  : Acc_G, per-family headline metric (eq. 6)
     topk_accuracy          : top-1 / top-3 on the FGC head over GT crops
     rare_macro_f1          : F1_macro,rare over long-tail fine classes (eq. 7)
+    macro_f1, per_class_prf: over the whole vocabulary (global encoder, protocol C)
+    family_breakdown       : per coarse family, accuracy and how often the predicted
+                             class leaves the family (an error coarse routing would block)
 
 These isolate within-group error that aggregate mAP collapses into one number.
 """
@@ -11,7 +14,7 @@ These isolate within-group error that aggregate mAP collapses into one number.
 from __future__ import annotations
 
 import numpy as np
-from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.metrics import confusion_matrix, f1_score, precision_recall_fscore_support
 
 
 def within_group_confusion(
@@ -81,3 +84,49 @@ def rare_macro_f1(y_true: list[str], y_pred: list[str], rare_fine_classes: list[
     return float(
         f1_score(y_true, y_pred, labels=rare_fine_classes, average="macro", zero_division=0)
     )
+
+
+def macro_f1(y_true: list[str], y_pred: list[str], labels: list[str]) -> float:
+    """F1 averaged over `labels` with equal weight per class."""
+    if not labels:
+        return 0.0
+    return float(f1_score(y_true, y_pred, labels=labels, average="macro", zero_division=0))
+
+
+def per_class_prf(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict[str, dict]:
+    """{class: {precision, recall, f1, support}} for each of `labels`, in that order."""
+    p, r, f, n = precision_recall_fscore_support(
+        y_true, y_pred, labels=labels, average=None, zero_division=0
+    )
+    return {
+        name: {
+            "precision": float(p[i]),
+            "recall": float(r[i]),
+            "f1": float(f[i]),
+            "support": int(n[i]),
+        }
+        for i, name in enumerate(labels)
+    }
+
+
+def family_breakdown(
+    y_true: list[str], y_pred: list[str], fine_to_coarse: dict[str, str]
+) -> dict[str, dict]:
+    """Per coarse family of the TRUE class: n_samples, accuracy, and the fraction of its
+    crops predicted as a class of ANOTHER family (`cross_family`). A global head can make
+    that error; a head routed by the Stage-1 coarse class cannot."""
+    out: dict[str, dict] = {}
+    for t, p in zip(y_true, y_pred, strict=True):
+        fam = fine_to_coarse[t]
+        row = out.setdefault(fam, {"n_samples": 0, "correct": 0, "cross": 0})
+        row["n_samples"] += 1
+        row["correct"] += int(p == t)
+        row["cross"] += int(fine_to_coarse.get(p) != fam)
+    return {
+        fam: {
+            "n_samples": row["n_samples"],
+            "accuracy": row["correct"] / row["n_samples"],
+            "cross_family": row["cross"] / row["n_samples"],
+        }
+        for fam, row in out.items()
+    }

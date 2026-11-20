@@ -25,6 +25,7 @@ import pandas as pd
 from omegaconf import DictConfig
 
 from pipeline.base import BasePipeline
+from utils.classmap import IGNORE_CATEGORY
 from utils.cli import CONFIG_DIR
 
 # Optional split map next to the COCO file: {image_id: "train"|"val"|"test"}. When a
@@ -51,7 +52,8 @@ class BuildManifestPipeline(BasePipeline):
             coco = json.load(f)
 
         images = coco.get("images", [])
-        annotations = coco.get("annotations", [])
+        # an ignore region (iscrowd: 1) is not a symbol: not counted, no class present
+        annotations = [a for a in coco.get("annotations", []) if not a.get("iscrowd")]
         if not images:
             raise ValueError(f"{self.paths.coco_json}: no `images` found")
 
@@ -59,7 +61,9 @@ class BuildManifestPipeline(BasePipeline):
         # the COCO categories block itself; self.classmap (built by build_classes from
         # this same COCO file) is the authoritative fine-name vocabulary, so validate
         # against it rather than trusting COCO category names blindly.
-        category_id_to_fine = {c["id"]: c["name"] for c in coco.get("categories", [])}
+        category_id_to_fine = {
+            c["id"]: c["name"] for c in coco.get("categories", []) if c["name"] != IGNORE_CATEGORY
+        }
         unknown_fine = set(category_id_to_fine.values()) - set(self.classmap.fine_classes)
         if unknown_fine:
             raise ValueError(

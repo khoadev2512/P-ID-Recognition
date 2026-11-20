@@ -28,6 +28,7 @@ dependencies = [
     "scikit-learn>=1.4",     # confusion matrices, macro-F1
     "matplotlib>=3.8",       # metric plots (confusion matrix, PR curves)
     "tqdm>=4.66",
+    "pymupdf>=1.24",         # extract ISO 10628-2 symbols from the standard's PDF (scripts/)
 ]
 
 [project.optional-dependencies]
@@ -47,9 +48,11 @@ pid-prep-crops = "pipeline.extract_crops:main"
 pid-prep-manifest = "pipeline.build_manifest:main"
 pid-detect-train = "pipeline.detect_train:main"
 pid-detect-infer = "pipeline.detect_infer:main"
+pid-iso-prototypes = "pipeline.iso_prototypes:main"
 pid-fgc-train = "pipeline.fgc_train:main"
 pid-fgc-infer = "pipeline.fgc_infer:main"
 pid-eval = "pipeline.evaluation:main"
+pid-render-iso = "pipeline.render_iso:main"
 
 [build-system]
 requires = ["hatchling"]

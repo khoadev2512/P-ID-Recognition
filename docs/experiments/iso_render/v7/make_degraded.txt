@@ -1,0 +1,14 @@
+sheet 0: 36 degraded
+sheet 1: 36 degraded
+sheet 2: 36 degraded
+sheet 3: 36 degraded
+sheet 4: 36 degraded
+sheet 5: 36 degraded
+sheet 6: 36 degraded
+sheet 7: 36 degraded
+sheet 8: 36 degraded
+sheet 9: 36 degraded
+sheet 10: 36 degraded
+sheet 11: 36 degraded
+432 images, 188s wall (8 workers), 4099 KB jpg each
+.venv/bin/python scripts/make_degraded.py --workers 8  796.20s user 296.92s system 580% cpu 3:08.24 total

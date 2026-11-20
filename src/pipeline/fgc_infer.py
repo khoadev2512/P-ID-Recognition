@@ -15,6 +15,21 @@ When cfg.fgc.metric_learning is on (ArcFace), a routed crop additionally passes 
 cfg.fgc.route.other_min_cosine, it's an out-of-vocabulary symbol and is written with
 fine_id = OTHER_FINE_ID (-2) rather than forced into the nearest known class.
 
+Global encoder (cfg.fgc.global_encoder=true; closed-set, protocol C, PLAN B6c): ONE head,
+`<fgc.ckpt_dir>/__global__.pt`, classifies every detection that meets min_score, whatever
+its coarse class, over the checkpoint's own `fine_classes`. The Stage-1 coarse class is not
+used unless cfg.fgc.route.by_coarse=true, which restricts the softmax to the fine classes of
+that coarse class (the "does coarse routing help" ablation). No "Other" gate here: the
+global encoder's Other decision belongs to the one-shot path against the ISO prototypes,
+with a threshold chosen by the B8 rules, not to fgc.route.other_min_cosine.
+
+One-shot (cfg.fgc.oneshot=true, PLAN B6a): instead of any head, each detection crop is matched
+against the ISO prototype directory (pipeline.oneshot_infer) and the result is written to
+derived/detections_oneshot/<split>/<image_id>.txt, a different file format from
+detections_fgc (columns in pipeline.oneshot_infer). No checkpoint directory is needed. The
+Stage-1 coarse ids are read with ++detector.classes_yaml when set (the DigitizePID detector's
+files on OPEN100-ISO, see pipeline.detect_infer); they only matter with oneshot.route_by_coarse.
+
 This is where the two stages compose into the final list[Detection].
 """
 
@@ -31,17 +46,33 @@ from omegaconf import DictConfig
 from PIL import Image
 
 from pipeline.base import BasePipeline
+from pipeline.oneshot_infer import (
+    OneShotClassifier,
+    load_oneshot_classifier,
+    require_oneshot_inputs,
+    write_oneshot_detections,
+)
 from utils import bbox_utils
-from utils.classmap import OTHER_FINE_ID, UNREFINED_FINE_ID
+from utils.classmap import (
+    GLOBAL_GROUP,
+    OTHER_CLASS_NAME,
+    OTHER_FINE_ID,
+    UNREFINED_FINE_ID,
+    training_fine_classes,
+)
 from utils.cli import CONFIG_DIR
-from utils.dataset import build_eval_transform
+from utils.crop_box import cut
+from utils.dataset import build_eval_transform, excluded_classes
 from utils.model import ArcFaceModel, build_model
 from utils.types import BBox
 
 logger = logging.getLogger(__name__)
 
-# Sentinel label for an out-of-vocabulary crop rejected by the ArcFace "Other" gate.
-OTHER_CLASS_NAME = "__other__"
+# Sentinel label for an out-of-vocabulary crop rejected by an "Other" gate. Defined in
+# utils.classmap (next to OTHER_FINE_ID, and shared with utils.oneshot's one-shot gate);
+# re-exported here because `from pipeline.fgc_infer import OTHER_CLASS_NAME` is the
+# import path existing call sites and tests already use.
+__all__ = ["FGCInferPipeline", "OTHER_CLASS_NAME", "main"]
 
 
 def _read_stage1_detections(path: Path) -> list[tuple[int, BBox, float]]:
@@ -77,13 +108,21 @@ class FGCInferPipeline(BasePipeline):
         )
         self.transform = build_eval_transform(cfg)
         self._models: dict[str, torch.nn.Module] | None = None
+        # The head's column order: the classes it was TRAINED on (fgc.exclude_classes
+        # removed), from the same function pid-fgc-train sized it with.
+        exclude = excluded_classes(cfg)
         self._fine_classes_per_group: dict[str, list[str]] = {
-            group: self.classmap.fine_of_group(group) for group in self.classmap.fgc_groups
+            group: training_fine_classes(self.classmap, group, exclude)
+            for group in self.classmap.fgc_groups
         }
         # Only ArcFace checkpoints carry class centers -> only they support the "Other"
         # reject gate. cfg.fgc.metric_learning selects that path in build_model.
         self._reject_enabled = bool(cfg.fgc.get("metric_learning", False))
         self._other_min_cosine = float(cfg.fgc.route.get("other_min_cosine", 0.0))
+        self._global = bool(cfg.fgc.get("global_encoder", False))
+        self._by_coarse = bool(cfg.fgc.route.get("by_coarse", False))
+        self._oneshot_mode = bool(cfg.fgc.get("oneshot", False))
+        self._oneshot: OneShotClassifier | None = None  # lazily loaded (or injected by tests)
 
     @property
     def models(self) -> dict[str, torch.nn.Module]:
@@ -101,6 +140,8 @@ class FGCInferPipeline(BasePipeline):
                 "    pid-fgc-infer fgc.ckpt_dir=runs/<train-run-dir>/fgc_checkpoints"
             )
         ckpt_dir = Path(str(ckpt_dir))
+        if self._global:
+            return {GLOBAL_GROUP: self._load_global(ckpt_dir / f"{GLOBAL_GROUP}.pt")}
         models: dict[str, torch.nn.Module] = {}
         for group in self.classmap.fgc_groups:
             fine_classes = self._fine_classes_per_group[group]
@@ -114,7 +155,34 @@ class FGCInferPipeline(BasePipeline):
             models[group] = model
         return models
 
+    def _load_global(self, ckpt_path: Path) -> torch.nn.Module:
+        """The single head of a global-encoder run. Its columns are the checkpoint's own
+        `fine_classes` (all 32 for R1b; fewer for a leave-out run), not a list rebuilt
+        from this command's fgc.exclude_classes."""
+        state = torch.load(ckpt_path, map_location=self.device)
+        fine_classes = list(state["fine_classes"])
+        self._fine_classes_per_group[GLOBAL_GROUP] = fine_classes
+        model = build_model(self.cfg, GLOBAL_GROUP, len(fine_classes)).to(self.device)
+        model.load_state_dict(state["model"])
+        model.eval()
+        logger.info("[fgc/%s] %d fine classes from %s", GLOBAL_GROUP, len(fine_classes), ckpt_path)
+        return model
+
     def validate(self) -> bool:
+        # Stage-1 files from a one-stage fine detector hold fine ids, which this stage
+        # would read as coarse ids. That detector is already the full pipeline: score it
+        # with eval.mode=det_only.
+        level = str(self.cfg.get("detector", {}).get("label_level", "coarse"))
+        if level != "coarse":
+            raise ValueError(
+                f"detector.label_level={level}: Stage-2 refines coarse detections only. "
+                "A fine-label detector is evaluated on its own (eval.mode=det_only)."
+            )
+        if self._oneshot_mode:
+            if self._oneshot is None:
+                require_oneshot_inputs(self.cfg)
+                self._oneshot_classifier()  # loads encoder + prototypes; raises on mismatch
+            return self._check_stage1_dir()
         if self.cfg.fgc.ckpt_dir is None:
             raise ValueError(
                 "cfg.fgc.ckpt_dir must be set to run FGC inference, e.g.:\n"
@@ -123,7 +191,19 @@ class FGCInferPipeline(BasePipeline):
         ckpt_dir = Path(str(self.cfg.fgc.ckpt_dir))
         if not ckpt_dir.exists():
             raise FileNotFoundError(f"fgc.ckpt_dir does not exist: {ckpt_dir}")
+        if self._global and not (ckpt_dir / f"{GLOBAL_GROUP}.pt").exists():
+            raise FileNotFoundError(
+                f"fgc.global_encoder=true but {ckpt_dir / (GLOBAL_GROUP + '.pt')} does not "
+                "exist; point fgc.ckpt_dir at the folder holding __global__.pt"
+            )
+        return self._check_stage1_dir()
 
+    def _oneshot_classifier(self) -> OneShotClassifier:
+        if self._oneshot is None:
+            self._oneshot = load_oneshot_classifier(self.cfg, self.transform, self.device)
+        return self._oneshot
+
+    def _check_stage1_dir(self) -> bool:
         split = str(self.cfg.eval.split)
         det_dir = self.paths.derived / "detections" / split
         if not det_dir.is_dir() or not any(det_dir.iterdir()):
@@ -139,7 +219,11 @@ class FGCInferPipeline(BasePipeline):
         image_ids = self._image_ids_for_split(split)
 
         det_dir = self.paths.derived / "detections" / split
-        out_dir = self.paths.derived / "detections_fgc" / split
+        out_dir = (
+            self.paths.derived
+            / ("detections_oneshot" if self._oneshot_mode else "detections_fgc")
+            / split
+        )
         out_dir.mkdir(parents=True, exist_ok=True)
 
         for image_id in image_ids:
@@ -164,6 +248,27 @@ class FGCInferPipeline(BasePipeline):
         img = Image.open(image_path).convert("RGB")
         image_w, image_h = img.size
         image_np = np.array(img)
+
+        if self._oneshot_mode:
+            classifier = self._oneshot_classifier()
+            min_score = float(self.cfg.fgc.route.min_score)
+            write_oneshot_detections(
+                out_path,
+                [
+                    classifier.resolve(
+                        coarse_id,
+                        self.detector_classmap.coarse_classes[coarse_id],
+                        box,
+                        score,
+                        image_np,
+                        image_w,
+                        image_h,
+                        min_score,
+                    )
+                    for coarse_id, box, score in rows
+                ],
+            )
+            return
 
         out_lines: list[str] = []
         for coarse_id, box, score in rows:
@@ -222,11 +327,15 @@ class FGCInferPipeline(BasePipeline):
         (score below threshold) and has no 1:1 fine fallback -- see _safe_fine_id,
         which guards exactly that case at the call site.
         """
-        if self.classmap.needs_fgc(coarse_class) and score >= float(self.cfg.fgc.route.min_score):
-            xyxy = bbox_utils.yolo_to_xyxy(box, image_w, image_h)
-            xyxy_int = bbox_utils.clip_xyxy(xyxy, image_w, image_h)
-            crop = bbox_utils.crop_xyxy(image_np, xyxy_int)
+        routed = self._global or self.classmap.needs_fgc(coarse_class)
+        if routed and score >= float(self.cfg.fgc.route.min_score):
+            # The same view the classifier was trained and validated on: the box grown by
+            # crop_box.CROP_MARGIN_FRAC, clipped to the image (before: the bare box).
+            crop = cut(image_np, bbox_utils.yolo_to_xyxy(box, image_w, image_h))
             if crop.size > 0:
+                if self._global:
+                    allowed = self.classmap.fine_of_group(coarse_class) if self._by_coarse else None
+                    return self._classify_crop(GLOBAL_GROUP, crop, allowed)
                 return self._classify_crop(coarse_class, crop)
             # Degenerate box (zero-area after clipping, e.g. sits on the image edge)
             # -- can't classify, fall through to the same un-refined fallback used
@@ -240,7 +349,9 @@ class FGCInferPipeline(BasePipeline):
         # degenerate-crop case above) -- leave un-refined, label stays coarse.
         return coarse_class, score
 
-    def _classify_crop(self, group: str, crop: np.ndarray) -> tuple[str, float]:
+    def _classify_crop(
+        self, group: str, crop: np.ndarray, allowed: list[str] | None = None
+    ) -> tuple[str, float]:
         """Softmax-argmax fine label, plus (ArcFace only) an "Other" reject gate.
 
         The label decision is always softmax-argmax over the head logits (unchanged
@@ -249,16 +360,24 @@ class FGCInferPipeline(BasePipeline):
         crop is out-of-vocabulary, so it's returned as OTHER_CLASS_NAME (which
         _safe_fine_id maps to OTHER_FINE_ID). The reported fine_score stays the softmax
         confidence so the output column keeps a consistent meaning.
+
+        Global head: `allowed` (fgc.route.by_coarse) restricts the softmax to those
+        classes, unless the head has none of them (a leave-out run); no Other gate.
         """
         tensor = self.transform(Image.fromarray(crop)).unsqueeze(0).to(self.device)
         model = self.models[group]
         fine_classes = self._fine_classes_per_group[group]
         with torch.no_grad():
             logits = model(tensor)
+            if allowed is not None:
+                outside = torch.tensor([name not in allowed for name in fine_classes])
+                if not outside.all():
+                    logits = logits.masked_fill(outside.to(logits.device), float("-inf"))
             probs = torch.softmax(logits, dim=1)
             conf, idx = probs.max(dim=1)
 
-            if self._reject_enabled and isinstance(model, ArcFaceModel):
+            gate = group != GLOBAL_GROUP and self._reject_enabled
+            if gate and isinstance(model, ArcFaceModel):
                 cosine = model.head.cosine(model.embed(tensor))
                 max_cosine = float(cosine.max(dim=1).values.item())
                 if max_cosine < self._other_min_cosine:

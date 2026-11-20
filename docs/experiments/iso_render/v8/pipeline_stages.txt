@@ -1,0 +1,7 @@
+== PID_DATA_ROOT=data/iso_open100 python -m pipeline.build_classes hydra.run.dir=data/iso_open100/_hydra oneshot.symbols_dir=data/raw/iso_symbols_clean oneshot.vocab_csv=data/raw/iso_symbols/vocab.csv
+exit 0
+== PID_DATA_ROOT=data/iso_open100 python -m pipeline.build_manifest hydra.run.dir=data/iso_open100/_hydra oneshot.symbols_dir=data/raw/iso_symbols_clean oneshot.vocab_csv=data/raw/iso_symbols/vocab.csv
+exit 0
+== PID_DATA_ROOT=data/iso_open100 python -m pipeline.coco_to_yolo hydra.run.dir=data/iso_open100/_hydra oneshot.symbols_dir=data/raw/iso_symbols_clean oneshot.vocab_csv=data/raw/iso_symbols/vocab.csv
+exit 0
+classes.yaml / manifest.csv / annotations.coco.json byte-identical after re-running pid-prep-classes and pid-prep-manifest

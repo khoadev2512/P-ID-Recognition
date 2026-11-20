@@ -8,6 +8,7 @@ Usage:
     python src/run_pipeline.py prep [--step classes|manifest|yolo|tiles|crops|all]
     python src/run_pipeline.py detect --train | --infer
     python src/run_pipeline.py fgc --train | --infer
+    python src/run_pipeline.py prototypes oneshot.encoder_ckpt=<run>/fgc_checkpoints/__global__.pt
     python src/run_pipeline.py evaluate
 
 Hydra overrides work the same as the individual pid-* commands, just appended:
@@ -34,6 +35,7 @@ from pipeline.evaluation import EvaluationPipeline
 from pipeline.extract_crops import ExtractCropsPipeline
 from pipeline.fgc_infer import FGCInferPipeline
 from pipeline.fgc_train import FGCTrainPipeline
+from pipeline.iso_prototypes import IsoPrototypePipeline
 from pipeline.tiling import TilingPipeline
 from utils.cli import CONFIG_DIR
 
@@ -68,6 +70,11 @@ def _parse_args() -> tuple[argparse.Namespace, list[str]]:
     fgc_mode = fgc.add_mutually_exclusive_group(required=True)
     fgc_mode.add_argument("--train", action="store_true")
     fgc_mode.add_argument("--infer", action="store_true")
+
+    sub.add_parser(
+        "prototypes",
+        help="One-shot GĐ2: embed the ISO template library with a frozen encoder",
+    )
 
     sub.add_parser("evaluate", help="Run evaluation (detection + FGC metrics)")
 
@@ -106,6 +113,9 @@ def main() -> None:
 
     elif args.command == "fgc":
         (FGCTrainPipeline(cfg) if args.train else FGCInferPipeline(cfg)).run()
+
+    elif args.command == "prototypes":
+        IsoPrototypePipeline(cfg).run()
 
     elif args.command == "evaluate":
         EvaluationPipeline(cfg).run()

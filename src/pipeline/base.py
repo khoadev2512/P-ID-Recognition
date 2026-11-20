@@ -24,6 +24,7 @@ class BasePipeline(ABC):
         self.cfg = cfg
         self.paths = DataPaths(root=Path(str(cfg.data_root)))
         self._classmap: ClassMap | None = None
+        self._detector_classmap: ClassMap | None = None
 
     @property
     def classmap(self) -> ClassMap:
@@ -31,6 +32,18 @@ class BasePipeline(ABC):
         if self._classmap is None:
             self._classmap = load_classmap(self.paths.classes_yaml)
         return self._classmap
+
+    @property
+    def detector_classmap(self) -> ClassMap:
+        """Label set of the Stage-1 detector checkpoint: ++detector.classes_yaml when set (a
+        detector trained on another dataset, e.g. the DigitizePID detector run on OPEN100-ISO,
+        whose classes.yaml is ISO's), else this data root's classes.yaml."""
+        path = (self.cfg.get("detector", None) or {}).get("classes_yaml", None)
+        if path is None:
+            return self.classmap
+        if self._detector_classmap is None:
+            self._detector_classmap = load_classmap(Path(str(path)))
+        return self._detector_classmap
 
     @property
     def output_dir(self) -> Path:

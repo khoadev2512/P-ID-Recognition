@@ -1,0 +1,9 @@
+data_root: data/iso_open100 | oneshot.symbols_dir: data/raw/iso_symbols_clean | vocab_csv: data/raw/iso_symbols/vocab.csv
+symbols_dir exists: True | vocab exists: True
+DataPaths.coco_json: data/iso_open100/canonical/annotations.coco.json | classmap coarse: 13 fine: 45 fgc_groups: ['agitator', 'blind_disc', 'check_valve', 'heat_exchanger', 'valve']
+rare_fine: ['compressor_centrifugal', 'hose', 'hx_coil', 'hx_general', 'hx_straight_tube', 'motor_electric', 'open_disc', 'pipeline', 'piping_heated_cooled_insulated', 'pump_diaphragm', 'tank', 'vessel_spherical']
+manifest rows: 826 {'test': 826}
+find_image ok for all manifest ids: True
+evaluation._stem: iso00_v000
+detect_infer constructed; classmap coarse ids: 7 manifest exists: True
+fgc_infer constructed; classmap coarse ids: 7 manifest exists: True

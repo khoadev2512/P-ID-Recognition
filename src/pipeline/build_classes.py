@@ -18,6 +18,7 @@ import yaml
 from omegaconf import DictConfig
 
 from pipeline.base import BasePipeline
+from utils.classmap import IGNORE_CATEGORY
 from utils.cli import CONFIG_DIR
 
 
@@ -38,10 +39,12 @@ class BuildClassesPipeline(BasePipeline):
         with self.paths.coco_json.open("r") as f:
             coco = json.load(f)
 
-        categories = coco.get("categories", [])
+        # The ignore-region category (iscrowd: 1 boxes, utils.classmap.IGNORE_CATEGORY) is no
+        # class; DigitizePID's COCO has none, so this changes nothing there.
+        categories = [c for c in coco.get("categories", []) if c["name"] != IGNORE_CATEGORY]
         if not categories:
             raise ValueError(f"{self.paths.coco_json}: no `categories` found")
-        annotations = coco.get("annotations", [])
+        annotations = [a for a in coco.get("annotations", []) if not a.get("iscrowd")]
 
         # fine -> coarse, preserving COCO category-id order (not alphabetical) so
         # fine ids stay meaningful / stable across re-derivations of the same COCO file.
@@ -52,12 +55,24 @@ class BuildClassesPipeline(BasePipeline):
         # reproducibility (unlike fine ids, coarse ids don't need to track COCO order).
         coarse_classes = sorted({c["supercategory"] for c in categories})
 
-        # fgc_groups: operational definition — a coarse class needs the FGC stage iff
-        # it has MORE THAN ONE associated fine class (i.e. the detector alone cannot
-        # tell its children apart, so a second, fine-grained head is needed). Coarse
-        # classes with exactly one fine child (fine == coarse in effect) skip FGC.
-        fine_count_per_coarse: Counter[str] = Counter(fine_to_coarse.values())
-        fgc_groups = [c for c in coarse_classes if fine_count_per_coarse[c] > 1]
+        # fgc_groups: a coarse class needs the FGC stage iff it's a VISUALLY SIMILAR
+        # family (detector alone can't tell its children apart). Two ways to decide:
+        #
+        #   1. If the COCO categories carry an explicit `fgc` flag (the ISO renderer
+        #      writes one, from vocab.csv's hand-marked fgc_group column) — trust it.
+        #      With a detailed vocab, "coarse has >1 fine" over-triggers: pump has
+        #      centrifugal/gear/diaphragm children that look clearly different and need
+        #      no FGC. The explicit flag captures real visual similarity.
+        #   2. Otherwise fall back to the >1-fine heuristic (DigitizePID path, where a
+        #      coarse with multiple fine children is in fact a look-alike family).
+        explicit_fgc = {
+            c["supercategory"] for c in categories if c.get("fgc") is True
+        }
+        if any("fgc" in c for c in categories):
+            fgc_groups = [c for c in coarse_classes if c in explicit_fgc]
+        else:
+            fine_count_per_coarse: Counter[str] = Counter(fine_to_coarse.values())
+            fgc_groups = [c for c in coarse_classes if fine_count_per_coarse[c] > 1]
 
         # rare_fine: flag the bottom decile (<=10th percentile) of fine classes by
         # training-instance frequency across ALL annotations (build_manifest hasn't

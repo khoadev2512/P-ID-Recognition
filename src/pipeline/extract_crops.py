@@ -10,11 +10,23 @@ per-fine-class folder tree that torchvision ImageFolder can read directly:
 Only symbols in fgc_groups (valve / instrument_bubble / fitting) are extracted by
 default; controlled by cfg.fgc.groups (classmap.needs_fgc is the source of truth,
 should match).
+
+cfg.fgc.global_encoder=true extracts EVERY symbol instead, including the coarse
+families with a single fine child that the per-group path has no head for. That is
+required by the one-shot ISO path: the global embedding encoder trains over the whole
+fine vocabulary, so a class with no crops here would simply be missing from the
+embedding space it is supposed to be separable in.
+
+Each PNG is the symbol's stored CONTEXT (box grown by CROP_CONTEXT_FRAC per side), not
+the view it is classified on; `<fine_class>/_boxes.csv` records the box and the crop's
+origin so the dataset cuts the view (box + CROP_MARGIN_FRAC, the same as at inference)
+or a jittered one at train time. See utils.crop_box.
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import cv2
 import hydra
@@ -22,15 +34,8 @@ import pandas as pd
 from omegaconf import DictConfig
 
 from pipeline.base import BasePipeline
-from utils import bbox_utils
 from utils.cli import CONFIG_DIR
-
-# Margin added around each ground-truth box before cropping, as a fraction of the
-# box's own size per side. Symbol detectors/crops benefit from a little context
-# around the tight box (stems, adjoining lines used to disambiguate fine classes);
-# 10% is a reasonable default that doesn't drag in neighbouring symbols on typical
-# P&ID symbol spacing.
-CROP_MARGIN_FRAC = 0.10
+from utils.crop_box import StoredCrop, context_region, write_boxes
 
 
 class ExtractCropsPipeline(BasePipeline):
@@ -58,8 +63,11 @@ class ExtractCropsPipeline(BasePipeline):
 
         anns_by_image: dict[int, list[dict]] = {}
         for ann in coco.get("annotations", []):
+            if ann.get("iscrowd"):
+                continue  # an ignore region (utils.classmap.IGNORE_CATEGORY) is no symbol
             anns_by_image.setdefault(ann["image_id"], []).append(ann)
 
+        stored: dict[Path, list[tuple[str, StoredCrop]]] = {}  # per class dir: its _boxes.csv
         for coco_image_id, img in images_by_id.items():
             image_id = self._stem(img["file_name"])
             split = split_by_id.get(image_id)
@@ -68,13 +76,9 @@ class ExtractCropsPipeline(BasePipeline):
                 # rather than guessing a split for it.
                 continue
 
-            fgc_anns = [
-                ann
-                for ann in anns_by_image.get(coco_image_id, [])
-                if self.classmap.needs_fgc(
-                    category_id_to_category[ann["category_id"]]["supercategory"]
-                )
-            ]
+            fgc_anns = self._wanted_anns(
+                anns_by_image.get(coco_image_id, []), category_id_to_category
+            )
             if not fgc_anns:
                 continue
 
@@ -89,24 +93,35 @@ class ExtractCropsPipeline(BasePipeline):
                 fine_class = category["name"]
 
                 x, y, w, h = ann["bbox"]
-                xyxy = (x, y, x + w, y + h)
-                xyxy = self._add_margin(xyxy, w, h)
-                xyxy_int = bbox_utils.clip_xyxy(xyxy, width, height)
-                crop = bbox_utils.crop_xyxy(image, xyxy_int)
+                box = (float(x), float(y), float(x + w), float(y + h))
+                x1, y1, x2, y2 = context_region(box, width, height)
+                if x2 <= x1 or y2 <= y1:
+                    continue  # degenerate box (outside the image): nothing to crop
+                crop = image[y1:y2, x1:x2]
 
                 out_dir = self.paths.crops_fgc / split / fine_class
                 out_dir.mkdir(parents=True, exist_ok=True)
-                out_path = out_dir / f"{image_id}_{ann_index}.png"
-                cv2.imwrite(str(out_path), crop)
+                name = f"{image_id}_{ann_index}.png"
+                cv2.imwrite(str(out_dir / name), crop)
+                stored.setdefault(out_dir, []).append((name, StoredCrop(box, (x1, y1))))
 
-    @staticmethod
-    def _add_margin(
-        xyxy: tuple[float, float, float, float], box_w: float, box_h: float
-    ) -> tuple[float, float, float, float]:
-        x1, y1, x2, y2 = xyxy
-        mx = box_w * CROP_MARGIN_FRAC
-        my = box_h * CROP_MARGIN_FRAC
-        return (x1 - mx, y1 - my, x2 + mx, y2 + my)
+        for out_dir, rows in stored.items():
+            write_boxes(out_dir, rows)
+
+    def _wanted_anns(
+        self, anns: list[dict], category_id_to_category: dict[int, dict]
+    ) -> list[dict]:
+        """Annotations to crop: every symbol under cfg.fgc.global_encoder, else only
+        those whose coarse family is routed to a fine head (classmap.needs_fgc)."""
+        if bool(self.cfg.fgc.get("global_encoder", False)):
+            return list(anns)
+        return [
+            ann
+            for ann in anns
+            if self.classmap.needs_fgc(
+                category_id_to_category[ann["category_id"]]["supercategory"]
+            )
+        ]
 
     @staticmethod
     def _stem(file_name: str) -> str:

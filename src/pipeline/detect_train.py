@@ -5,21 +5,65 @@ in §4.2.2) via whichever labels pipeline.tiling baked into derived/tiles/data.y
 Thin wrapper over ultralytics.YOLO(...).train — this module owns config plumbing and
 result-path bookkeeping (mirrors PID_Symbol_Detection's YOLOTrainer), not a hand-rolled
 training loop.
+
+Scan-like degradation (`utils.scan_degrade`, off unless `detector.aug.degrade.p > 0`) has no
+Ultralytics hyperparameter, so it comes in through `ScanDegradeTrainer`: the train dataset
+degrades each image as it is loaded, before mosaic and the geometric augment (no box moves,
+and the mosaic's grey padding is never taken for ink). Validation images stay clean.
 """
 
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 
 import hydra
 from omegaconf import DictConfig
 from ultralytics import YOLO
+from ultralytics.data.dataset import YOLODataset
+from ultralytics.models.yolo.detect import DetectionTrainer
 
 from pipeline.base import BasePipeline
 from utils.cli import CONFIG_DIR
+from utils.scan_degrade import ScanDegrade, gray_of, stroke_width
 
 logger = logging.getLogger(__name__)
+
+
+class ScanDegradeDataset(YOLODataset):
+    """A YOLODataset whose images are degraded as they are loaded. Only the image changes, so
+    the labels hold. The clean image is what Ultralytics caches / buffers; each load draws a
+    new degradation. The stroke width of an image is measured once (per worker) and kept."""
+
+    scan_degrade: ScanDegrade
+
+    def load_image(self, i, rect_mode=True, resize_short=False):
+        im, hw0, hw = super().load_image(i, rect_mode, resize_short)
+        if not self.scan_degrade.fires():
+            return im, hw0, hw
+        widths = self.__dict__.setdefault("stroke_widths", {})
+        if (i, im.shape) not in widths:
+            widths[i, im.shape] = stroke_width(gray_of(im))
+        return self.scan_degrade.apply(im, widths[i, im.shape]), hw0, hw
+
+
+class ScanDegradeTrainer(DetectionTrainer):
+    """DetectionTrainer whose train dataset is a `ScanDegradeDataset`. Pass it to
+    `YOLO.train(trainer=partial(ScanDegradeTrainer, scan_degrade=...))`."""
+
+    def __init__(self, *args, scan_degrade: ScanDegrade, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.scan_degrade = scan_degrade
+
+    def build_dataset(self, img_path, mode="train", batch=None):
+        dataset = super().build_dataset(img_path, mode, batch)
+        if mode == "train":
+            if type(dataset) is not YOLODataset:
+                raise TypeError(f"scan degradation expects a YOLODataset, got {type(dataset)}")
+            dataset.__class__ = ScanDegradeDataset  # built (and cached) clean, degraded on load
+            dataset.scan_degrade = self.scan_degrade
+        return dataset
 
 
 class DetectTrainPipeline(BasePipeline):
@@ -56,8 +100,18 @@ class DetectTrainPipeline(BasePipeline):
             )
         return Path(str(resume_dir)) / "train" / "weights" / "last.pt"
 
+    def _trainer(self):
+        """The Ultralytics trainer to use: None (the default one) unless scan degradation is on.
+        Resuming does not restore it: pass the same `detector.aug.degrade` override again."""
+        degrade = ScanDegrade.from_cfg(self.cfg.detector.aug.get("degrade"))
+        if degrade is None:
+            return None
+        logger.info("Scan degradation on for training images: %r", degrade)
+        return partial(ScanDegradeTrainer, scan_degrade=degrade)
+
     def run(self) -> None:
         self.validate()
+        trainer = self._trainer()
 
         if bool(self.cfg.detector.get("resume", False)):
             # True Ultralytics resume: reload last.pt AND its optimizer/LR/epoch state,
@@ -69,7 +123,7 @@ class DetectTrainPipeline(BasePipeline):
             logger.info("Resuming detector training from %s", last)
             model = YOLO(str(last))
             try:
-                model.train(resume=True)
+                model.train(trainer=trainer, resume=True)
             except Exception:
                 logger.exception("Detector training (resume) failed")
                 raise
@@ -80,6 +134,7 @@ class DetectTrainPipeline(BasePipeline):
         model = YOLO(str(self.cfg.detector.weights))
         try:
             model.train(
+                trainer=trainer,
                 data=str(data_yaml),
                 epochs=self.cfg.detector.epochs,
                 batch=self.cfg.detector.batch,

@@ -1,0 +1,34 @@
+
+gate (k >= 3.5)
+scenario                 tests  fail strict-fail  detail detail-fail  min own max other
+clean                      288     0           0      33           0     1.00      0.00
+all_erode                  288     0           0      33           0     0.53      0.16
+all_dilate                 288     0           2      33           0     0.90      0.43
+only_rotate_deg            288     0           0      33           0     0.92      0.04
+only_shear_deg             288     0           0      33           0     0.96      0.02
+only_erode                 288     0           0      33           0     0.60      0.02
+only_dilate                288     0           0      33           0     1.00      0.28
+only_blur                  288     0           0      33           0     0.95      0.15
+only_pixelate              288     0           0      33           0     0.91      0.20
+only_lighting              288     0           0      33           0     1.00      0.12
+only_noise_sigma           288     0           0      33           0     1.00      0.11
+only_jpeg_quality          288     0           0      33           0     1.00      0.07
+
+below the gate
+scenario                 tests  fail strict-fail  detail detail-fail  min own max other
+clean                       96     0           0      17           0     1.00      0.71
+all_erode                   96     0           0      17           0     0.59      0.27
+all_dilate                  96     0           2      17           0     0.89      0.69
+only_rotate_deg             96     0           0      17           0     0.96      0.63
+only_shear_deg              96     0           0      17           0     0.96      0.68
+only_erode                  96     1           1      17           0     0.59      0.10
+only_dilate                 96     0           0      17           0     1.00      0.79
+only_blur                   96     0           0      17           0     0.95      0.59
+only_pixelate               96     0           0      17           0     0.92      0.58
+only_lighting               96     0           0      17           0     1.00      0.71
+only_noise_sigma            96     0           0      17           0     1.00      0.69
+only_jpeg_quality           96     0           0      17           0     0.99      0.63
+
+detail failures (a distinguishing detail faded, or the other class's grew):
+
+failures of the all-maximum scenarios (class confused):

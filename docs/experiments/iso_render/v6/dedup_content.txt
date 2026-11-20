@@ -1,0 +1,7 @@
+V6 content dedup (min_node_diff 0.05), V5 bridges (page.bridge_gap 1.5), overlap permission from the unscaled sheet; base_seed 0, 12 sheets
+attempts 444, kept 432, dropped duplicate 0, signature 0
+share of nodes differing from the closest kept variant, 431 candidates:
+  min 0.190  p5 0.220  median 0.387  p95 0.507  max 0.605
+  below 0.05: 0;  below 0.10: 0
+drawn candidates with a hash distance recorded: 431; hash distance < 8 (the old filter's drop): 43
+  their node share: min 0.200 median 0.366 max 0.465

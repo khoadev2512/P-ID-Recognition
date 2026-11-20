@@ -1,0 +1,9 @@
+G1 check: sheet 3, seed 0, 6800x4635 px
+drawn: arrow:flow_direction=15, bubble:other_isa=26, flag:flag=3, generic:other_generic=5, iso:blind_disc=2, iso:breather_valve=2, iso:check_valve_globe=4, iso:check_valve_swing=1, iso:compensator=1, iso:flame_arrestor=3, iso:flame_arrestor_detonation_proof=2, iso:flame_arrestor_explosion_proof=1, iso:flanged_connection=4, iso:funnel=3, iso:interchangeable_disc=1, iso:pump_gear=1, iso:pump_general=1, iso:reducer=1, iso:silencer=2, iso:steam_trap=1, iso:valve_gate=2, iso:valve_general=1, iso:valve_globe=5, iso:valve_needle=2, iso:viewing_glass=1
+log: iso=39, shrunk=0, replaced=0, multi_as_generic=3, zero_length_runs=12, skipped_internal_runs=0, unmatched_ports=0, loose_ends=4, stems=8, flanges=2, nozzles=4, resized=5, turned=1, leaders=0
+[1] pipe and symbol meet within 1 px: 98/98 ports  -> PASS
+[2] stroke thickness: symbols 3.00 px, pipes 3.00 px (|diff| 0.00 <= 1.0)  -> PASS
+[3] new overlapping pairs vs the 16 source pairs within column_tol: 0 with an ISO symbol, 0 between non-ISO shapes (ignored)  -> PASS
+[5] graph edges between drawn symbols joined or touching: 45/45  -> PASS
+[4] look at the picture: docs/experiments/iso_render/v5_g1/sheet3.png
+automatic criteria: ALL PASS
