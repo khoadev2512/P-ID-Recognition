@@ -44,16 +44,24 @@ def _is_14(cell: str) -> bool:
     return "template_align" in code or "ROWS14" in code or "in F0:" in code
 
 
+def _is_17(cell: str) -> bool:
+    """§17 (PHASE C §2L): the fine-tuned DINOv2 (FT-triển khai) against `formB`, plus e2e."""
+    code = _active([cell])
+    return "ENC_FT" in code or "ROWS17" in code
+
+
 def _is_16(cell: str) -> bool:
     """§16 (PHASE C §2K.6): form B of the butterfly and aggregate=max, against §15's base."""
     code = _active([cell])
-    return "PROTO43" in code or "ROWS16" in code or "in K4:" in code
+    return not _is_17(cell) and ("PROTO43" in code or "ROWS16" in code or "in K4:" in code)
 
 
 def _is_15(cell: str) -> bool:
     """§15 (PHASE C §2G, Điểm 4): reruns §13's protocols with `pipeline` excluded."""
     code = _active([cell])
-    return not _is_16(cell) and ("NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code)
+    return not (_is_16(cell) or _is_17(cell)) and (
+        "NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code
+    )
 
 
 def test_never_reads_an_old_crop_zip(code_cells):
@@ -389,7 +397,7 @@ def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cel
     s13 = [
         c
         for c in code_cells
-        if "__dinov2__" in _active([c]) and not (_is_14(c) or _is_15(c) or _is_16(c))
+        if "__dinov2__" in _active([c]) and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c))
     ]
     assert len(s13) == 4  # 13a, 13b, 13c, 13e (13d only reads metrics)
     make, run, p4, e2e = (_active([c]) for c in s13)
@@ -455,7 +463,7 @@ def test_section_14_reruns_tau_p1_p4_with_each_template_align_and_keeps_the_csvs
     last_13 = max(
         i
         for i, c in enumerate(code_cells)
-        if "__dinov2__" in c and not (_is_14(c) or _is_15(c) or _is_16(c))
+        if "__dinov2__" in c and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c))
     )
     assert last_13 < idx[0] < idx[1] < idx[2]
 
@@ -538,3 +546,48 @@ def test_section_16_checks_form_b_and_max_against_the_41_template_base(code_cell
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s16]
     last_15 = max(i for i, c in enumerate(code_cells) if _is_15(c))
     assert last_15 < idx[0] < idx[1] < idx[2] < idx[3]
+
+
+def test_section_17_checks_the_deployed_fine_tune_against_form_b_with_e2e(code_cells):
+    """PHASE C §2L: the FT encoder trained locally is checked by sha256 and its meta (all
+    templates, alpha 0.5) before use; 43 prototypes and a CL2N center rebuilt with it (center
+    on §13's crops); tau (val_sel, R1a) -> P2 (test, R1b) -> P1 -> P4 (R1a) without `pipeline`,
+    checked against formB's crops; e2e of formB and ft at each line's own tau, Stage 2 cache
+    keyed by the checkpoint hash; CSVs / e2e JSON under the names scripts/ft_colab_compare.py
+    reads."""
+    s17 = [c for c in code_cells if _is_17(c)]
+    assert len(s17) == 5  # 17a build, 17b tau + P2 + P1, 17c P4, 17d e2e, 17e table
+    build, run, p4cell, e2e, table = (_active([c]) for c in s17)
+    assert "ENC_FT = f'{ENC_DIR}/__dinov2_ft_all_a0.5__.pt'" in build
+    assert "h.hexdigest() == FT_SHA" in build and "__FT_SHA__" not in build
+    assert "m['fold'] == 'all' and m['held_out'] == [] and m['alpha'] == 0.5" in build
+    assert "oneshot.encoder_ckpt=$ENC_FT oneshot.prototypes=$PROTO_FT" in build
+    assert "++oneshot.extra_forms_dir=$FORMS_DIR" in build and "d.names == d43.names" in build
+    assert "protocol=center" in build and "c['n_crops'] == c0['n_crops']" in build
+    assert build.index("prototypes run_dir") < build.index("protocol=center")
+    assert "make_imagenet_encoder" not in "".join((build, run, p4cell, e2e))
+    assert "++oneshot.center={CENTER_FT} {NOPIPE}" in run
+    lines = [ln for ln in (run + "\n" + p4cell).splitlines() if "protocol=" in ln]
+    tau, p2, p1, p4 = (
+        next(ln for ln in lines if f"protocol={p}" in ln) for p in ("tau", "p2", "p1", "p4")
+    )
+    assert "image_subset=val_sel" in tau and "$GROUPS $ENC_K" in tau
+    assert "image_subset=test" in p2 and "$GROUPS_P2 $ENC_K" in p2
+    assert "image_subset" not in p1 and "GROUPS" not in p1 and "$ENC_K" in p1
+    assert "LOCAL_ISO_ROOT" in p4 and "$GROUPS $ENC_K" in p4
+    assert run.index("protocol=tau") < run.index("protocol=p2") < run.index("protocol=p1")
+    assert "eval_tau_dinov2_ft" in run and "eval_tau_dinov2_formB" in run
+    assert "CSV_DIR = f'{RUNS_DIR}/ft_csv'" in build
+    assert "f'{CSV_DIR}/oneshot_{p}_crops_dinov2_ft.csv'" in run
+    assert "f'{CSV_DIR}/oneshot_p4_crops_dinov2_ft.csv'" in p4cell
+    assert "chosen_taus(f'dinov2_{tag}')['rule_a']" in e2e and "fgc --infer" in e2e
+    assert "eval.mode=det_plus_fgc" in e2e and e2e.count("++fgc.oneshot=true") == 2
+    assert "f'ft_{FT_SHA[:8]}'" in e2e and "{DINO} {A4} {NOPIPE}" in e2e
+    assert "restore(f'{KEEP_ISO}/detections_agnostic', ISO_DET, 864)" in e2e
+    assert "eval_e2e_iso_" not in e2e  # §12 / §13 tests key on that run name
+    assert "f'{CSV_DIR}/e2e_dinov2_{tag}.json'" in e2e
+    assert "('formB', 'dinov2_formB'), ('ft', 'dinov2_ft')" in table
+    assert "ft_colab_compare.py" in table
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s17]
+    last_16 = max(i for i, c in enumerate(code_cells) if _is_16(c))
+    assert last_16 < idx[0] < idx[1] < idx[2] < idx[3] < idx[4]

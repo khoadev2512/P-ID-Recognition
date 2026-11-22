@@ -823,6 +823,12 @@ dưới; `runs/phase_c/nopipe_sim/results.json`): tác động **nhỏ**.
 - Lớp duy nhất đổi: `flanged_connection` 0.592 → 0.639. Trong 933 crop từng bị gọi `pipeline`, chỉ 195 thành đúng; còn lại sang
   flow_direction 374, tank 326 → điểm yếu mặt bích là của encoder, `pipeline` chỉ là nơi lỗi rơi vào trước.
 
+**Kết quả Colab §15 — 2026-11-20** (`scripts/nopipe_compare.py` → `runs/phase_c/nopipe/`): kiểm nhất quán ĐẠT (P1 / P2 / P4: 2 / 7 / 2216
+crop đổi top-1, đúng → sai 0, lệch cos ≤ 1e-6 — khớp đúng mô phỏng). **P2 (sạch):** S / V top-1 không đổi, V top-3 +0.009 (tốt hơn),
+AUROC lề +0.002 (tốt hơn), **AUROC cos −0.00003 (CI [−0.00007, −0.000003]) "kém hơn"** → theo luật: báo user, ghi đánh đổi (độ lớn không
+đáng kể); quyết định ngữ nghĩa giữ nguyên. P1 / P4 (hậu kiểm): đúng như mô phỏng (P4 S 0.847 → 0.863, AUROC cos −0.002, lề +0.005).
+τ 41: luật A 0.1979 (δ 0.0157). → 41 ảnh mẫu là mốc của §2K.6.
+
 ## 2H. A — So khớp theo patch DINOv2 (tầng giữa) — LUẬT CHỐT 2026-11-19, TRƯỚC KHI CODE / CHẠY (user: "Hãy thử A")
 
 **Cơ sở** (tra 2026-11-19, user yêu cầu): không paper P&ID nào đo đúng thiết lập "ảnh mẫu theo chuẩn ISO → bản vẽ khác phong cách"
@@ -1253,6 +1259,140 @@ Kiểm: mốc 41/mean tái lập P4-val 0.742, P1-val 0.477 / AUROC 0.692. Form 
 `PrototypeDirectory` cấm trùng tên); (b) `oneshot.aggregate=max` (hiện chỉ `vote` / `mean`); (c) **τ chọn lại trên val_sel** cho cấu hình
 mới (phân bố điểm `max` khác mean). Rồi luật chấp nhận Colab (P4 + P1 + P2, theo nhóm, CI theo tờ) viết trước khi chạy.
 
+### 2K.7 Kết quả Colab §16 — 2026-11-20 (áp luật §2K.6, `scripts/k4_colab_compare.py` → `runs/phase_c/k4_colab/`) → **(i) NHẬN, (ii) KHÔNG NHẬN** → cấu hình đề xuất = **`formB`**
+
+Kiểm nhất quán ĐẠT (cùng tập crop mọi protocol; mọi crop đổi top-1 của dòng dạng B đều có butterfly trong top-3: P1 0 / P2 18 / P4 966 crop
+với `formB`; P2 19 / P4 729 với `formB_max` so với `max`). τ chọn lại trên val_sel: mean 0.1979 (δ 0.0157) — `formB` trùng mốc; `max`
+0.3281 (δ 0.0066).
+
+| so với `base41` (CI 95%) | `formB` | `max` | `formB_max` |
+|---|---|---|---|
+| P4 suy giảm S (0.863) | 0.863, không khác | **0.781, kém hơn** [−0.105, −0.051] | **0.781, kém hơn** |
+| P4 V (0.437) | **0.536, tốt hơn** [+0.090, +0.106] | 0.465, tốt hơn | 0.555, tốt hơn |
+| P4 H_chon (0.547) | 0.547, không khác | 0.638, tốt hơn | 0.638, tốt hơn |
+| P4 H_tu_nhien (0.646) | 0.646, không khác | 0.772, tốt hơn | 0.772, tốt hơn |
+| P4 AUROC cos (0.726) | 0.725, không khác | 0.802, tốt hơn | 0.803, tốt hơn |
+| P2 S / V top-1 (0.648 / 0.267) | 0.648 / **0.284 tốt hơn** | **0.681 tốt hơn** / 0.273 | 0.681 tốt hơn / 0.280 |
+| P2 AUROC cos (0.571) | 0.571 (+0.0002, "tốt hơn") | 0.642, tốt hơn | 0.642, tốt hơn |
+| P1 đủ top-1 / AUROC cos (0.576 / 0.360) | 0.576 / 0.360 (0 crop đổi) | 0.593 / 0.434 | 0.593 / 0.434 |
+| **Luật §2K.6** | **NHẬN** (đủ 5 điều kiện) | KHÔNG NHẬN (P4 S kém hơn) | KHÔNG NHẬN (P4 S kém hơn) |
+
+- **(i) `formB` NHẬN.** Chỉ đổi butterfly như dự báo: P4 butterfly 0.60 → **1.00** (nhóm V +0.098), P2 V +0.017 (bằng chứng sạch). Không
+  nhóm / AUROC nào kém hơn. Nhắc lại giới hạn: mức tăng P4 có sẵn do bộ render dùng cùng SVG; P2 là số độc lập.
+- **(ii) `max` KHÔNG NHẬN — đúng rủi ro ghi trước.** Nhóm S của P4 có 3 lớp; tụt **chỉ do `flanged_connection` 0.64 → 0.35** (4,114 crop;
+  crop đúng → sai sang motor_electric 441, flow_direction 409, hx_straight_tube 235, piping_heated_cooled_insulated 170), flow_direction
+  1.00 → 1.00, valve_gate 0.95 → 1.00. Mọi số còn lại của `max` tăng: P4 V / H_chon / H_tu_nhien, AUROC cos P4 +0.076 / P2 +0.071 / P1
+  +0.074, P2 S +0.033. Theo §2K.6: ghi **đánh đổi**, không sửa luật; `max` → **ablation** (luận văn báo cả dòng). Lớp tăng mạnh:
+  agitator_general 0.05 → 0.90, valve_general 0.08 → 0.55, agitator_turbine 0.10 → 0.64, interchangeable_disc 0.75 → 0.97, check_valve_general
+  0.70 → 0.92; giảm: flanged 0.64 → 0.35, valve_needle 0.22 → 0.08, column 0.94 → 0.79, valve_control 0.37 → 0.27,
+  interchangeable_disc_open 0.97 → 0.88. Hướng giảm khớp P4-val (§2K.5) → P4-val dự báo đúng cả chiều tăng lẫn chiều giảm.
+- **Cấu hình đề xuất mới:** 2B, 41 lớp (bỏ `pipeline`) + `valve_butterfly@B` = 43 prototype / 42 lớp, gộp trung bình, τ 0.1979.
+  Mọi ý "max nhưng xử lý riêng mặt bích" là **hậu kiểm** (đã xem P4 từng lớp) → chỉ được làm với luật mới, chọn trên tập quyết định khác P4.
+- Chưa làm: end-to-end (§12 / 13e) cho cấu hình mới — theo §2K.6 cần luật riêng; `configs/config.yaml` chưa sửa (cần user duyệt).
+
+## 2L. Bước 4 — Fine-tune DINOv2 "giữ ảnh mẫu ra" để tách ảnh mẫu giống nhau — **CHỐT 2026-11-21 (user duyệt cách chia cụm + chặn (a) / (b)), TRƯỚC KHI CODE / CHẠY**
+
+**Mục tiêu:** lỗi loại (3) còn lại sau §2K.7 (cấu hình `formB`): ảnh mẫu ISO gần như trùng nhau, chỉ khác chi tiết nhỏ (P4-val:
+valve_globe 0.19, valve_needle 0.51, check_valve_general 0.64, interchangeable_disc 0.61). Câu hỏi khoa học: fine-tune **chỉ trên ảnh mẫu**
+có dạy được **kỹ năng** "nhìn chi tiết nhỏ" dùng được cho **cặp ảnh mẫu chưa train** không (thêm ký hiệu mới vẫn = thêm 1 ảnh)?
+
+**Cơ sở:** VPE (Kim et al. CVPR 2019: train embedding từ ảnh nguyên mẫu + augment, test trên lớp chưa thấy chỉ với ảnh nguyên mẫu — đúng
+thiết kế giữ lớp ra); Hain et al. ECML PKDD 2025 (P&ID: train tương phản trên augment của ký hiệu legend); ArcFace (Deng et al. CVPR 2019,
+loss có sẵn trong code); chống méo đặc trưng: LP-FT (Kumar et al. ICLR 2022), WiSE-FT (Wortsman et al. CVPR 2022), surgical fine-tuning
+(Lee et al. ICLR 2023: chỉ mở vài khối). Bằng chứng ngược (ghi trước): Han et al. CVPR 2024 — fine-tune vài lớp DINOv2 không giúp FSOD.
+
+**Cụm ảnh mẫu giống nhau** (đã chốt ở §2K: CL2N cos ≥ 0.85, 224 px, 19 cặp; thành phần liên thông, tính lại 2026-11-21 từ
+`runs/phase_c/viso/emb_224.pt`, khớp 19 cặp):
+- K1 bơm / máy nén: pump_general, pump_diaphragm, pump_centrifugal, compressor_centrifugal, compressor_vacuum (P4-val < 20 crop / lớp)
+- **K2 van**: valve_globe, valve_butterfly, check_valve_globe, check_valve_swing (P4-val đo được cả 4)
+- K3: valve_needle, valve_three_way (đo được: needle)
+- K4: check_valve_general, breather_valve (đo được: check_valve_general)
+- K5 đĩa: blind_disc, interchangeable_disc, interchangeable_disc_open, open_disc (đo được: 3 lớp đầu)
+
+**Thiết kế (cố định trước):**
+- **FT-chính (quyết định), 2 lượt giữ cụm ra:** lượt 1 giữ **K2** ra; lượt 2 giữ **K3 ∪ K4 ∪ K5** ra. Mỗi lượt train trên **mọi ảnh mẫu
+  còn lại** (kể cả lớp không sát, K1 luôn train, dạng B của butterfly theo K2). Ảnh mẫu của cụm giữ ra **không** xuất hiện khi train;
+  lúc chấm vẫn dựng prototype đủ 42 hàng / 41 lớp. Lớp đo = lớp giữ ra có ≥ 20 crop P4-val: **9 lớp** (4 + 1 + 1 + 3), mỗi lớp lấy
+  từ lượt nó bị giữ ra (như LOCO của F0-b).
+- **FT-triển khai:** train trên **cả 42 ảnh mẫu**; chỉ làm nếu FT-chính ĐẠT. Số P4 / P4-val của bản này lạc quan (cùng nguồn vector với
+  ảnh mẫu) → ghi rõ; bằng chứng độc lập là P2 / P1 (phong cách DigitizePID).
+- **Dữ liệu train:** chỉ ảnh mẫu ISO (thư mục `formB`, 43 ảnh) qua bộ sinh H2 `dirty_view` (ống ở cổng, nét ±1 px, suy giảm) +
+  8 view truy vấn (2 tỉ lệ × 4 góc) → A4 → 224 px. **Seed 2027** (H2 dùng 0, V-ISO dùng 2026). **Không** dùng crop DigitizePID, ảnh
+  render OPEN100 hay P4-val để train → P4-val, P1-val giữ nguyên vai trò.
+- **Mô hình:** DINOv2-S/14 (`vit_small_patch14_dinov2.lvd142m`), mở **2 khối cuối + LayerNorm cuối**, còn lại đóng băng. LP-FT: giai
+  đoạn 1 chỉ train tâm lớp ArcFace (backbone đóng), giai đoạn 2 mở 2 khối. ArcFace s = 30, m = 0.5 (như config); AdamW, lr backbone 1e-5,
+  lr tâm 1e-3, weight decay 0.05; batch 64; 300 + 1,500 bước. **WiSE-FT α = 0.5** (trung bình trọng số gốc / fine-tune). Không dò
+  siêu tham số; α = 1.0 (không WiSE) báo kèm như ablation, **không chọn**.
+- **Đánh giá cục bộ (MPS):** đúng đường 2B của `p4val_probe` / `k4_probe` (A4, 8 view, gộp trung bình, CL2N): **tâm CL2N dựng lại**
+  bằng encoder mới trên cùng 570 crop center; prototype dựng lại. Mốc = `formB` cùng đường (P4-val 0.770, P1-val 0.485).
+- Checkpoint ghi đúng định dạng `__dinov2__.pt` (`make_imagenet_encoder`) → pipeline đọc được, **không sửa code pipeline**.
+
+**Luật FT-chính (so với mốc `formB`, P4-val):**
+1. Macro top-1 trên **9 lớp giữ ra**: **Δ ≥ +0.05** và CI 95% bootstrap theo **37 tờ** nằm hẳn trên 0; **và**
+2. Không lớp giữ ra nào giảm quá 0.10; **và**
+3. Chặn hại phong cách, **mỗi lượt**: P1-val macro top-1 Δ ≥ −0.01 và AUROC cos Δ ≥ −0.01.
+4. **(a) Chặn "ảnh mẫu bị đẩy văng"**, mỗi lượt: trên V-ISO dạng **sạch** (chính ảnh mẫu, 8 view truy vấn; §2K), top-1 của **mỗi**
+   lớp giữ ra — **kể cả** valve_three_way, breather_valve, open_disc, K1 (không có crop P4-val) — không giảm quá 0.10. V-ISO không đại diện
+   P4 (§2K.1) nên chỉ dùng để chặn sụp, không xếp hạng.
+   Lý do (user duyệt 2026-11-21): valve_three_way / breather_valve hút nhầm (needle → three_way, check_valve_general → breather) nhưng
+   **không thể có trong P4-val**: 750 khung xương PID2Graph không có `valve` nối 3 nút (bộ render vẽ three_way từ van 3 cổng) và không có
+   `instrumentation` 1 cổng (breather đến từ bong bóng 1 cổng) → luật 1 chỉ đo phía bị hút; (a) chặn kiểu "đẩy ảnh mẫu hút ra xa".
+- ĐẠT → kỹ năng chuyển được sang cặp chưa train → làm FT-triển khai, rồi luật xác nhận Colab = **luật (ii) §2K.6** so với `formB`
+  (P4 không nhóm nào kém hơn và ≥ 1 nhóm tốt hơn, AUROC cos P4 không kém hơn; P2 S / V / AUROC không kém hơn; P1 Δ top-1 / AUROC ≥ −0.01),
+  **(b) thêm:** top-1 riêng của valve_three_way (38 crop) và breather_valve (189 crop) trên P4 suy giảm không giảm quá 0.10 (chỉ chặn,
+  không chọn); kèm e2e của cả `formB` và bản fine-tune trong cùng phiên.
+- KHÔNG ĐẠT → ablation; ghi giới hạn "loại lỗi (3) chưa giải"; hệ thống giữ `formB`. **Không** chạy FT-triển khai để "cứu" (nó chỉ đo
+  được trên dữ liệu cùng nguồn vector).
+- Báo kèm (mô tả, không quyết định): tỉ lệ cặp nhầm globe → butterfly, needle → three_way, check_valve_general → breather; lớp đã train
+  (lạc quan); α = 1.0.
+
+**Chi phí ước tính:** code 1–2 ngày (`scripts/ft_templates.py` + test: sinh augment, train, WiSE, ghi checkpoint, chấm qua hàm probe có
+sẵn); chạy cục bộ ~1–2 giờ (2 lượt + mốc). Colab chỉ khi ĐẠT.
+
+### 2L.1 Kết quả FT-chính — 2026-11-21 (MPS, ~55 phút: 2 lượt × 16 phút train + nhúng) → **ĐẠT** (α = 0.5)
+
+`scripts/ft_templates.py` (+ `tests/test_ft_templates.py`, 6 test) → `runs/phase_c/ft/` (`report.txt`, `results.json`, checkpoint
+`__dinov2_ft_{k2,k345}_a{0.5,1}__.pt` định dạng `__dinov2__.pt`). **Kiểm trước khi so (chặn):** mốc qua chính code mới tái lập k4
+`41+B/mean` (P4-val 0.7698, P1-val 0.4853 — trùng 4 chữ số); 5 cụm tính lại từ prototype của mốc trùng §2L; đúng 9 lớp đo. Train: loss
+ArcFace 0.001 cuối mỗi lượt (lượt K2 37 lớp, lượt K3+K4+K5 33 lớp); chỉ 2 khối cuối + LayerNorm cuối đổi.
+
+| α = 0.5 (quyết định) | mốc | FT | |
+|---|---|---|---|
+| **9 lớp giữ ra (P4-val)** | 0.760 | **0.851** | Δ **+0.091**, CI theo 37 tờ [+0.076, +0.109] |
+| valve_globe / valve_needle / check_valve_general | 0.19 / 0.51 / 0.64 | **0.42 / 0.75 / 0.84** | |
+| interchangeable_disc / check_valve_globe | 0.61 / 0.92 | 0.69 / 1.00 | |
+| giảm lớn nhất | | check_valve_swing 0.97 → 0.94 | (≥ −0.10 ✓) |
+| P1-val top-1 / AUROC — lượt K2 | 0.485 / 0.693 | +0.036 / **+0.122** | |
+| P1-val top-1 / AUROC — lượt K3+K4+K5 | | +0.024 / **+0.106** | |
+| (a) V-ISO sạch: lớp giữ ra bị văng | | không (cả hai lượt, kể cả three_way / breather) | |
+
+Cặp nhầm (mốc → FT, P4-val): globe → butterfly 0.81 → 0.58; **needle → three_way 0.39 → 0.11; check_valve_general → breather 0.33 →
+0.07** (phía bị hút giảm, và (a) cho thấy ảnh mẫu hút không bị đẩy văng).
+
+- **α = 1.0 (ablation, KHÔNG chọn):** 9 lớp 0.901 (+0.141), globe 0.76, P1-val AUROC +0.17 / +0.20. Tốt hơn α = 0.5 trên P4-val, nhưng α
+  đã chốt trước; chọn α = 1.0 bây giờ là **hậu kiểm** trên P4-val → không làm (muốn dò α cần tập quyết định khác).
+- **Đọc (ghi thận trọng):** mức tăng đến từ hai nguồn chưa tách được: (1) kỹ năng chi tiết nhỏ (cặp nhầm trong cụm giảm, lớp chưa train);
+  (2) bền hơn với "bẩn kiểu bản vẽ" (ống, nét, suy giảm) — P1-val (phong cách DigitizePID, khác hẳn bộ sinh) cũng tăng, AUROC tăng mạnh.
+  Cả hai đều chuyển sang lớp chưa train → đúng câu hỏi của §2L. Đối chứng với Han et al. 2024 (không giúp): ở đây cùng thiết kế "vài
+  khối cuối" nhưng mục tiêu là tách ảnh mẫu, không phải phát hiện.
+- Lớp đã train (lạc quan, mô tả): P4-val 18 lớp 0.90–0.94.
+- **Việc tiếp theo luật:** FT-triển khai (cả 42 ảnh mẫu, α = 0.5, cùng công thức) → xác nhận Colab bằng luật (ii) §2K.6 + (b) so với
+  `formB`, kèm e2e của `formB` và bản FT trong cùng phiên.
+
+### 2L.2 FT-triển khai — 2026-11-22 (MPS, cục bộ; ~17 phút train + nhúng) → chờ xác nhận Colab (notebook §17)
+
+`python scripts/ft_templates.py --out runs/phase_c/ft --deploy --device mps`: cùng công thức FT-chính, lượt `all` (41 lớp / 42 ảnh, không
+giữ gì ra), WiSE α = 0.5 → `__dinov2_ft_all_a0.5__.pt` (sha256 `66c513fb…`, meta `fine_tuned` ghi fold / α / seed / công thức). Mốc tái
+lập 0.7698 / 0.4853 trước khi train; loss 0.001 cuối. Train cục bộ (không Colab): cùng phần cứng với FT-chính, phần chậm là sinh ảnh
+H2 trên CPU (10 nhân cục bộ so với ~2 trên Colab).
+
+**Mô tả, lạc quan** (mọi lớp đã train, P4-val cùng nguồn vector; **không** quyết định): P4-val 18 lớp 0.770 → 0.937 (globe 0.19 → 1.00,
+valve_general 0.27 → 0.99, needle 0.51 → 0.80); P1-val top-1 0.485 → 0.538, AUROC 0.693 → 0.814; V-ISO sạch 40 → 41 / 41.
+
+**Kiểm định dạng:** pipeline (`run_pipeline.py prototypes`) đọc checkpoint FT, dựng 43 prototype trùng vector của script (cos 1.000) →
+Colab dùng đúng model đã chấm. **Code ✅:** notebook §17 (cell-31a–31f; test `test_section_17_…`; §13 / §15 / §16 tách bằng `_is_17`),
+RUNBOOK §5l, `scripts/ft_colab_compare.py` (+ 4 test; thử khô `ft` = `formB` → KHÔNG NHẬN như mong đợi: không nhóm nào tốt hơn).
+
 ## 3. Bước 3 — Đóng băng và viết (2026-12-15, dù Bước 2 ra sao)
 
 Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
@@ -1304,7 +1444,7 @@ Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
 - [x] P4 + CL2N → đã gộp vào §13c (chạy cùng 2B)
 - [x] Điểm 4 quyết (user 2026-11-19): bỏ `pipeline` (nét nối) → 41 ảnh mẫu; luật đo §2G
 - [x] Điểm 4 code (2026-11-19): notebook §15, `scripts/nopipe_compare.py` + test (RUNBOOK §5j); 831 test pass
-- [ ] Chạy Colab §15 → áp §2G
+- [x] Chạy Colab §15 → áp §2G (2026-11-20): nhất quán ĐẠT; P2 AUROC cos −0.00003 "kém hơn" (ghi đánh đổi, không đáng kể); P4 S +0.016
 - [x] Tra paper cross-standard + A so khớp patch DINOv2 (2026-11-19, §2H): KHÔNG ĐẠT (top-1 −0.027, lề +0.078); ablation
 - [x] Tầng giữa CNN ImageNet, Gan et al. 2023 (2026-11-19, §2I): KHÔNG ĐẠT (top-1 0.251 vs 0.477, sụp hub); ablation
 - [x] §2J ba phần còn sót (Chamfer một chiều, TB patch mực, ghép CLS 4 tầng) (2026-11-19): KHÔNG ĐẠT (tốt nhất cat4/cl2n
@@ -1319,7 +1459,17 @@ Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
   tái lập k4_probe trên P4-val (mean / max khớp 4 chữ số); 876 test
 - [x] Luật chấp nhận Colab §2K.6 (user duyệt 2026-11-20) + notebook §16 + `scripts/k4_colab_compare.py` (thử khô trên CSV giả) +
   RUNBOOK §5k
-- [ ] Chạy Colab §15 rồi §16 → `k4_colab_compare.py` → áp §2K.6 (nhận / không nhận (i), (ii) vào cấu hình chính)
+- [x] Chạy Colab §16 → `k4_colab_compare.py` → áp §2K.6 (2026-11-20, §2K.7): **(i) `formB` NHẬN**; (ii) `max` KHÔNG NHẬN (P4 S −0.082,
+  chỉ do flanged_connection 0.64 → 0.35; mọi số khác tăng) → ablation. Cấu hình đề xuất = 2B 41 + dạng B, gộp trung bình
+- [ ] Cấu hình mới: e2e (luật riêng) — chạy bằng tham số dòng lệnh như §16 (`$DINO $A4 ++oneshot.center=… 'exclude_prototypes=[pipeline]'
+  prototypes=…_formB.pt aggregate=mean other_min_cosine=0.1979`)
+- [x] Bước 4 fine-tune "giữ ảnh mẫu ra" (§2L): luật CHỐT 2026-11-21 (+ chặn (a) V-ISO sạch, (b) P4 three_way / breather)
+- [x] §2L code + chạy (2026-11-21, §2L.1): **FT-chính ĐẠT** — 9 lớp giữ ra 0.760 → 0.851 (CI [+0.076, +0.109]), P1-val top-1 / AUROC tăng
+- [x] FT-triển khai (42 ảnh mẫu, α = 0.5) train cục bộ + code notebook §17 / `ft_colab_compare.py` (2026-11-22, §2L.2)
+- [ ] Colab §17 (P1 / P2 / P4 + e2e `formB` và FT) → `scripts/ft_colab_compare.py` → áp luật (ii) §2K.6 + (b)
+- [ ] (Để sau, user 2026-11-21: "cứ chạy với các tham số, có thời gian thì refactor") đưa cấu hình đề xuất thành mặc định
+  `configs/config.yaml`: đổi `fgc.backbone/imgsz/embed_dim` + 9 khoá `oneshot`, thêm `$LEGACY` cho notebook §5–§12, `exclude_prototypes=[]`
+  cho §13–§14, ghim ResNet trong `oneshot_probe.load_encoder`; kiểm: config mới không override tái lập P4-val `41+B / mean` 0.770
 - [ ] Đóng băng 2026-12-15
 
 ## 7. Nhật ký sửa luật

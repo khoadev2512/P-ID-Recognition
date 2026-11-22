@@ -908,7 +908,14 @@ CI theo tờ [+0.040, +0.077], P1-val không hại, AUROC P1-val 0.692 → 0.755
 `oneshot.aggregate=max`, `++oneshot.extra_forms_dir=data/raw/iso_symbols_forms` (ảnh dạng B từ `scripts/make_iso_forms.py`, git theo
 dõi). Tái lập đúng số P4-val của probe. Việc tiếp: luật chấp nhận Colab (chờ user duyệt) → notebook §16.
 **Luật §2K.6 CHỐT 2026-11-20 + notebook §16 XONG** (RUNBOOK §5k): mốc = 2B 41 (§15); 3 dòng formB / max / formB_max; τ mới → P2 → P1
-→ P4; áp luật cục bộ `scripts/k4_colab_compare.py`. **Việc tiếp: user chạy Colab §15 rồi §16, gửi 12 CSV.**
+→ P4; áp luật cục bộ `scripts/k4_colab_compare.py`.
+**Colab §15 + §16 ĐÃ CHẠY 2026-11-20** (CSV ở `runs/oneshot_{p1,p2,p4}_crops_dinov2_{nopipe,formB,max,formB_max}.csv`):
+- §2G (`runs/phase_c/nopipe/`): nhất quán ĐẠT; P2 AUROC cos −0.00003 "kém hơn" (ghi đánh đổi, không đáng kể) → giữ 41 ảnh mẫu.
+- §2K.7 (`runs/phase_c/k4_colab/`): **(i) dạng B butterfly NHẬN** (P4 butterfly 0.60 → 1.00, P2 V +0.017, không gì kém hơn);
+  **(ii) `max` KHÔNG NHẬN** — P4 nhóm S 0.863 → 0.781 (chỉ do flanged_connection 0.64 → 0.35), dù mọi số khác tăng (AUROC cos
+  P4 / P2 / P1 +0.07; P2 S +0.033) → ablation, ghi đánh đổi.
+- **Cấu hình đề xuất = 2B 41 + `valve_butterfly@B`, gộp trung bình** (43 prototype / 42 lớp, τ 0.1979). Việc tiếp (chờ user): e2e với
+  luật riêng, `configs/config.yaml`, bước 4 fine-tune (giữ ảnh mẫu ra ngoài).
 
 **Bước 2B KẾT QUẢ Colab 2026-11-17** (chi tiết + luật: PLAN_PHASE_C "2B — Kết quả Colab"): DINOv2 + A4 + CL2N gọi tên lớp
 chưa thấy tốt nhất ở mọi đề thi — P1 top-1 0.576 / top-3 0.827 (R1a 0.036 / 0.366; 6/6 lớp tăng), P4 H_tu_nhien 0.646 (R1a
@@ -1070,3 +1077,11 @@ theo S/V/H trên OPEN100-ISO.
   runtime = reset phiên → chạy lại mục 1–3 notebook (crop có sẵn zip trên Drive, chỉ giải nén).
 - Ngôn ngữ làm việc: tiếng Việt. User là tác giả luận văn, có chuyên môn P&ID (nhận diện symbol
   giỏi hơn AI — luôn để user duyệt symbol, đừng tự đoán valve loại nào).
+**Bước 4 fine-tune "giữ ảnh mẫu ra" (PLAN §2L, luật chốt 2026-11-21) — FT-chính ĐẠT** (`scripts/ft_templates.py`, `runs/phase_c/ft/`):
+DINOv2-S mở 2 khối cuối, ArcFace trên ảnh mẫu ISO + bộ sinh H2 (seed 2027), LP-FT, WiSE α = 0.5; 2 lượt giữ cụm ra (K2 van | K3+K4+K5).
+9 lớp chưa train trên P4-val 0.760 → 0.851 (CI theo tờ [+0.076, +0.109]); globe 0.19 → 0.42, needle 0.51 → 0.75, check_valve_general
+0.64 → 0.84; P1-val top-1 +0.02–0.04, AUROC +0.11–0.12; không ảnh mẫu nào bị văng. α = 1.0 tốt hơn nữa (0.901) nhưng là ablation (α chốt
+trước). **FT-triển khai đã train cục bộ 2026-11-22** (PLAN §2L.2; `--deploy`, `runs/phase_c/ft/__dinov2_ft_all_a0.5__.pt`, sha256
+`66c513fb…`; mô tả lạc quan P4-val 0.770 → 0.937, P1-val 0.485 → 0.538 / AUROC 0.693 → 0.814). Việc tiếp: tải checkpoint lên Drive
+`encoders/` → notebook §17 (RUNBOOK §5l) → `scripts/ft_colab_compare.py` (luật (ii) §2K.6 + chặn three_way / breather) kèm e2e.
+

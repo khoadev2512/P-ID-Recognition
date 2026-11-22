@@ -343,6 +343,35 @@ Chi phí ≈ 3 × (τ + P2 + P1 + P4) của 2B.
 mốc của §15 trong `runs/nopipe_csv/` (`oneshot_{p1,p2,p4}_crops_dinov2_nopipe.csv`). Đặt cả 12 vào `runs/` trên máy rồi chạy
 `python scripts/k4_colab_compare.py --out runs/phase_c/k4_colab` (luật §2K.6: kiểm nhất quán trước, rồi bootstrap và quyết định).
 
+## 5l. PHASE C §2L — FT-triển khai (DINOv2 fine-tune trên 42 ảnh mẫu) + end-to-end — notebook §17 (2026-11-22)
+
+**Trước khi mở Colab**:
+- Encoder đã train **cục bộ** (MPS): `python scripts/ft_templates.py --out runs/phase_c/ft --deploy --device mps` →
+  `runs/phase_c/ft/__dinov2_ft_all_a0.5__.pt` (~87 MB) + `.sha256`. **Tải file `.pt` lên `encoders/` trên Drive.** 17a so sha256 với
+  `FT_SHA` trong notebook (đã điền) → dừng nếu khác.
+- **§16 đã chạy** (mốc `formB`: `eval_{tau,p2,p1,p4}_dinov2_formB`, `iso_prototypes_dinov2_a4_formB.pt`); 17a dừng nếu thiếu.
+- Commit + push: notebook, `scripts/{ft_templates,ft_colab_compare}.py` và các test (pipeline không đổi).
+- Trên Drive `encoders/`: `__dinov2__.pt`, `iso_prototypes_dinov2_a4_formB.pt`, `center_dinov2_a4.pt`, `__global__.pt`, `__global_lo__.pt`,
+  `__dinov2_ft_all_a0.5__.pt`.
+
+Không train trên Colab. Dựng 43 prototype + tâm CL2N với encoder FT (vài phút), rồi τ + P2 + P1 + P4 cho một dòng (`ft`), rồi e2e cho
+hai dòng (`formB`, `ft`: mỗi dòng một lượt `fgc --infer` GPU + một `evaluate`; Stage 2 lưu ở `stage1_iso/detections_oneshot_dinov2_*`,
+phiên sau không chạy lại; khoá của `ft` gồm 8 ký tự đầu của sha256).
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–4, 11a | mount, clone, crop; OPEN100-ISO | như §5h |
+| 12a + def 9a | detection `agnostic_merge` đã lưu; `chosen_taus` | chỉ cần cho 17d |
+| 17a | kiểm sha256 + meta; 43 prototype + tâm CL2N bằng encoder FT | tên prototype trùng file `formB`; tâm cùng `n_crops` / lớp với tâm §13 (assert) |
+| 17b | τ (val_sel, R1a) → P2 (val `test`, R1b) → P1 đủ | `n_prototypes` 42, mean, có tâm, A4; cùng crop / lớp với `formB` (assert) |
+| 17c | P4 | như 17b (assert) |
+| 17d | e2e `formB` và `ft`, τ quy tắc A của từng dòng | τ trong metrics = τ đã chọn (assert) |
+| 17e | bảng nhanh `formB` / `ft` + e2e | — |
+
+**Gửi lại**: in ra của 17a–17e + 5 file trong `runs/ft_csv/` (`oneshot_{p1,p2,p4}_crops_dinov2_ft.csv`, `e2e_dinov2_{formB,ft}.json`).
+Đặt vào `runs/` trên máy (CSV `formB` của §16 đã có ở đó) rồi chạy `python scripts/ft_colab_compare.py --out runs/phase_c/ft_colab`
+(luật (ii) §2K.6 + chặn (b) của §2L; e2e chỉ mô tả).
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python
