@@ -52,6 +52,7 @@ from utils.diversity import ContentDeduper, Deduper, ahash, dhash
 from utils.iso_layout import transform_layout
 from utils.iso_mapping import Assignment, assign_symbols
 from utils.iso_templates import Template
+from utils.page_frame import Frame, add_frame, frame_settings, shift_runs, shift_sheet
 from utils.page_svg import Page, rasterize, render_page
 from utils.pid2graph import PipeRun, Sheet
 
@@ -217,6 +218,7 @@ class Rendered:
     source: Sheet
     cfg: dict[str, Any]
     sheet: Sheet | None = None  # the sheet after V4 (node boxes in page px)
+    frame: Frame | None = None  # the sheet frame round the drawing (config `frame`), if any
 
 
 def plan_variant(
@@ -252,6 +254,14 @@ def render_variant(
         sheet4, runs4, draft.assignments, cfg_v, sized, touch_source=sheet,
         text_rng=random.Random(draft.seeds["text"]),
     )  # fmt: skip
+    frame = frame_settings(cfg)
+    if frame is not None:  # PLAN_PHASE_C §2M item 7: drawn last, the drawing moves into it
+        seed = derive_seed(variant_settings(cfg).base_seed, draft.source, draft.index, "frame")
+        page, fr = add_frame(page, draft.stroke_px, frame, random.Random(seed))
+        dx, dy = fr.layout.offset
+        sheet4 = shift_sheet(sheet4, dx, dy, page.width, page.height)
+        runs4 = shift_runs(runs4, dx, dy)
+        return Rendered(page, runs4, sheet, cfg_v, sheet4, fr)
     return Rendered(page, runs4, sheet, cfg_v, sheet4)
 
 
@@ -388,6 +398,13 @@ def generate_sheet(
                 "annotations": page.annotations,
                 "texts": page.texts,  # V5c labels: not COCO objects
             }
+            if rendered.frame is not None:  # where the drawing is; the rest is frame (not COCO)
+                lay = rendered.frame.layout
+                meta["frame"] = {
+                    "content": list(lay.content), "border": list(lay.border),
+                    "column": list(lay.column), "title_block": list(rendered.frame.title_block),
+                    "revision_table": list(rendered.frame.revision_table),
+                }  # fmt: skip
             (sheet_dir / f"{stem}.json").write_text(json.dumps(meta, indent=1))
             rec["files"] = [f"sheet{source}/{stem}.{ext}" for ext in ("png", "svg", "json")]
             rec["seconds"]["write"] = round(time.perf_counter() - t4, 3)

@@ -108,14 +108,22 @@ def run_sheet(job: tuple) -> list[dict]:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", type=Path, default=Path("data/raw/pid2graph/open100"))
-    ap.add_argument("--variants", type=Path, default=Path("data/iso_open100/variants"))
-    ap.add_argument("--out", type=Path, default=Path("data/iso_open100/degraded"))
-    ap.add_argument("--stats", type=Path, default=Path("docs/experiments/iso_render/v7"))
+    ap.add_argument("--variants", type=Path, default=None, help="default: <data_root>/variants")
+    ap.add_argument("--out", type=Path, default=None, help="default: <data_root>/degraded")
+    ap.add_argument("--stats", type=Path, default=None, help="default: export.degrade_stats")
+    ap.add_argument("--overwrite", action="store_true", help="allow replacing degraded images")
     ap.add_argument("--sheets", type=int, nargs="*", default=list(range(12)))
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args()
     cfg = load_config()
     cfg["_src"] = str(args.src)
+    root = Path(cfg["export"]["data_root"])
+    args.variants = args.variants or root / "variants"
+    args.out = args.out or root / "degraded"
+    args.stats = args.stats or Path(cfg["export"]["degrade_stats"])
+    done = [s for s in args.sheets if any((args.out / f"sheet{s}").glob("v*.json"))]
+    if done and not args.overwrite:  # v1 stays as it is (PLAN_PHASE_C §2M rule 2)
+        raise SystemExit(f"{args.out}: sheets {done} already degraded (--overwrite to redo)")
     t0 = time.perf_counter()
     rows: list[dict] = []
     with ProcessPoolExecutor(args.workers) as pool:

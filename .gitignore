@@ -246,6 +246,9 @@ runs/
 !data/raw/iso_symbols_clean/
 !data/raw/iso_symbols_clean/*.png
 !data/raw/iso_symbols_clean/symbols.csv
+# ...and the extra drawn forms of vocab classes (PLAN_PHASE_C §2K.4: BK-2020 X8075 form B), tiny
+!data/raw/iso_symbols_forms/
+!data/raw/iso_symbols_forms/*.png
 /PID2Graph.zip
 # experiment renders (regenerable; derived from OPEN100 sheets) — numbers and READMEs are tracked
 docs/experiments/**/*.jpg

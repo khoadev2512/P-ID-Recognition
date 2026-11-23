@@ -1,0 +1,8 @@
+# Label set of the one-class Stage 1 detector of docs/PLAN_PHASE_C.md §2N (S1-ISO): every symbol is
+# `symbol`. Pass as ++detector.classes_yaml=configs/classes_symbol.yaml with detector.label_level=coarse
+# (detect_infer checks the checkpoint's names against `coarse`). No fine-grained head routes from it.
+coarse:
+- symbol
+fine:
+  symbol: symbol
+fgc_groups: []

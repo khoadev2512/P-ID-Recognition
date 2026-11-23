@@ -25,10 +25,11 @@ Weighting classes by how often they were already drawn is deferred (plan).
 from __future__ import annotations
 
 import logging
+import os
 import random
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -93,11 +94,33 @@ class Assignment:
     clearance: float = 0.5
 
 
-def load_config(path: str | Path | None = None) -> dict[str, Any]:
-    """The `render_iso` mapping of a render_iso.yaml (default: configs/render_iso.yaml)."""
+CONFIG_ENV = "PID_RENDER_CONFIG"  # path of the render config to use instead of the default
+
+
+def config_path(path: str | Path | None = None) -> Path:
+    """`path`, else `$PID_RENDER_CONFIG`, else configs/render_iso.yaml."""
+    return Path(path or os.environ.get(CONFIG_ENV) or DEFAULT_CONFIG)
+
+
+def load_config_node(path: str | Path | None = None) -> Any:
+    """The whole config file (an OmegaConf node, not resolved). A file with `extends: <file>`
+    (relative to its own folder) is that file with this one merged over it: an overlay names only
+    what it changes (configs/render_iso_v2.yaml, PLAN_PHASE_C §2M)."""
     from omegaconf import OmegaConf
 
-    cfg = OmegaConf.to_container(OmegaConf.load(path or DEFAULT_CONFIG), resolve=True)
+    p = config_path(path)
+    node = OmegaConf.load(p)
+    base = node.pop("extends", None)
+    if base is None:
+        return node
+    return OmegaConf.merge(load_config_node(p.parent / base), node)
+
+
+def load_config(path: str | Path | None = None) -> dict[str, Any]:
+    """The `render_iso` mapping of a render config (see `config_path`, `load_config_node`)."""
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.to_container(load_config_node(path), resolve=True)
     return cfg["render_iso"]  # type: ignore[index,return-value]
 
 
@@ -280,6 +303,75 @@ def _arrow_template(overlays: list[Template], axis: str, forward: bool) -> Templ
     return None
 
 
+def _straight_axis(run: PipeRun) -> str | None:
+    (x0, y0), (x1, y1) = run.points[0], run.points[-1]
+    if run.elbows:
+        return None
+    if abs(y0 - y1) <= 1e-6 and abs(x0 - x1) > 1e-6:
+        return "H"
+    if abs(x0 - x1) <= 1e-6 and abs(y0 - y1) > 1e-6:
+        return "V"
+    return None
+
+
+def arrow_chains(runs: list[PipeRun], assignments: Mapping[str, Assignment]) -> list[list[str]]:
+    """Flow arrows strung on one straight pipe: groups of arrows joined by straight runs (between
+    two arrows) along the arrows' own axis; each group in order of first appearance in `runs`."""
+    parent: dict[str, str] = {}
+
+    def find(n: str) -> str:
+        while parent.setdefault(n, n) != n:
+            parent[n] = parent[parent[n]]
+            n = parent[n]
+        return n
+
+    order: list[str] = []
+    for run in runs:
+        if run.internal or run.nozzle or run.a == run.b:
+            continue
+        a, b = assignments.get(run.a), assignments.get(run.b)
+        if a is None or b is None or a.kind != "arrow" or b.kind != "arrow":
+            continue
+        axis = _straight_axis(run)
+        if axis is None or a.axis != axis or b.axis != axis:
+            continue
+        for n in (run.a, run.b):
+            if n not in parent:
+                order.append(n)
+        parent[find(run.a)] = find(run.b)
+    groups: dict[str, list[str]] = {}
+    for n in order:
+        groups.setdefault(find(n), []).append(n)
+    return list(groups.values())
+
+
+def unify_arrow_chains(
+    runs: list[PipeRun],
+    assignments: dict[str, Assignment],
+    tipped: set[str],
+    arrow_tpls: list[Template],
+) -> dict[str, Assignment]:
+    """Every arrow of a chain (`arrow_chains`) points the same way (PLAN_PHASE_C §2M, user rule
+    2026-11-23): the way of its arrows read from the drawing (`tipped`, the majority; the first on
+    a tie), else the way drawn for the chain's first arrow. No random draw, so nothing else of
+    the variant changes."""
+    out = dict(assignments)
+    for chain in arrow_chains(runs, assignments):
+        votes = [bool(assignments[n].forward) for n in chain if n in tipped]
+        if votes:
+            forward = votes.count(True) > votes.count(False) or (
+                votes.count(True) == votes.count(False) and votes[0]
+            )
+        else:
+            forward = bool(assignments[chain[0]].forward)
+        for n in chain:
+            a = assignments[n]
+            if bool(a.forward) != forward:
+                tpl = _arrow_template(arrow_tpls, a.axis or "H", forward)
+                out[n] = replace(a, forward=forward, template=tpl)
+    return out
+
+
 def _is_nested(sheet: Sheet, node_id: str, runs_of: dict[str, list[PipeRun]]) -> bool:
     """Centre inside another symbol's bbox and linked to the rest only by `internal` runs."""
     cx, cy = sheet.nodes[node_id].center
@@ -316,7 +408,11 @@ def assign_symbols(
     tagged, min_aspect / max_aspect = height / width in [min, max)) match and that yields a symbol
     wins; a `replace` rule first rolls `p_replace`. No rule
     -> a plain box. A symbol of a `cfg["flanges"]["classes"]` class gets flanges with chance `p`.
+    `cfg["vocab_only"]` (PLAN_PHASE_C §2N): templates outside the Stage 2 vocabulary are never
+    drawn; a rule that only had those falls through like any rule with no template left.
     """
+    if cfg.get("vocab_only", False):  # PLAN_PHASE_C §2N rule 2: Stage 1's library = the vocab
+        templates = {k: t for k, t in templates.items() if t.in_vocab}
     rules = list(cfg["rules"])
     _check_rules(rules)
     small_max, large_min = cfg["size_class"]["small_max"], cfg["size_class"]["large_min"]
@@ -339,6 +435,7 @@ def assign_symbols(
             runs_of.setdefault(run.b, []).append(run)
 
     out: dict[str, Assignment] = {}
+    tipped: set[str] = set()  # arrows whose way was read from the drawing
     fallbacks: Counter[tuple[str, str]] = Counter()
     for nid, node in sheet.nodes.items():
         if node.label in NOT_SYMBOLS:
@@ -418,6 +515,7 @@ def assign_symbols(
                 forward = rng.random() < 0.5
                 if kind == "arrow" and (tip := _tip_side(node, ports, runs)) is not None:
                     axis, forward = ("H" if tip in "LR" else "V"), tip in "RB"
+                    tipped.add(nid)
                 tpl = _arrow_template(arrow_tpls, axis, forward) if kind == "arrow" else None
                 result = Assignment(
                     kind, KIND_LABELS[kind], template=tpl, axis=axis, forward=forward
@@ -433,6 +531,8 @@ def assign_symbols(
             fallbacks[(node.label, pcfg.kind)] += 1
         out[nid] = result
 
+    if cfg.get("arrow_chains", False):  # PLAN_PHASE_C §2M (OPEN100-ISO v2)
+        out = unify_arrow_chains(runs, out, tipped, arrow_tpls)
     if fallbacks:
         detail = ", ".join(f"{lb}/{cf}: {n}" for (lb, cf), n in sorted(fallbacks.items()))
         logger.info(

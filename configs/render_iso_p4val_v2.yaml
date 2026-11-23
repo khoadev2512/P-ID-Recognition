@@ -1,0 +1,13 @@
+# P4-val v2 (docs/PLAN_PHASE_C.md §2N rule 1): the 40 P4-val skeletons (data/iso_p4val/src, §2K.2)
+# drawn like OPEN100-ISO v2 (fixes + sheet frame), as Stage 1's decision set: the frame and its text
+# change the detector's false boxes, so the decision set must look like train and test. P4-val v1
+# (data/iso_p4val) is left as it is for §2K / §2L. Same variant budget and images as §2K.2.
+extends: render_iso_v2.yaml
+render_iso:
+  variants:
+    count: 2
+  export:
+    data_root: ${oc.env:PID_DATA_ROOT,data/iso_p4val_v2}
+    src_dir: data/iso_p4val/src
+    degrade_stats: docs/experiments/iso_render/p4val_v2/v7
+    images: degraded

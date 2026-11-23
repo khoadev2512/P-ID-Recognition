@@ -360,9 +360,17 @@ def _place(
     bbox_src: Box,
     scale: float,
     k: float | None = None,
+    by_axis: bool = False,
 ) -> _Placed:
     """Size (`k`, px per mm: the ink fitted into `bbox_src` x `scale` unless given) and position
-    (by the ports that agree on the side) of one ISO symbol."""
+    (by the ports that agree on the side) of one ISO symbol.
+
+    `by_axis` (PLAN_PHASE_C §2M): y from the L / R ports only and x from the T / B ports only,
+    where there are any. A pipe fixes where it runs across its own axis (a left port's y); its
+    end along the axis is just where the source bbox stopped. Averaging both would move a valve
+    off its line by a signal port on top, and every pipe into it would need a step. Equipment
+    (G4: pumps, exchangers) is placed as without it: several pipes on one side of an exchanger
+    may meet one template port and, alone, pull it off the symbols piped to its other sides."""
     ix0, iy0, ix1, iy1 = oriented_ink_box(tpl)
     if k is None:
         k = _fit_scale(tpl, bbox_src, scale)
@@ -374,9 +382,13 @@ def _place(
     # where the symbol goes; only the pairs that agree on the side do
     sure = [(p, q) for p, q in pairs if p.side == q.side]
     if sure:
+        on_x, on_y = sure, sure
+        if by_axis and tpl.group != "G4":  # valves and fittings on a line, not equipment
+            on_x = [(p, q) for p, q in sure if p.side in "TB"] or sure
+            on_y = [(p, q) for p, q in sure if p.side in "LR"] or sure
         pos = (
-            sum(p.x - k * q.x_mm for p, q in sure) / len(sure),
-            sum(p.y - k * q.y_mm for p, q in sure) / len(sure),
+            sum(p.x - k * q.x_mm for p, q in on_x) / len(on_x),
+            sum(p.y - k * q.y_mm for p, q in on_y) / len(on_y),
         )
     elif node_ports and len({p.side for p in node_ports}) == 1:
         # no port says where it goes and all pipes come from one side (a pump piped from the top
@@ -1190,6 +1202,33 @@ def _inside(poly: list[Point], pt: Point) -> bool:
     return inside
 
 
+def clip_at_wall(far: Point, centre: Point, walls: list[list[Point]], length: float) -> Point:
+    """Where to centre a leader's head (`length` px long, pointing from `far` to `centre`) so
+    that it does not go into a vessel: when `centre` lies inside a `walls` outline and `far` does
+    not, the head's tip goes to the first crossing of far -> centre with that outline. Else
+    `centre` (PLAN_PHASE_C §2M: OPEN100 leaders into equipment that became a vessel)."""
+    for poly in walls:
+        if not _inside(poly, centre) or _inside(poly, far):
+            continue
+        dx, dy = centre[0] - far[0], centre[1] - far[1]
+        best = None
+        for (xa, ya), (xb, yb) in zip(poly, [*poly[1:], poly[0]], strict=True):
+            ex, ey = xb - xa, yb - ya
+            den = dx * ey - dy * ex
+            if abs(den) < EPS:
+                continue
+            t = ((xa - far[0]) * ey - (ya - far[1]) * ex) / den
+            u = ((xa - far[0]) * dy - (ya - far[1]) * dx) / den
+            if 0 <= t <= 1 and 0 <= u <= 1 and (best is None or t < best):
+                best = t
+        if best is None:
+            continue
+        n = math.hypot(dx, dy)
+        tip = (far[0] + best * dx, far[1] + best * dy)
+        return (tip[0] - dx / n * length / 2, tip[1] - dy / n * length / 2)
+    return centre
+
+
 def _vessel_stub(vessel: _Vessel, target: Point, side: str) -> list[Point] | None:
     """The pipe from the vessel's outline to `target`, a port on `side` of the symbol beside it
     (as `_nozzle_stub` for a box); None when the port is inside the outline, or the vessel is not
@@ -1275,6 +1314,9 @@ class Page:
     text: str = ""  # SVG fragment of the labels (V5c, utils.page_text); empty without text
     # one dict per label: kind, owner (node or None), text, box, vertical; not COCO objects
     texts: list[dict[str, Any]] = field(default_factory=list)
+    # SVG fragment of the sheet frame round the drawing (utils.page_frame, PLAN_PHASE_C §2M item
+    # 7); empty without one. Not a COCO object.
+    frame: str = ""
 
     def _doc(self, body: str) -> str:
         return (
@@ -1285,11 +1327,15 @@ class Page:
 
     @property
     def svg(self) -> str:
-        return self._doc(self.pipes + self.symbols + self.text)
+        return self._doc(self.frame + self.pipes + self.symbols + self.text)
 
     def layer(self, which: str) -> str:
-        """A document with only the pipes, the symbols or the text (for measuring)."""
-        return self._doc({"pipes": self.pipes, "symbols": self.symbols, "text": self.text}[which])
+        """A document with only the pipes, the symbols, the text or the frame (for measuring)."""
+        return self._doc(
+            {"pipes": self.pipes, "symbols": self.symbols, "text": self.text, "frame": self.frame}[
+                which
+            ]
+        )
 
 
 def rasterize(svg: str, dpi: int = 72) -> np.ndarray:
@@ -1325,6 +1371,7 @@ def render_page(
     nozzle_frac = float(page_cfg.get("nozzle_stub", 0.0))
     bridge_gap = page_cfg.get("bridge_gap")  # None: links of no length are not piped
     replaced_px = page_cfg.get("replaced_size")
+    by_axis = bool(page_cfg.get("place_by_axis", False))  # PLAN_PHASE_C §2M
     disc_classes = set((cfg.get("flanges") or {}).get("classes", []))
     flange_symbol = (cfg.get("flanges") or {}).get("symbol")
     k_sheet = _sheet_scale(assignments, source, scale)
@@ -1349,6 +1396,16 @@ def render_page(
     arrow_boxes: dict[str, Box] = {}
     arrow_placed: dict[str, _Placed] = {}  # drawn from the arrow template (241)
     leaders: dict[str, tuple[str, list[Point]]] = {}  # head SVG, tail
+    # PLAN_PHASE_C §2M: a leader whose head lands inside a vessel body stops at its wall
+    walls = (
+        [
+            _make_vessel(n, a.template, _node_box(sheet.nodes[n])).poly
+            for n, a in assignments.items()
+            if a.kind == "iso" and a.template is not None and a.template.port_config == "multi"
+        ]
+        if page_cfg.get("clip_leaders", False)
+        else []
+    )
     for nid, a in assignments.items():
         if a.kind == "leader" and ports[nid]:
             p = ports[nid][0]
@@ -1356,9 +1413,8 @@ def render_page(
             far = tuple(run.points[-1] if run.a == nid else run.points[0])  # the line's end
             src_box = _node_box(source.nodes[nid])
             length = scale * max(src_box[2] - src_box[0], src_box[3] - src_box[1])
-            head, tail, box = _leader_shape(
-                far, sheet.nodes[nid].center, p.side, a.template, length, w_px
-            )
+            centre = clip_at_wall(far, sheet.nodes[nid].center, walls, length)
+            head, tail, box = _leader_shape(far, centre, p.side, a.template, length, w_px)
             leaders[nid] = (head, tail)
             arrow_boxes[nid] = box
             continue
@@ -1403,7 +1459,7 @@ def render_page(
             k = joint_scale(a.template, size_box)
         size_boxes[nid] = size_box
         placed[nid] = _place(
-            nid, a.template, ports[nid], _node_box(sheet.nodes[nid]), size_box, scale, k
+            nid, a.template, ports[nid], _node_box(sheet.nodes[nid]), size_box, scale, k, by_axis
         )
         if disc and k is not None:  # in a tight spot it may shrink back to fit its whole box
             placed[nid].min_factor = min(1.0, _fit_scale(a.template, size_box, scale) / k)
@@ -1446,7 +1502,16 @@ def render_page(
         base = pl.tpl.base or pl.tpl
         sides = Counter(pl.tpl.sides)
         out = [
-            _place(nid, o, ports[nid], _node_box(sheet.nodes[nid]), size_boxes[nid], scale, pl.k0)
+            _place(
+                nid,
+                o,
+                ports[nid],
+                _node_box(sheet.nodes[nid]),
+                size_boxes[nid],
+                scale,
+                pl.k0,
+                by_axis,
+            )  # fmt: skip
             for o in base.all_orientations()
             if Counter(o.sides) == sides and (o.rot, o.flip) != (pl.tpl.rot, pl.tpl.flip)
         ]
@@ -1525,6 +1590,7 @@ def render_page(
         port_log.append(entry)
         port_log.append({"id": bubble, "kind": "bubble", "x": end[0], "y": end[1], "loose": True})
         log["stems"] += 1
+    port_run: dict[int, int] = {}  # index in port_log -> the run whose end it is
     for nid in drawn:
         if kind[nid] in ("arrow", "leader"):  # drawn to the centre of its box / no pipe: below
             continue
@@ -1549,6 +1615,7 @@ def render_page(
             for e in "ab":
                 if (p.run, e) in ends and ends[(p.run, e)][:3] == (nid, p.x, p.y):
                     targets[(p.run, e)] = (target, side)
+                    port_run[len(port_log)] = p.run
                     port_log.append(
                         {
                             "id": nid,
@@ -1560,6 +1627,7 @@ def render_page(
                     )
                     break
     polylines: list[list[Point]] = []
+    pipe_of: dict[int, int] = {}  # polyline index -> run index (pipes drawn from a run)
     for idx, run in enumerate(runs):
         if run.internal:
             log["skipped_internal_runs"] += 1
@@ -1576,6 +1644,7 @@ def render_page(
             if (idx, end) in targets:
                 target, side = targets[(idx, end)]
                 pts = _attach_end(pts, end, target, side, stub, w_px / 2)
+        pipe_of[len(polylines)] = idx
         polylines.append(_simplify(pts))
     for idx, (nid, box_node, _) in nozzles.items():
         hits = [
@@ -1822,7 +1891,89 @@ def render_page(
         for lb in labels
     ]  # fmt: skip
     page.log.update(text_log)
+    if page_cfg.get("drop_hanging", False):  # PLAN_PHASE_C §2M (OPEN100-ISO v2)
+        boxes_drawn = [tuple(a["bbox"]) for a in page.annotations]
+        dropped = hanging_pipes(
+            sheet, runs, polylines, pipe_of, labels, _HANGING_NEAR * w_px, boxes_drawn, 2 * w_px
+        )
+        for i in dropped:
+            page.pipes = page.pipes.replace(f'<polyline points="{_pts(polylines[i])}"/>', "", 1)
+        page.log["dropped_hanging"] = len(dropped)
+        # a pipe left out has no port any more: where it met a symbol is not a joint to check
+        gone = {pipe_of[i] for i in dropped}
+        page.ports = [q for k, q in enumerate(page.ports) if port_run.get(k) not in gone]
     return page
+
+
+_HANGING_NEAR = 15  # strokes: a label this close to a free pipe end names that line
+
+
+def hanging_pipes(
+    sheet: Sheet,
+    runs: list[PipeRun],
+    polylines: list[list[Point]],
+    pipe_of: Mapping[int, int],
+    labels: list[Any],
+    near: float,
+    boxes: list[Box] = (),
+    touch: float = 0.0,
+) -> list[int]:
+    """Polylines (indices) of pipes left hanging: drawn from a run with an end at a connector /
+    crossing that no other drawn run reaches, and that end touches nothing on the page: no other
+    pipe (within `touch` px), no drawn symbol box (`boxes`, grown by `touch`) and no label
+    (`labels`, with `.box`) within `near` px. PID2Graph labels a tag's leader line as pipe; once
+    V5c could not write the tag at its free end, it is a line to nowhere (PLAN_PHASE_C §2M: not
+    drawn). A pipe the graph leaves unjoined but that runs into another one is not hanging."""
+    dropped: list[int] = []
+
+    def labelled(q: Point) -> bool:
+        return any(
+            lb.box[0] - near <= q[0] <= lb.box[2] + near
+            and lb.box[1] - near <= q[1] <= lb.box[3] + near
+            for lb in labels
+        )
+
+    def touches(q: Point, own: int) -> bool:
+        if any(
+            b[0] - touch <= q[0] <= b[2] + touch and b[1] - touch <= q[1] <= b[3] + touch
+            for b in boxes
+        ):
+            return True
+        return any(
+            _seg_dist(q, a, b) <= touch
+            for j, other in enumerate(polylines)
+            if j != own and j not in dropped
+            for a, b in zip(other, other[1:], strict=False)
+        )
+
+    # a hanging line can be several runs (a leader with a bend): drop the run at the free end,
+    # then look again, until none is left hanging (it stops at a symbol, an arrow or a junction)
+    while True:
+        live = {i: idx for i, idx in pipe_of.items() if i not in dropped}
+        seen = Counter(n for idx in live.values() for n in (runs[idx].a, runs[idx].b))
+
+        def free(nid: str, seen: Counter = seen) -> bool:
+            node = sheet.nodes.get(nid)
+            return node is not None and node.label in ("connector", "crossing") and seen[nid] == 1
+
+        new = [
+            i
+            for i, idx in live.items()
+            if any(
+                free(nid) and not labelled(q) and not touches(q, i)
+                for nid, q in ((runs[idx].a, polylines[i][0]), (runs[idx].b, polylines[i][-1]))
+            )
+        ]
+        if not new:
+            return dropped
+        dropped += new
+
+
+def _seg_dist(p: Point, a: Point, b: Point) -> float:
+    ax, ay = b[0] - a[0], b[1] - a[1]
+    n2 = ax * ax + ay * ay
+    t = 0.0 if n2 == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * ax + (p[1] - a[1]) * ay) / n2))
+    return math.hypot(p[0] - a[0] - t * ax, p[1] - a[1] - t * ay)
 
 
 def _shape_box(

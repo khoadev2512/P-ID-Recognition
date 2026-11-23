@@ -45,6 +45,20 @@ BBOX_TOL = 0.02  # px: a redrawn clean variant must give the boxes stored in its
 SHOW_MISMATCHES = 20  # degraded images named in the error at most (the count is always given)
 
 
+def drawing_box(meta: dict, degraded: dict | None) -> list[float] | None:
+    """The drawing's rectangle on a framed page (PLAN_PHASE_C §2M item 7; None without a
+    frame): what lies outside it is frame. On a degraded image, the box round its moved corners."""
+    frame = meta.get("frame")
+    if frame is None:
+        return None
+    box = tuple(frame["content"])
+    if degraded is None:
+        return [round(float(v), 2) for v in box]
+    from utils.iso_degrade import corner_box
+
+    return [round(float(v), 2) for v in corner_box(degraded["affine"], box)]
+
+
 def degraded_mismatches(root: Path, sheets: list[int], render_cfg: dict) -> list[str]:
     """`<stem>: <keys>` for every degraded image the export would read (one per clean variant
     json) whose stored `params` the current `degrade` config does not draw from its seed (see
@@ -134,6 +148,7 @@ def _export_sheet(job: tuple[int, dict, dict, str]) -> tuple[list[dict], dict[st
                 {
                     "stem": stem, "ext": image.suffix, "sheet": sheet_id, "index": index,
                     "degraded": degraded, "width": meta["width"], "height": meta["height"],
+                    "drawing_box": drawing_box(meta, doc if degraded else None),
                     "anns": [
                         {"category": cats[a["id"]], "box": a["bbox"], "id": a["id"],
                          "node": a.get("node", a["id"]), "added": bool(a.get("added"))}
@@ -217,7 +232,8 @@ class RenderIsoPipeline(BasePipeline):
             images.append(
                 {"id": i, "file_name": f"synthetic/{r['stem']}{r['ext']}", "width": r["width"],
                  "height": r["height"], "sheet": r["sheet"], "variant": r["index"],
-                 "degraded": r["degraded"]}
+                 "degraded": r["degraded"],
+                 **({"drawing_box": r["drawing_box"]} if r["drawing_box"] else {})}
             )  # fmt: skip
             for a in r["anns"]:
                 box = ex.coco_box(a["box"])
@@ -267,15 +283,23 @@ class RenderIsoPipeline(BasePipeline):
 
 def main(argv: list[str] | None = None) -> None:
     """`pid-render-iso [hydra overrides]`; the data root is `$PID_DATA_ROOT` (default
-    `data/iso_open100`) unless `render_iso.export.data_root=` says otherwise."""
+    `data/iso_open100`) unless `render_iso.export.data_root=` says otherwise. With
+    `$PID_RENDER_CONFIG` (e.g. configs/render_iso_v2.yaml, PLAN_PHASE_C §2M) that config is read
+    instead (`utils.iso_mapping.load_config_node`), the overrides applied over it as a dotlist."""
+    import os
+
     from hydra import compose, initialize_config_dir
     from hydra.core.global_hydra import GlobalHydra
 
-    GlobalHydra.instance().clear()
-    with initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
-        cfg = compose(
-            config_name="render_iso", overrides=list(sys.argv[1:] if argv is None else argv)
-        )
+    from utils.iso_mapping import CONFIG_ENV, load_config_node
+
+    overrides = list(sys.argv[1:] if argv is None else argv)
+    if os.environ.get(CONFIG_ENV):
+        cfg = OmegaConf.merge(load_config_node(), OmegaConf.from_dotlist(overrides))
+    else:
+        GlobalHydra.instance().clear()
+        with initialize_config_dir(config_dir=str(CONFIG_DIR), version_base=None):
+            cfg = compose(config_name="render_iso", overrides=overrides)
     top = OmegaConf.create({"data_root": cfg.render_iso.export.data_root, "run_dir": "runs"})
     top.render_iso = cfg.render_iso
     RenderIsoPipeline(top).run()

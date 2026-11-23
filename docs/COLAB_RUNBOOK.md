@@ -372,6 +372,50 @@ phiên sau không chạy lại; khoá của `ft` gồm 8 ký tự đầu của s
 Đặt vào `runs/` trên máy (CSV `formB` của §16 đã có ở đó) rồi chạy `python scripts/ft_colab_compare.py --out runs/phase_c/ft_colab`
 (luật (ii) §2K.6 + chặn (b) của §2L; e2e chỉ mô tả).
 
+## 5m. PHASE C §2M — OPEN100-ISO v2 (sửa lỗi render + khung bản vẽ): `formB` và `ft` — notebook §18 (2026-11-23)
+
+**Trước khi mở Colab**:
+- Upload `data/iso_open100_v2/iso_open100_v2_canonical.zip` (2.7 GB, đã tạo ở máy; tạo lại:
+  `cd data/iso_open100_v2 && zip -r -0 iso_open100_v2_canonical.zip canonical`) thành `<DRIVE_ROOT>/data/iso_open100_v2_canonical.zip`.
+  18a kiểm 864 ảnh, 93,794 annotation ký hiệu + 12,096 vùng bỏ qua, mỗi ảnh có `drawing_box`.
+- §16 và §17 đã chạy (mốc v1 + τ của `formB` / `ft`; không chọn lại τ). Không cần file mới trong `encoders/`.
+- Commit + push: renderer (`src/utils/{page_frame,page_svg,iso_layout,iso_mapping,iso_variants}.py`), `src/pipeline/render_iso.py`,
+  `configs/render_iso{,_v2}.yaml`, notebook, test.
+
+Thứ tự trong phiên: 1–4, 11a (v1, cho 12a), 12a (DET_CKPT, `restore`; detection v1 đã lưu), def đầu 9a, 16a–16b (biến; lượt τ / P2 /
+P1 đã có thì **chỉ cần chạy phần gán biến** — hoặc chạy lại, kết quả như cũ), 17a–17b (như vậy), 17d (biến `E2E17`), rồi 18a–18e.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 18a | giải nén v2 vào `/content/iso_open100_v2` | số ảnh / annotation / `drawing_box` (assert) |
+| 18b | Stage 1 `agnostic_merge` trên v2 (lưu `runs/stage1_iso_v2/`), chấm không phân lớp | in dòng `detection` |
+| 18c | P4 `formB`, `ft` trên v2 | 42 prototype, mean, có tâm, A4 (assert) |
+| 18d | e2e `formB`, `ft` trên v2, τ quy tắc A của từng dòng | τ trong metrics = τ đã chọn (assert) |
+| 18e | bảng v1 \| v2 + zip detection v2 | — |
+
+**Gửi lại**: in ra của 18a–18e + các file trong `runs/v2_csv/` (`oneshot_p4v2_crops_dinov2_{formB,ft}.csv`,
+`e2e_v2_dinov2_{formB,ft}.json`, `detections_v2.zip`). Đặt vào `runs/v2_csv/` trên máy: phần đếm dự đoán rơi vào khung bản vẽ
+(`drawing_box`) làm ở máy.
+
+## 5n. PHASE C §2N — Stage 1 một lớp học trên trang ISO (S1-ISO) — notebook mới `train_stage1_iso_colab.ipynb` (2026-11-23)
+
+**Trước khi mở Colab** (máy local, đã tạo sẵn): upload `data/s1iso_tiles.zip` (~6.7 GB) → `<DRIVE_ROOT>/data/s1iso_tiles.zip` và
+`data/iso_p4val_v2/iso_p4val_v2_canonical.zip` → `<DRIVE_ROOT>/data/iso_p4val_v2_canonical.zip`. Commit + push (notebook,
+`configs/classes_symbol.yaml`, `scripts/s1iso_*.py`, test). Trong notebook **sửa `DET_CKPT_OLD`** (= `DET_CKPT` của notebook Stage 2
+mục 12a). **GPU: L4 khuyến nghị** (một phiên); T4 được (~20 phút / epoch, resume mục 6 qua 2 phiên).
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 1–3 | Drive, code, giải nén tile | 50,248 train / 6,924 val (assert) |
+| 4 | detector cũ | 8 lớp coarse (assert), in sha256 |
+| 5 / 6 | train 20 epoch / resume | — |
+| 7 | chốt `encoders/det_s1iso.pt` | đủ 20 epoch, 1 lớp `symbol` (assert) |
+| 8 | P4-val v2: cũ, mới (`agnostic_merge`), chấm không phân lớp | 73 ảnh / 4,832 ký hiệu / `drawing_box` (assert) |
+| 9 | bảng cũ \| mới | — |
+
+**Gửi lại**: in ra của 7–9 + `runs/s1iso_csv/det_p4v2_{old,new}.json` → đặt vào `runs/s1iso_csv/` trên máy, chạy
+`python scripts/s1iso_compare.py --out runs/phase_c/s1iso` (luật 6 §2N). NHẬN → notebook Stage 2 §19 (test v2 + e2e) sẽ được soạn.
+
 ## 6. Infer + eval (sau khi train xong)
 
 ```python

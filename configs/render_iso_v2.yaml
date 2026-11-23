@@ -1,0 +1,22 @@
+# OPEN100-ISO v2 (docs/PLAN_PHASE_C.md §2M): configs/render_iso.yaml with the §2M.2 renderer fixes
+# and the sheet frame of §2M item 7; nothing else changes (sources, mapping rules, variant budget,
+# seeds, degradation). Only what differs is named here (`extends`, utils.iso_mapping.load_config).
+# Use it for every step of the v2 build, e.g.
+#   PID_RENDER_CONFIG=configs/render_iso_v2.yaml .venv/bin/python scripts/make_variants.py
+#   PID_RENDER_CONFIG=configs/render_iso_v2.yaml .venv/bin/python scripts/make_degraded.py
+#   PID_RENDER_CONFIG=configs/render_iso_v2.yaml .venv/bin/pid-render-iso
+# v1 (configs/render_iso.yaml, data/iso_open100) is left as it is.
+extends: render_iso.yaml
+render_iso:
+  arrow_chains: true             # arrows joined by a straight pipe point the same way
+  layout:
+    straighten_pipes: true       # small jogs across a node / inside a pipe put on one line
+  page:
+    place_by_axis: true          # a symbol's y from its L / R ports, x from T / B
+    drop_hanging: true           # pipes left with a free end that touches nothing are left out
+    clip_leaders: true           # a leader whose head lands inside a vessel stops at its wall
+  frame:
+    enabled: true                # trim line, zones, border, notes, revisions, title block
+  export:
+    data_root: ${oc.env:PID_DATA_ROOT,data/iso_open100_v2}
+    degrade_stats: docs/experiments/iso_render/v2_open100/v7

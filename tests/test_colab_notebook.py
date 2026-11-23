@@ -44,22 +44,30 @@ def _is_14(cell: str) -> bool:
     return "template_align" in code or "ROWS14" in code or "in F0:" in code
 
 
+def _is_18(cell: str) -> bool:
+    """§18 (PHASE C §2M): `formB` and `ft` rerun on OPEN100-ISO v2 (its own data root)."""
+    code = _active([cell])
+    return "ISO2" in code or "ROWS18" in code
+
+
 def _is_17(cell: str) -> bool:
     """§17 (PHASE C §2L): the fine-tuned DINOv2 (FT-triển khai) against `formB`, plus e2e."""
     code = _active([cell])
-    return "ENC_FT" in code or "ROWS17" in code
+    return not _is_18(cell) and ("ENC_FT" in code or "ROWS17" in code)
 
 
 def _is_16(cell: str) -> bool:
     """§16 (PHASE C §2K.6): form B of the butterfly and aggregate=max, against §15's base."""
     code = _active([cell])
-    return not _is_17(cell) and ("PROTO43" in code or "ROWS16" in code or "in K4:" in code)
+    return not (_is_17(cell) or _is_18(cell)) and (
+        "PROTO43" in code or "ROWS16" in code or "in K4:" in code
+    )
 
 
 def _is_15(cell: str) -> bool:
     """§15 (PHASE C §2G, Điểm 4): reruns §13's protocols with `pipeline` excluded."""
     code = _active([cell])
-    return not (_is_16(cell) or _is_17(cell)) and (
+    return not (_is_16(cell) or _is_17(cell) or _is_18(cell)) and (
         "NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code
     )
 
@@ -591,3 +599,34 @@ def test_section_17_checks_the_deployed_fine_tune_against_form_b_with_e2e(code_c
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s17]
     last_16 = max(i for i, c in enumerate(code_cells) if _is_16(c))
     assert last_16 < idx[0] < idx[1] < idx[2] < idx[3] < idx[4]
+
+
+def test_section_18_reruns_form_b_and_ft_on_open100_iso_v2(code_cells):
+    """PHASE C §2M: OPEN100-ISO v2 in its own root (zip checked: 864 images, the v2 annotation
+    count, a `drawing_box` on every image); Stage 1 agnostic_merge once on v2, kept on Drive;
+    P4 for formB and ft with the same arguments as §16 / §17 (tau not chosen again: read from
+    §16 / §17's tau runs); e2e of both from v2's detections; v1 and v2 printed side by side; no
+    write to v1's run names."""
+    s18 = [c for c in code_cells if _is_18(c)]
+    assert len(s18) == 5  # 18a unzip, 18b Stage 1, 18c P4, 18d e2e, 18e table
+    unzip, det, p4, e2e, table = (_active([c]) for c in s18)
+    assert (
+        "iso_open100_v2_canonical.zip" in unzip
+        and "LOCAL_ISO2_ROOT = '/content/iso_open100_v2'" in unzip
+    )
+    assert "n_sym == 93794" in unzip and "'drawing_box' in im" in unzip
+    assert "++detector.agnostic_merge=true" in det and "data_root=$LOCAL_ISO2_ROOT" in det
+    assert "KEEP_ISO2 = f'{RUNS_DIR}/stage1_iso_v2'" in det and "eval_det_iso2_agnostic_lo" in det
+    assert "protocol=p4" in p4 and "data_root=$LOCAL_ISO2_ROOT $GROUPS $ENC_V2" in p4
+    assert "{BASE_K4} oneshot.prototypes={PROTO43} oneshot.aggregate=mean" in p4
+    assert "++oneshot.center={CENTER_FT} {NOPIPE}" in p4 and "eval_p4v2_dinov2_" in p4
+    assert "protocol=tau" not in "".join((unzip, det, p4, e2e, table))  # nothing chosen on v2
+    assert "chosen_taus(f'dinov2_{tag}')['rule_a']" in e2e and "in E2E17:" in e2e
+    assert "data_root=$LOCAL_ISO2_ROOT" in e2e and "eval_e2e18_" in e2e
+    assert "restore(f'{KEEP_ISO2}/detections_agnostic', ISO2_DET, 864)" in e2e
+    assert "eval_p4_dinov2_{t}" in table and "eval_p4v2_dinov2_{t}" in table
+    for cell in (det, p4, e2e):
+        assert "data_root=$LOCAL_ISO_ROOT " not in cell and "KEEP_ISO}" not in cell
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s18]
+    last_17 = max(i for i, c in enumerate(code_cells) if _is_17(c))
+    assert last_17 < idx[0] < idx[1] < idx[2] < idx[3] < idx[4]

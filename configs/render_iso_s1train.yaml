@@ -1,0 +1,17 @@
+# ISO-train for Stage 1 (docs/PLAN_PHASE_C.md §2N): pages drawn exactly like OPEN100-ISO v2
+# (render_iso_v2.yaml: fixes + sheet frame + text + degradation) on 710 PID2Graph skeletons that
+# are neither test nor P4-val (scripts/s1iso_prepare.py -> data/iso_s1train/src), with ONLY the
+# Stage 2 vocabulary's templates (rule 2, option D: the 19 templates outside it stand for symbols
+# outside the library and are never drawn here). Built with 2 variants per `Dataset PID` sheet and 1
+# per `Synthetic` sheet; rule 2 was cut to 1 per sheet before any tile was cut, and
+# s1iso_tiles.py --per-sheet 1 takes each sheet's lowest kept index (what count=1 keeps). Use:
+#   PID_RENDER_CONFIG=configs/render_iso_s1train.yaml .venv/bin/python scripts/make_variants.py \
+#       --src data/iso_s1train/src --sheets ... --count 2
+extends: render_iso_v2.yaml
+render_iso:
+  vocab_only: true
+  export:
+    data_root: ${oc.env:PID_DATA_ROOT,data/iso_s1train}
+    src_dir: data/iso_s1train/src
+    degrade_stats: docs/experiments/iso_render/s1train/v7
+    images: degraded

@@ -1393,6 +1393,193 @@ valve_general 0.27 → 0.99, needle 0.51 → 0.80); P1-val top-1 0.485 → 0.538
 Colab dùng đúng model đã chấm. **Code ✅:** notebook §17 (cell-31a–31f; test `test_section_17_…`; §13 / §15 / §16 tách bằng `_is_17`),
 RUNBOOK §5l, `scripts/ft_colab_compare.py` (+ 4 test; thử khô `ft` = `formB` → KHÔNG NHẬN như mong đợi: không nhóm nào tốt hơn).
 
+### 2L.3 Kết quả Colab §17 — 2026-11-22 (áp luật (ii) §2K.6 + (b), `scripts/ft_colab_compare.py` → `runs/phase_c/ft_colab/`) → **`ft` NHẬN** → cấu hình đề xuất = **`ft`**
+
+Kiểm trên Colab: sha256 checkpoint trùng bản cục bộ; 43 prototype cùng tên file `formB`; tâm CL2N dựng lại trên cùng tập crop với tâm §13
+(3,800 crop, 19 lớp; |tâm| 0.651, §13: 0.863); P1 / P2 / P4 cùng crop, τ cùng lớp với `formB`. τ (val_sel, luật A) **0.1923** (δ 0.0187).
+
+| so với `formB` (CI) | formB | ft | |
+|---|---|---|---|
+| P4 suy giảm S / V | 0.863 / 0.536 | 0.913 / 0.636 | cả hai **tốt hơn** |
+| P4 suy giảm H_chon / H_tu_nhien | 0.547 / 0.646 | 0.824 / 0.744 | cả hai **tốt hơn** |
+| P4 AUROC cos | 0.725 | 0.758 | tốt hơn |
+| **P2** S / V top-1 | 0.648 / 0.284 | **0.901 / 0.344** | cả hai **tốt hơn** |
+| **P2** AUROC cos | 0.571 | **0.716** | tốt hơn |
+| P1 đủ h_in top-1 / AUROC cos | 0.576 / 0.360 | 0.904 / 0.465 | Δ +0.328 / +0.105 |
+| (b) P4 three_way / breather | 1.00 / 0.82 | 1.00 / 0.90 | ✓ |
+
+Mọi điều kiện ✓. **End-to-end (mô tả; cùng Stage 1 `agnostic_merge`, box R 0.837 như nhau):** P 0.435 → **0.473**, R 0.440 → **0.478**;
+theo nhóm S 0.881 → 0.898, V 0.441 → 0.495, H_chon 0.371 → **0.645**, H_tu_nhien 0.431 → 0.500.
+
+**Ghi rõ khi báo cáo (không giấu):**
+- **P2 là bằng chứng sạch nhất** (DigitizePID, phong cách khác hẳn bộ sinh H2; không dùng chọn gì): tăng rộng — valve_general 0.00 → 0.89,
+  valve_globe 0.33 → 0.98, open_disc 0.17 → 0.51, interchangeable_disc_open 0.38 → 0.73, valve_butterfly 0.10 → 0.43.
+- **Đánh đổi theo lớp (luật chỉ kiểm theo nhóm):** P2 `piping_heated_cooled_insulated` **0.88 → 0.63** (sang column 15 → 26,
+  hx_straight_tube 1 → 21). Không lớp P1 nào giảm quá 0.01. Lỗi không đổi: P2 valve_control 0.01, check_valve_general 0.00 (phong cách
+  DigitizePID khác ảnh mẫu ISO — không phải loại lỗi "ảnh mẫu giống nhau").
+- **Ý nghĩa của P1 / P2 với bản triển khai:** encoder đã thấy **ảnh mẫu** của mọi lớp (không thấy crop DigitizePID nào) → P1 không còn đo
+  "lớp encoder chưa thấy" theo nghĩa ảnh mẫu. Câu "thêm ký hiệu mới = thêm 1 ảnh, không train lại" dựa trên **FT-chính** (§2L.1, giữ cụm
+  ra). Ký hiệu mới thật thì hoặc dùng encoder này như ảnh mẫu chưa train (bằng chứng §2L.1), hoặc train lại ~17 phút cục bộ.
+- P4 lạc quan (encoder train trên chính ảnh mẫu mà bộ render OPEN100-ISO dùng). AUROC P1 vẫn < 0.5 (formB 0.360) — cổng "Other" yếu ở cả
+  hai; e2e other_iso 0.012 → 0.005 (đã thấp ở cả hai).
+
+**Cấu hình đề xuất mới (`ft`):** encoder `__dinov2_ft_all_a0.5__.pt` (sha256 `66c513fb…`), prototype `iso_prototypes_dinov2_ft_a4_formB.pt`
+(43 hàng), tâm `center_dinov2_ft_a4.pt`, `exclude_prototypes=[pipeline]`, A4, gộp trung bình, τ 0.1923. `formB` → mốc / ablation.
+
+## 2M. OPEN100-ISO v2 — sửa lỗi render, chạy lại số chính — **CHỐT 2026-11-23 (user chọn (c)), TRƯỚC KHI CODE / CHẠY**
+
+**Lý do (user, chuyên gia P&ID, 2026-11-23, khi xem hình minh hoạ tờ iso01):** bản vẽ OPEN100-ISO có lỗi hình — ống chạy xuyên vào
+thân bình, đoạn gấp khúc nhỏ trên ống gần thẳng, mũi tên ngược chiều trên cùng một ống, đường thừa lơ lửng. Không đổi topology hay
+nhãn ký hiệu, nhưng làm bản vẽ không giống thật / không đẹp cho luận văn. Đây là sửa **dữ liệu test vì hình thức**, không vì số.
+
+**Luật (cố định trước):**
+1. Danh sách lỗi sửa + tiêu chí đo tự động viết trước khi sửa (§2M.1); sửa trong renderer (`src/utils/iso_*`, `page_svg`), có test;
+   đếm lỗi trên 12 tờ trước / sau. Không đổi: 12 khung xương, ánh xạ ký hiệu, ngân sách biến thể (36 / tờ), seed, suy giảm, nhãn COCO
+   (trừ box của mũi tên / đoạn ống bị bỏ hoặc dời do chính các sửa này).
+2. Dựng lại toàn bộ OPEN100-ISO → **v2** (864 ảnh). v1 giữ nguyên trên đĩa / Drive (không ghi đè).
+3. Chạy lại trên v2, **chỉ** các dòng: `formB` và `ft` (P4 + e2e; Stage 1 `agnostic_merge` chạy lại một lần trên v2); tuỳ chọn một mốc
+   cũ (R1a hoặc ImageNet) cho bảng chính. τ giữ nguyên (chọn trên DigitizePID `val_sel`, không phụ thuộc OPEN100-ISO). P1 / P2 không
+   chạy lại.
+4. **Không chọn gì trên v2**: cấu hình `ft` đã chốt (§2L.3); v2 chỉ báo lại số. Bảng ablation cũ giữ số v1, ghi rõ phiên bản.
+5. **P4-val không dựng lại** (tập quyết định đã dùng xong cho §2K / §2L; đổi nó bây giờ là hậu kiểm).
+6. Báo cáo cả v1 và v2 của `formB` / `ft` cạnh nhau (không giấu v1).
+7. **(thêm 2026-11-23, user duyệt, trước khi dựng v2)** Trang có **khung bản vẽ kỹ thuật**: viền, lưới tham chiếu, cột ghi chú,
+   bảng revision, bảng tên — nội dung tự sinh (không chép chữ của DigitizePID / OPEN100). Lý do: bản vẽ thật (kể cả OPEN100 gốc)
+   và DigitizePID (Stage 1 học trên đó) đều có; v1 không có → Stage 1 được test dễ hơn thực tế. Khung / chữ không là nhãn COCO;
+   ký hiệu không được nằm dưới khung (khổ trang nới ra để chừa cột ghi chú / bảng tên). Số e2e v2 có thể giảm vì lý do này — báo rõ,
+   tách được nhờ đếm dự đoán rơi vào vùng khung.
+
+### 2M.1 Danh sách sửa + cách đo — CHỐT 2026-11-23 (user chọn luật mũi tên + đường thừa), TRƯỚC KHI SỬA
+
+Đo: `scripts/check_render_artifacts.py` (vẽ lại mọi biến thể giữ lại bằng chính renderer, đếm 4 loại; kiểm bằng mắt trên tờ 1 / 5 có
+đánh dấu). **Mốc v1** (12 tờ × 36 biến thể, `runs/phase_c/render_v1_artifacts.json`): gấp khúc **6,581**, đường vào thân bình **180**,
+mũi tên ngược chiều trên một ống thẳng **258**, đường lơ lửng **1,754**.
+
+| Lỗi | Nguyên nhân | Sửa |
+|---|---|---|
+| Gấp khúc | hai đầu ống đối diện qua mũi tên / van / tê lệch vài px ở bản gốc; V4 chỉ nắn van 2 cổng (`straight_max`) | nắn cùng một đường khi lệch ≤ `straight_max` (15 px gốc) cho mọi nút có hai đầu ống đối diện cùng trục |
+| Mũi tên ngược | `iso_mapping`: OPEN100 không có chiều dòng → mỗi mũi tên bốc chiều riêng | **nhất quán theo dãy** (user 2026-11-23): mũi tên nối nhau bằng ống thẳng cùng trục chung một chiều; theo mũi tên có chiều suy ra từ hình học (đầu ống) nếu có, không thì chiều bốc của mũi tên đầu dãy (không rút thêm số ngẫu nhiên) |
+| Đường vào thân bình | bản gốc có ống / leader đi vào trong cụm thiết bị; V5 thay cụm bằng bình, giữ đường | cắt tại thành bình, mũi tên đặt ở thành |
+| Đường lơ lửng | PID2Graph gán leader như ống; V5c không xếp được chữ ở đầu tự do | **bỏ đường đó** (user 2026-11-23); mũi tên leader vốn là vùng bỏ qua, không phải nhãn COCO |
+
+**Đạt (để dựng v2):** cả 4 loại giảm ≥ 90% so với mốc v1; toàn bộ test renderer xanh; G1 tự động (`check_g1.py`) không xấu hơn; số
+ký hiệu COCO mỗi tờ không đổi ngoài mũi tên / leader bị bỏ do sửa (đếm, báo).
+
+### 2M.2 Sửa renderer — 2026-11-23 (cờ trong `configs/render_iso.yaml`, mặc định TẮT → v1 dựng lại y nguyên; 896 test xanh)
+
+| Cờ | Nơi | Làm gì |
+|---|---|---|
+| `layout.straighten_pipes` | `iso_layout._pipe_ties` | nắn (≤ `straight_max`) hai đầu ống đối diện qua mọi nút (đúng một ống mỗi phía trên trục) + bậc nhỏ trong một ống; không bị cạnh ký hiệu chặn (V5 vẽ ký hiệu theo box gốc) — **trừ mép box bong bóng ISA** (vẽ từ box V4) |
+| `page.place_by_axis` | `page_svg._place` | y của ký hiệu lấy từ cổng L / R, x từ cổng T / B (van có cổng tín hiệu không bị kéo khỏi đường ống); **thiết bị G4 đặt như v1** |
+| `arrow_chains` | `iso_mapping.unify_arrow_chains` | mũi tên nối nhau bằng ống thẳng cùng trục chung một chiều; không rút số ngẫu nhiên mới |
+| `page.drop_hanging` | `page_svg.hanging_pipes` | bỏ (lặp) ống có đầu tự do không chạm ống / ký hiệu / chữ nào (**cùng cổng của run đó**) |
+| `page.clip_leaders` | `page_svg.clip_at_wall` | leader có đầu rơi vào trong bình dừng ở thành bình |
+
+**Đo (12 tờ × 36 biến thể; thước sửa trong lúc làm — đã đo lại mốc v1 bằng đúng thước cuối):**
+
+| Loại | v1 | v2 | giảm |
+|---|---|---|---|
+| mũi tên ngược | 258 | **0** | 100% |
+| đường lơ lửng | 914 | **0** | 100% |
+| gấp khúc | 3,771 | **1,109** (trước sửa G1: 785) | **71%** (< 90%) |
+| đường vào thân bình | 180 | 144 | **20%** (< 90%) |
+
+Sửa thước trong lúc làm (ghi rõ, đều do kiểm bằng mắt thấy báo nhầm, áp như nhau cho v1 / v2): gấp khúc chỉ tính bậc ≥ một nét và chỉ ở
+nút có đúng một ống mỗi phía; đường lơ lửng không tính đầu có chữ gần / chạm ống hay ký hiệu khác; vào thân bình tính đầu mũi tên nằm
+sâu (> 5%) và ống trong box co 15% (bỏ góc chỏm cong). **Không đạt ngưỡng 90% ở 2 loại** — phần còn lại (xem bằng mắt):
+- gấp khúc: tờ 7 (324) = cửa hút / đẩy của bơm lệch 21–23 px gốc > `straight_max` → theo luật §2M.1 là đường thật, không nắn; tờ 6
+  (353) / 5 (180) / 2 (144): ống vào bong bóng ở mép (lệch > bán kính), vòi bình, thiết bị G4 (đặt như v1 sau sửa G1, xem dưới).
+- vào thân bình: tờ 6 (72) = bình nằm trong bình (V-626B trong V-601B, như bản gốc — không phải lỗi); tờ 1 (36) = leader đã dừng ở
+  chỏm cong (đúng trên hình, thước theo box còn đếm); tờ 5 (36) = ống tới mặt bích ở mép trong thân bình (lỗi nhỏ, còn).
+
+**Quyết định phần thiếu (user 2026-11-23, chọn (A)):** không sửa thêm 2 loại dưới ngưỡng. Bản thử dời bong bóng lên trục ống làm hình
+xấu hơn (đã gỡ); mặt bích trong bình chỉ một chỗ trên một tờ gốc; bơm lệch là đường thật. Ghi vào phần giới hạn của luận văn.
+
+**Khung bản vẽ (§2M mục 7) — 2026-11-23:** `src/utils/page_frame.py`, khối `frame` trong `configs/render_iso.yaml` (mặc định TẮT).
+Viền ngoài mảnh, dải ô lưới (số trên / dưới, chữ hai bên, không I / O, chiều đánh số bốc ngẫu nhiên), viền trong đậm, cột phải
+(16–22% bề rộng bản vẽ): NOTES (4–18 ghi chú tự viết, ~15% "DELETED."), tuỳ chọn danh sách bản vẽ tham chiếu, bảng revision (1–6
+dòng, mới nhất trên cùng), bảng tên (công ty / dự án / tiêu đề / người vẽ–kiểm–duyệt / số bản vẽ / tỉ lệ / tờ / rev) — chữ ghép từ
+mảnh chung, không chép DigitizePID / OPEN100. Seed riêng `"frame"` (không đổi seed các bước khác). Vẽ sau cùng trong `render_variant`;
+bản vẽ dời nguyên số pixel, mọi toạ độ (box COCO, cổng, đường tín hiệu, chữ, nút V4, ống V4) dời theo → G1, suy giảm, kiểm export
+không đổi cách chạy. Kiểm: G1 trên 12 biến thể (tờ 1 / 5 / 7) giống hệt khi bật / tắt khung; lớp ống trùng từng pixel, lớp ký hiệu
+/ chữ chỉ lệch khử răng cưa (≤ 13 mức xám, ~0,05% pixel mực); 9/9 SVG v1 vẽ lại giống hệt từng byte. Export ghi `drawing_box` (vùng
+bản vẽ; ảnh suy giảm: hộp qua affine) vào mỗi ảnh COCO → đếm dự đoán rơi vào khung khi báo e2e.
+
+**Sửa sau khi G1 chặn lượt dựng v2 đầu (2026-11-23).** Lượt `make_variants` v2 đầu: G1 loại gần hết tờ 0 / 2 / 4 / 5 (giữ 296 / 432).
+Thước §2M.1 không chạy G1 nên không thấy; tìm theo từng cờ (bật một cờ một lần, 3–5 biến thể / tờ), mỗi cờ một nguyên nhân:
+(1) `drop_hanging` bỏ ống nhưng giữ bản ghi cổng ở đầu ống → G1 tiêu chí 1 (ống chạm ký hiệu tại cổng) trượt — bỏ luôn cổng của run
+đó; (2) `straighten_pipes` (tie tự do) dời mép box bong bóng → vòng tròn nhỏ lại, cặp bong bóng chạm nhau trong dữ liệu bị tách
+(tiêu chí 5) — tie tự do không được dời mép box bong bóng; (3) `place_by_axis` đặt bộ trao đổi nhiệt (hai ống vào từ trên, chung một
+cổng mẫu) lệch khỏi cụm bù giãn nở (tiêu chí 5) — thiết bị G4 đặt như v1. Một lần thử luật "chỉ khi có ống đi xuyên" cho (3) làm gấp
+khúc tăng lại 2,430 → bỏ, giữ luật G4. Kết quả: G1 trên 96 biến thể thử (12 tờ × 8) v2 rớt 3, v1 rớt 4; lượt dựng lại giữ đủ
+432 / 442 lần thử (G1 loại 10; v1: 12). Test: `tests/test_render_v2_fixes.py` (đơn vị + 3 ca hồi quy G1 đúng các tờ từng rớt).
+
+**Dựng v2 (2026-11-23):** `data/iso_open100_v2/` — 432 biến thể sạch + 432 suy giảm, export 864 ảnh, **93,794** annotation ký hiệu
+(v1: 93,800) + 12,096 vùng bỏ qua (= v1). Mười tờ số nhãn trùng v1 từng lớp; tờ 6 (−4) / 11 (−2) khác chỉ vì G1 loại lần thử khác
+(mỗi tờ đổi đúng một chỉ số biến thể giữ lại). Mỗi ảnh COCO có `drawing_box`. JPEG suy giảm trung bình 5.8 MB (v1 4.1 MB: trang
+lớn hơn + khung). Thống kê: `docs/experiments/iso_render/v2_open100/{v6,v7}`; lượt hỏng giữ ở `v6_failed_g1/`. Zip cho Colab:
+`data/iso_open100_v2/iso_open100_v2_canonical.zip` (2.7 GB). Notebook §18 / RUNBOOK §5m.
+
+**Cấu hình v2:** `configs/render_iso_v2.yaml` (chỉ ghi phần khác: 5 cờ §2M.2 + `frame.enabled` + `data_root` `data/iso_open100_v2`),
+bật bằng `PID_RENDER_CONFIG=configs/render_iso_v2.yaml` cho `make_variants` / `make_degraded` / `pid-render-iso`. Hai script dựng
+lấy đường ra theo `data_root` và từ chối ghi vào thư mục đã có biến thể (v1 an toàn).
+
+## 2N. Stage 1 học trên trang ISO tự sinh (S1-ISO) — **CHỐT 2026-11-23 (user duyệt từng điểm), TRƯỚC KHI CODE / RENDER / TRAIN**
+
+**Lý do (phân tích e2e `ft`, v1, 2026-11-23):** e2e P 0.473 / R 0.478. Trên ký hiệu có trong thư viện: Stage 1 thấy box 86%, Stage 2 đúng
+90% số đó (R 0.77). Stage 1 (detector 8 lớp DigitizePID) bỏ sót hình chưa từng thấy (recall H_tu_nhien 0.61, other_iso 0.46;
+agitator / column 0) và sinh 7,785 box thừa (31% lỗi). Phần lớn lỗi còn lại là nhóm Other bị Stage 2 gọi thành ký hiệu (bong bóng →
+`vessel_spherical`): việc của Stage 2, **không** thuộc §2N (bước 3, hậu kiểm, luật riêng sau). User (chuyên gia, 2026-11-23): mục tiêu
+là nhận ký hiệu ISO → cho Stage 1 học trên trang ISO tự sinh là hợp lệ; thư viện ảnh mẫu là kiến thức đầu vào (như `ft` §2L).
+
+**Cơ sở:** dữ liệu tổng hợp cho P&ID / phát hiện vật (Paliwal et al. 2021 Digitize-PID; Dwibedi et al. 2017 Cut-Paste-Learn); phát hiện
+không phân lớp tổng quát sang vật lạ (Jaiswal et al. 2021; Kim et al. 2022 OLN: đầu phân lớp dạy vật lạ thành nền); mẫu âm khó / tỉ lệ
+nền (Shrivastava et al. 2016 OHEM; khuyến nghị Ultralytics ít ảnh nền); ngữ cảnh khi chèn vật (Dvornik et al. 2018 — giữ bố cục thật).
+
+**Luật (cố định trước):**
+1. **Ba tập, tách theo khung xương** (không tờ nào ở hai tập):
+   - **ISO-train**: PID2Graph.zip `Complete/Dataset PID` (500) + `Complete/PID2Graph Synthetic` (250) **trừ 40 tờ P4-val**
+     (`data/iso_p4val/src/mapping.csv` `source_id`) = 710 tờ; đánh số lại từ **200** (seed render khác 0–11 và 100–139); đưa về thang
+     OPEN100 bằng đúng f của §2K.2 (`scripts/p4val_prepare.py`). 5% số tờ (rút `Random("s1iso/2026")`, theo bộ) làm val của YOLO
+     (dừng sớm / theo dõi), **không** dùng để quyết định.
+   - **P4-val v2 (tập quyết định)**: 40 khung xương P4-val, **render lại bằng cấu hình v2** (khung + sửa lỗi) vào `data/iso_p4val_v2/`
+     (P4-val v1 giữ nguyên cho §2K / §2L; tập quyết định của Stage 1 phải cùng kiểu trang với train / test vì khung / chữ đổi box thừa).
+   - **Test**: OPEN100-ISO v2 (12 tờ) — chạy **một lần** với detector đã chọn.
+2. **Render ISO-train**: cấu hình v2 + overlay `configs/render_iso_s1train.yaml`: **phương án D — thư viện = vocab**: 19 mẫu ngoài vocab
+   (`in_vocab = no` của taxonomy, = `other_iso` trên test) **không bao giờ được vẽ** khi train (luật nào chỉ ra mẫu đó thì rơi xuống luật
+   sau, như mọi luật hết mẫu). Kiểm: số annotation `other_iso` trong ISO-train = 0. Biến thể: **1 / tờ** (cả hai bộ; sửa 2026-11-23
+   trước khi cắt tile / train, user chọn — bản đầu ghi 2 / tờ `Dataset PID`: ~83k tile, ~9 GB, ~10–12 giờ T4; 1 / tờ: ~56k tile); lọc G1 như cũ; mỗi biến thể dùng **ảnh suy giảm** (V7). Hạn chế đã biết (đo trên P4-val): `Synthetic` 69% hộp trơn,
+   ~18% ký hiệu vocab (chủ yếu bơm) — giữ vì là nguồn bơm duy nhất + bố cục trang lớn.
+3. **Một lớp `symbol`** (user 2026-11-23): mọi annotation COCO (vocab, `other_isa`, `other_generic`, mũi tên dòng chảy) → lớp 0; vùng bỏ
+   qua (mũi tên dẫn, cờ) cũng gán `symbol` khi train (dự đoán rơi vào đó không tính lúc chấm; tránh dạy đầu mũi tên là nền). DigitizePID
+   (chỉ split `train`): 8 lớp coarse → `symbol`.
+4. **Luật tile** (mỗi trang, tile 1024 chồng 20% như `data.tiling`; box tính vào tile khi ≥ 60% diện tích nằm trong — `min_visibility`):
+   giữ **mọi tile có ký hiệu**; tile không ký hiệu giữ **≤ 30%** số tile giữ lại của trang, ưu tiên tile có khung / chữ (mẫu âm khó), rồi
+   tile chỉ có ống; tile trắng **≤ 5%**; rút bằng `Random("s1iso/tiles/<trang>")`. Trang vẽ không đổi gì (minh hoạ đã duyệt: 40 tờ P4-val
+   → 65% tile có ký hiệu ở cả hai bộ). Áp như nhau cho DigitizePID.
+5. **Train**: YOLOv8, khởi tạo từ `best.pt` của detector Stage 1 hiện tại (12a, đầu ra 1 lớp khởi tạo lại), `imgsz` 1024, aug như
+   `detector.aug` (không xoay), ISO-train + DigitizePID trộn theo số tile (không lặp mẫu). Số epoch / batch ghi khi viết notebook, trước khi
+   chạy; không chọn epoch trên P4-val v2 ngoài `best.pt` theo val YOLO (luật 1). **Chốt 2026-11-23 (notebook `train_stage1_iso_colab.ipynb`, trước khi
+   chạy):** 20 epoch, `batch=-1` (tự chọn theo GPU; Ultralytics tích luỹ gradient tới batch danh nghĩa 64 → công thức học không đổi theo
+   GPU), không dừng sớm (patience mặc định), `best.pt` theo fitness val YOLO. Đã chạy thử toàn đường trên CPU (1 epoch / 16 tile →
+   suy luận 37 tờ P4-val v2 → chấm không phân lớp → `scripts/s1iso_compare.py`).
+6. **Quyết định trên P4-val v2** (ảnh suy giảm, `det_only` không phân lớp, `agnostic_merge`, IoU 0.5, cùng `score_thr`): detector mới
+   NHẬN khi (a) recall box tăng, **cận dưới CI 95% (bootstrap theo tờ) của Δrecall > 0**, (b) precision không giảm quá 0.02, (c) recall
+   nhóm `other_iso` (chưa thấy) không giảm quá 0.05. Thiếu một điều → giữ detector cũ, báo đủ số.
+7. **Test một lần** trên OPEN100-ISO v2: Stage 1 (cũ | mới) không phân lớp, theo nhóm, **tách 'Stage 1 đã thấy' (vocab, bong bóng,
+   hộp trơn) / 'chưa thấy' (other_iso)**; e2e `formB` / `ft` với detector đã chọn; đếm dự đoán rơi vào khung (`drawing_box`). P4 (crop GT)
+   không đổi. Số trên vocab **lạc quan** (test vẽ bằng đúng ảnh mẫu đó) — ghi rõ, như P4 của `ft`.
+8. **Ngoài phạm vi §2N**: hình ngẫu nhiên trên ống (hướng (a), bản thứ hai nếu còn thời gian, luật riêng, quyết định trên P4-val v2);
+   bong bóng → Other (bước 3: hậu kiểm, luật riêng); đổi Stage 2.
+
+**Dựng (2026-11-23):** `scripts/s1iso_prepare.py` → 710 khung xương (`data/iso_s1train/src`, f trùng P4-val, 0 tờ trùng P4-val; 36 tờ
+`yolo_val`). Render (`configs/render_iso_s1train.yaml`): `Dataset PID` 395 / 480 tờ giữ được (85 tờ G1 loại cả 60 lần thử, tiêu chí 1 + 5 —
+lỗi của chính khung xương, như 3 tờ P4-val), `Synthetic` 230 / 230 → **625 tờ**; **0 annotation `other_iso`** (phương án D đúng).
+Hệ quả phụ của D: agitator (3 lớp vocab) chỉ vẽ trong bình đáy cong (ngoài vocab) → cũng không có trong ISO-train; báo riêng như nhóm
+"chưa thấy". P4-val v2: 73 ảnh / 4,832 ký hiệu (= P4-val v1). Tile (`scripts/s1iso_tiles.py`, `data/s1iso_tiles`, 6.7 GB): train
+**50,248** (ISO 29,191: 65% có ký hiệu; DigitizePID 21,057: 70%), val 6,924; kiểm bằng mắt box trên tile suy giảm + 15,709 annotation
+không có box trống.
+
 ## 3. Bước 3 — Đóng băng và viết (2026-12-15, dù Bước 2 ra sao)
 
 Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
@@ -1461,19 +1648,33 @@ Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
   RUNBOOK §5k
 - [x] Chạy Colab §16 → `k4_colab_compare.py` → áp §2K.6 (2026-11-20, §2K.7): **(i) `formB` NHẬN**; (ii) `max` KHÔNG NHẬN (P4 S −0.082,
   chỉ do flanged_connection 0.64 → 0.35; mọi số khác tăng) → ablation. Cấu hình đề xuất = 2B 41 + dạng B, gộp trung bình
-- [ ] Cấu hình mới: e2e (luật riêng) — chạy bằng tham số dòng lệnh như §16 (`$DINO $A4 ++oneshot.center=… 'exclude_prototypes=[pipeline]'
-  prototypes=…_formB.pt aggregate=mean other_min_cosine=0.1979`)
+- [x] Cấu hình mới: e2e — chạy trong §17d cho cả `formB` (τ 0.1979) và `ft` (τ 0.1923), mô tả (§2L.3)
 - [x] Bước 4 fine-tune "giữ ảnh mẫu ra" (§2L): luật CHỐT 2026-11-21 (+ chặn (a) V-ISO sạch, (b) P4 three_way / breather)
 - [x] §2L code + chạy (2026-11-21, §2L.1): **FT-chính ĐẠT** — 9 lớp giữ ra 0.760 → 0.851 (CI [+0.076, +0.109]), P1-val top-1 / AUROC tăng
 - [x] FT-triển khai (42 ảnh mẫu, α = 0.5) train cục bộ + code notebook §17 / `ft_colab_compare.py` (2026-11-22, §2L.2)
-- [ ] Colab §17 (P1 / P2 / P4 + e2e `formB` và FT) → `scripts/ft_colab_compare.py` → áp luật (ii) §2K.6 + (b)
+- [x] Colab §17 → `ft_colab_compare.py` (2026-11-22, §2L.3): **`ft` NHẬN** — mọi nhóm P4 / P2 tốt hơn, (b) ✓; e2e P / R 0.435 / 0.440 →
+  0.473 / 0.478. Cấu hình đề xuất = **`ft`** (τ 0.1923); đánh đổi P2 piping_heated_cooled_insulated 0.88 → 0.63 ghi rõ
 - [ ] (Để sau, user 2026-11-21: "cứ chạy với các tham số, có thời gian thì refactor") đưa cấu hình đề xuất thành mặc định
   `configs/config.yaml`: đổi `fgc.backbone/imgsz/embed_dim` + 9 khoá `oneshot`, thêm `$LEGACY` cho notebook §5–§12, `exclude_prototypes=[]`
-  cho §13–§14, ghim ResNet trong `oneshot_probe.load_encoder`; kiểm: config mới không override tái lập P4-val `41+B / mean` 0.770
+  cho §13–§14, ghim ResNet trong `oneshot_probe.load_encoder`; từ 2026-11-22 cấu hình là **`ft`** (encoder / prototype / tâm FT, τ 0.1923);
+  kiểm: config mới không override tái lập số §17 của `ft`
 - [ ] Đóng băng 2026-12-15
 
 ## 7. Nhật ký sửa luật
 
+- **2026-11-23 — §2M:** tập test OPEN100-ISO sẽ dựng lại (v2) vì lỗi hình do user chỉ ra; luật §2M chốt trước khi sửa / chạy;
+  không đổi cấu hình hay luật nào đã chốt; số v1 giữ nguyên và báo cạnh v2.
+- **2026-11-23 — §2M mục 7:** thêm khung bản vẽ (viền, lưới, ghi chú, revision, bảng tên) vào v2, user duyệt sau khi so với
+  DigitizePID / SynthPID; v2 chưa dựng, chưa có số nào.
+
+- **2026-11-23 — §2M.2 sửa sau G1:** lượt dựng v2 đầu bị G1 loại hàng loạt (tờ 0 / 2 / 4 / 5) → ba sửa trong chính các cờ §2M.2
+  (cổng của ống bị bỏ; tie tự do không dời mép bong bóng; G4 đặt như v1), đo lại: gấp khúc 785 → 1,109 (vẫn dưới ngưỡng, đã nhận ở
+  (A)); hai loại 100% giữ nguyên. Không đổi luật / ngưỡng. v2 dựng lại đủ 864 ảnh.
+- **2026-11-23 — §2N:** Stage 1 học trên trang ISO tự sinh (710 khung xương PID2Graph, trừ P4-val; phương án D: chỉ mẫu vocab; 1 lớp
+  `symbol`; luật tile 30% / 5%); P4-val render lại kiểu v2 làm tập quyết định Stage 1; test v2 một lần. Chốt trước khi code.
+- **2026-11-23 — §2N luật 2 (trước khi cắt tile / train):** 2 → **1 biến thể / tờ `Dataset PID`** (user chọn, vì khối lượng: ~83k tile
+  ~9 GB → ~56k tile). Dựng đã chạy với 2 / tờ; lấy biến thể giữ lại có chỉ số nhỏ nhất của mỗi tờ = đúng biến thể mà lượt 1 / tờ giữ
+  (V6 thử chỉ số tăng dần, giữ biến thể đầu qua lọc; loại trùng chỉ so với biến thể giữ trước) → `s1iso_tiles.py --per-sheet 1`.
 - **2026-11-17, trước khi có số C3** (lần chạy C3 đang nhúng `dinov2reg`, chưa chấm gì): sau yêu cầu của user "tối ưu phải
   có cơ sở từ paper" (§2C.0), ứng viên được **đưa vào pipeline** ở §2C.3 chỉ còn ViT-B (`dinov2b`, `dinov2breg` — cơ sở
   mạnh, DINOv2 Bảng 4 / 6 / 9). `dinov2reg` (ViT-S + registers; cơ sở yếu cho đặc trưng toàn ảnh, Darcet et al.) chỉ báo

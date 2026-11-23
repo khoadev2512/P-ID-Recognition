@@ -115,7 +115,12 @@ def write_stats(records: list[dict], walls: dict[int, float], out: Path, stats: 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--src", type=Path, default=Path("data/raw/pid2graph/open100"))
-    ap.add_argument("--out", type=Path, default=Path("data/iso_open100/variants"))
+    ap.add_argument(
+        "--out", type=Path, default=None, help="default: <render config export.data_root>/variants"
+    )
+    ap.add_argument(
+        "--overwrite", action="store_true", help="allow writing where variants already exist"
+    )
     ap.add_argument("--stats", type=Path, default=None, help="write summary CSVs here")
     ap.add_argument("--sheets", type=int, nargs="*", default=list(range(12)))
     ap.add_argument("--count", type=int, help="variants kept per sheet (config: variants.count)")
@@ -136,6 +141,10 @@ def main() -> None:
         if val is not None:
             cfg["variants"][key] = val
     cfg["variants"]["max_attempts"] = max(cfg["variants"]["max_attempts"], cfg["variants"]["count"])
+    args.out = args.out or Path(cfg["export"]["data_root"]) / "variants"
+    done = [s for s in args.sheets if any((args.out / f"sheet{s}").glob("v*.json"))]
+    if done and not args.overwrite:  # v1 stays as it is (PLAN_PHASE_C §2M rule 2)
+        raise SystemExit(f"{args.out}: sheets {done} already have variants (--overwrite to redo)")
     args.out.mkdir(parents=True, exist_ok=True)
 
     t0 = time.perf_counter()

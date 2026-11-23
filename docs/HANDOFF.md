@@ -1084,4 +1084,14 @@ DINOv2-S mở 2 khối cuối, ArcFace trên ảnh mẫu ISO + bộ sinh H2 (see
 trước). **FT-triển khai đã train cục bộ 2026-11-22** (PLAN §2L.2; `--deploy`, `runs/phase_c/ft/__dinov2_ft_all_a0.5__.pt`, sha256
 `66c513fb…`; mô tả lạc quan P4-val 0.770 → 0.937, P1-val 0.485 → 0.538 / AUROC 0.693 → 0.814). Việc tiếp: tải checkpoint lên Drive
 `encoders/` → notebook §17 (RUNBOOK §5l) → `scripts/ft_colab_compare.py` (luật (ii) §2K.6 + chặn three_way / breather) kèm e2e.
+**Colab §17 ĐÃ CHẠY 2026-11-22 → `ft` NHẬN** (PLAN §2L.3, `runs/phase_c/ft_colab/`): mọi nhóm P4 / P2 "tốt hơn" (P2 S 0.648 → 0.901,
+V 0.284 → 0.344, AUROC 0.571 → 0.716); P1 h_in 0.576 → 0.904; chặn (b) ✓. e2e P / R 0.435 / 0.440 → 0.473 / 0.478 (H_chon 0.371 → 0.645).
+Đánh đổi: P2 piping_heated_cooled_insulated 0.88 → 0.63. **Cấu hình đề xuất = `ft`**: `__dinov2_ft_all_a0.5__.pt` +
+`iso_prototypes_dinov2_ft_a4_formB.pt` + `center_dinov2_ft_a4.pt`, bỏ `pipeline`, A4, mean, τ 0.1923 (lệnh: notebook 17b / 17d).
+
+**OPEN100-ISO v2 (PLAN §2M, 2026-11-23):** user chỉ ra lỗi hình của OPEN100-ISO (gấp khúc, mũi tên ngược, đường lơ lửng, đường vào
+thân bình) và thiếu khung bản vẽ → dựng lại tập test thành v2 (`data/iso_open100_v2/`, v1 giữ nguyên): 5 cờ sửa renderer (§2M.2;
+mũi tên ngược / đường lơ lửng 0, gấp khúc −71%, vào thân bình −20%: dưới ngưỡng 90%, user nhận (A)) + khung bản vẽ tự sinh
+(`src/utils/page_frame.py`; `drawing_box` trong COCO). Bật bằng `PID_RENDER_CONFIG=configs/render_iso_v2.yaml`. 864 ảnh, 93,794
+annotation. Chưa chạy trên Colab: notebook §18 (RUNBOOK §5m) — chỉ `formB` / `ft`, không chọn gì trên v2, báo v1 cạnh v2.
 

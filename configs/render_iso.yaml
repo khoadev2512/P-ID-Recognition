@@ -161,6 +161,7 @@ render_iso:
     data_root: ${oc.env:PID_DATA_ROOT,data/iso_open100}  # holds variants/ and degraded/ (inputs)
     src_dir: data/raw/pid2graph/open100       # the source GraphML / PNG (read only)
     vocab_csv: data/raw/iso_symbols/vocab.csv # Stage 2 vocabulary (read only)
+    degrade_stats: docs/experiments/iso_render/v7  # make_degraded.py's degraded.csv
     images: both          # clean | degraded | both
     link: hardlink        # hardlink | symlink | copy: how renderings enter canonical/images
     other_labels: [other_iso, other_isa, other_generic]
@@ -173,3 +174,17 @@ render_iso:
       test_fraction: 0.5  # by_source only
       seed: 0
     workers: 4
+
+  # PLAN_PHASE_C §2M item 7 (OPEN100-ISO v2): an engineering sheet frame round the drawing (trim
+  # line, zone band, border, notes column, revision table, title block; utils.page_frame). Drawn
+  # last from its own seed ("frame"); the drawing moves into it, every recorded coordinate with it.
+  # Not COCO. `enabled: false` keeps v1 exactly as it was drawn.
+  frame:
+    enabled: false
+    cap_px: [13, 19]        # notes / table text cap height, page px (title / company larger)
+    column: [0.16, 0.22]    # notes column width, share of the drawing's width
+    notes: [4, 18]          # numbered notes (some "DELETED."); those that do not fit are dropped
+    revisions: [1, 6]       # rows of the revision table
+    rows: [6, 8]            # zone rows (letters); columns follow the page's aspect
+    p_references: 0.5       # a reference-drawings list under the notes
+    p_centring: 0.5         # centring marks at the middle of each side
