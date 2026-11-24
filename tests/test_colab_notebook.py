@@ -44,10 +44,16 @@ def _is_14(cell: str) -> bool:
     return "template_align" in code or "ROWS14" in code or "in F0:" in code
 
 
+def _is_19(cell: str) -> bool:
+    """§19 (PHASE C §2N rule 7): the new one-class Stage 1 on OPEN100-ISO v2, e2e formB / ft."""
+    code = _active([cell])
+    return "CSV19" in code or "det_s1iso" in code
+
+
 def _is_18(cell: str) -> bool:
     """§18 (PHASE C §2M): `formB` and `ft` rerun on OPEN100-ISO v2 (its own data root)."""
     code = _active([cell])
-    return "ISO2" in code or "ROWS18" in code
+    return not _is_19(cell) and ("ISO2" in code or "ROWS18" in code)
 
 
 def _is_17(cell: str) -> bool:
@@ -67,7 +73,7 @@ def _is_16(cell: str) -> bool:
 def _is_15(cell: str) -> bool:
     """§15 (PHASE C §2G, Điểm 4): reruns §13's protocols with `pipeline` excluded."""
     code = _active([cell])
-    return not (_is_16(cell) or _is_17(cell) or _is_18(cell)) and (
+    return not (_is_16(cell) or _is_17(cell) or _is_18(cell) or _is_19(cell)) and (
         "NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code
     )
 
@@ -630,3 +636,41 @@ def test_section_18_reruns_form_b_and_ft_on_open100_iso_v2(code_cells):
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s18]
     last_17 = max(i for i, c in enumerate(code_cells) if _is_17(c))
     assert last_17 < idx[0] < idx[1] < idx[2] < idx[3] < idx[4]
+
+
+def test_section_19_runs_the_new_stage1_once_on_open100_iso_v2(code_cells):
+    """PHASE C §2N rule 7: the adopted one-class detector (sha checked, `classes_symbol.yaml`)
+    runs once on v2 with agnostic_merge and is scored class-agnostic like §18's old one; e2e of
+    formB / ft with the same tau / arguments as 18d on the new boxes only; nothing chosen, P4 not
+    rerun; the frame count covers old and new, Stage 1 and one-shot; §18's kept outputs are never
+    overwritten."""
+    s19 = [c for c in code_cells if _is_19(c)]
+    assert len(s19) == 3  # 19a Stage 1, 19b e2e, 19c table
+    det, e2e, table = (_active([c]) for c in s19)
+    assert "DET_S1 = f'{ENC_DIR}/det_s1iso.pt'" in det and "S1_SHA = '57c4c4c61430'" in det
+    assert "S1_CLASSES = '/content/pid/configs/classes_symbol.yaml'" in det
+    assert "coarse_classes == ['symbol']" in det
+    assert "detector.ckpt=$DET_S1" in det and "++detector.classes_yaml=$S1_CLASSES" in det
+    assert "++detector.agnostic_merge=true" in det and "data_root=$LOCAL_ISO2_ROOT" in det
+    assert "++eval.class_agnostic=true" in det and "__global_lo__.pt" in det
+    assert "keep = f'{KEEP_ISO2}/detections_agnostic_s1iso'" in det
+    assert "('old', 'eval_det_iso2_agnostic_lo'), ('new', 'eval_det_iso2_s1iso_lo')" in det
+    assert "restore(f'{KEEP_ISO2}/detections_agnostic_s1iso', ISO2_DET, 864)" in e2e
+    assert "chosen_taus(f'dinov2_{tag}')['rule_a']" in e2e and "in E2E17:" in e2e
+    assert "E_ARGS = f'{enc} {DINO} {A4} {NOPIPE}'" in e2e
+    assert "++detector.classes_yaml=$S1_CLASSES" in e2e and "eval_e2e19_" in e2e
+    assert "detections_oneshot_s1iso_dinov2_{keep_tag}" in e2e
+    every = "".join((det, e2e, table))
+    assert "protocol=" not in every  # no tau, no P4
+    assert "run_dir=$RUNS_DIR/eval_det_iso2_agnostic_lo" not in every
+    assert "run_dir=$RUNS_DIR/eval_e2e18_" not in every
+    assert "keep = f'{KEEP_ISO2}/detections_agnostic'" not in every
+    assert "data_root=$LOCAL_ISO_ROOT " not in every and "KEEP_ISO}" not in every
+    assert "scripts/frame_predictions.py" in table and "drawing_box" not in det
+    for d in ("'detections_agnostic', 'detections_agnostic_s1iso'", "detections_oneshot_dinov2_{k}",
+              "detections_oneshot_s1iso_dinov2_{k}"):  # fmt: skip
+        assert d in table, d
+    assert "e2e_v2_dinov2_{tag}.json" in table and "e2e_v2_s1iso_dinov2_{tag}.json" in table
+    idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s19]
+    last_18 = max(i for i, c in enumerate(code_cells) if _is_18(c))
+    assert last_18 < idx[0] < idx[1] < idx[2]

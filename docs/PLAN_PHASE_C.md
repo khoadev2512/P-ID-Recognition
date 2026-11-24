@@ -1580,6 +1580,20 @@ Hệ quả phụ của D: agitator (3 lớp vocab) chỉ vẽ trong bình đáy 
 **50,248** (ISO 29,191: 65% có ký hiệu; DigitizePID 21,057: 70%), val 6,924; kiểm bằng mắt box trên tile suy giảm + 15,709 annotation
 không có box trống.
 
+**Kết quả luật 6 (2026-11-24) — NHẬN detector mới** (`runs/encoders/det_s1iso.pt`, sha `57c4c4c61430`, `best.pt` epoch 20 / 20, val
+YOLO mAP50 0.995; `scripts/s1iso_compare.py` → `runs/phase_c/s1iso/`). P4-val v2 suy giảm, 37 tờ / 73 ảnh / 4,832 GT:
+
+| | P | R | TP | FP | mAP50 |
+|---|---|---|---|---|---|
+| cũ (8 lớp DigitizePID) | 0.718 | 0.724 | 3,498 | 1,375 | 0.671 |
+| mới (1 lớp, trang ISO) | 0.793 | 0.984 | 4,754 | 1,243 | 0.973 |
+
+(a) Δrecall **+0.260**, CI95 [+0.212, +0.333] ✓; (b) Δprecision **+0.075** ✓; (c) Δrecall `other_iso` **+0.324** (0.534 → 0.858) ✓.
+Theo nhóm (cũ → mới): S 0.959 → 1.000; V 0.782 → 1.000; H_chon 0.921 → 1.000; H_tu_nhien 0.679 → 0.981; other_isa 1.000 → 1.000;
+other_generic 0.390 → 1.000. Agitator (chưa thấy, 12 box) 0 → 1 / 12. Hạn chế ghi kèm: P4-val v2 cùng bộ render với ISO-train (khác
+khung xương) → mức tăng trên nhóm đã thấy là **trong cùng phong cách**; tín hiệu tổng quát sang hình lạ là `other_iso` (+0.32) và
+agitator (vẫn ~0). Box thừa còn 1,243 (~34 / tờ) — chưa tách được phần nằm trong khung (cần file detection; đếm ở test, luật 7).
+
 ## 3. Bước 3 — Đóng băng và viết (2026-12-15, dù Bước 2 ra sao)
 
 Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
@@ -1675,6 +1689,8 @@ Khung luận văn theo kết quả (BACKUP_PLAN nhóm E):
 - **2026-11-23 — §2N luật 2 (trước khi cắt tile / train):** 2 → **1 biến thể / tờ `Dataset PID`** (user chọn, vì khối lượng: ~83k tile
   ~9 GB → ~56k tile). Dựng đã chạy với 2 / tờ; lấy biến thể giữ lại có chỉ số nhỏ nhất của mỗi tờ = đúng biến thể mà lượt 1 / tờ giữ
   (V6 thử chỉ số tăng dần, giữ biến thể đầu qua lọc; loại trùng chỉ so với biến thể giữ trước) → `s1iso_tiles.py --per-sheet 1`.
+- **2026-11-24 — §2N luật 6:** detector mới (1 lớp, 20 epoch) **NHẬN** trên P4-val v2: Δrecall +0.260 (CI95 [+0.212, +0.333]),
+  ΔP +0.075, Δrecall `other_iso` +0.324; cả ba điều đạt. Luật không đổi. Bước tiếp: test OPEN100-ISO v2 một lần (luật 7).
 - **2026-11-17, trước khi có số C3** (lần chạy C3 đang nhúng `dinov2reg`, chưa chấm gì): sau yêu cầu của user "tối ưu phải
   có cơ sở từ paper" (§2C.0), ứng viên được **đưa vào pipeline** ở §2C.3 chỉ còn ViT-B (`dinov2b`, `dinov2breg` — cơ sở
   mạnh, DINOv2 Bảng 4 / 6 / 9). `dinov2reg` (ViT-S + registers; cơ sở yếu cho đặc trưng toàn ảnh, Darcet et al.) chỉ báo

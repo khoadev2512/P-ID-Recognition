@@ -395,7 +395,8 @@ P1 đã có thì **chỉ cần chạy phần gán biến** — hoặc chạy l�
 
 **Gửi lại**: in ra của 18a–18e + các file trong `runs/v2_csv/` (`oneshot_p4v2_crops_dinov2_{formB,ft}.csv`,
 `e2e_v2_dinov2_{formB,ft}.json`, `detections_v2.zip`). Đặt vào `runs/v2_csv/` trên máy: phần đếm dự đoán rơi vào khung bản vẽ
-(`drawing_box`) làm ở máy.
+(`drawing_box`) làm ở máy. **Từ 2026-11-24:** 19c đếm luôn trên Colab (cả detector cũ lẫn mới) → chạy §18 rồi §19 trong cùng phiên,
+`detections_v2.zip` không cần tải.
 
 ## 5n. PHASE C §2N — Stage 1 một lớp học trên trang ISO (S1-ISO) — notebook mới `train_stage1_iso_colab.ipynb` (2026-11-23)
 
@@ -415,6 +416,24 @@ mục 12a). **GPU: L4 khuyến nghị** (một phiên); T4 được (~20 phút /
 
 **Gửi lại**: in ra của 7–9 + `runs/s1iso_csv/det_p4v2_{old,new}.json` → đặt vào `runs/s1iso_csv/` trên máy, chạy
 `python scripts/s1iso_compare.py --out runs/phase_c/s1iso` (luật 6 §2N). NHẬN → notebook Stage 2 §19 (test v2 + e2e) sẽ được soạn.
+**Kết quả 2026-11-24: NHẬN** (`det_s1iso.pt`, sha `57c4c4c61430`; xem PLAN §2N) → §5o.
+
+## 5o. PHASE C §2N luật 7 — Stage 1 mới trên OPEN100-ISO v2, e2e `formB` / `ft` — notebook Stage 2 §19 (2026-11-24)
+
+**Trước khi mở Colab**: `encoders/det_s1iso.pt` đã có trên Drive (mục 7 notebook S1-ISO). Commit + push: notebook,
+`scripts/frame_predictions.py`, test. Như §5m: zip v2 trên Drive. **GPU** (suy luận detector + DINOv2).
+
+Thứ tự trong phiên: như §5m (1–4, 11a, 12a, def đầu 9a, 16a–16b, 17a–17b, 17d), **18a–18e** (detector cũ trên v2: mốc của §19; đã lưu
+Drive thì không chạy lại), rồi **19a–19c**. Một phiên GPU đủ: mỗi detector chạy một lần trên 864 ảnh, đã lưu thì phiên sau bỏ qua.
+
+| Mục | Việc | Kiểm / gửi lại |
+|---|---|---|
+| 19a | detector mới `agnostic_merge` trên v2 (lưu `runs/stage1_iso_v2/detections_agnostic_s1iso`), chấm không phân lớp | sha256 + 1 lớp (assert); in dòng `detection` |
+| 19b | e2e `formB`, `ft` trên box mới, τ quy tắc A của từng dòng | τ trong metrics = τ đã chọn (assert) |
+| 19c | bảng cũ \| mới (đã thấy / chưa thấy, e2e), đếm dự đoán rơi vào khung | — |
+
+**Gửi lại**: in ra của 18a–18e và 19a–19c + thư mục `runs/s1iso_test_csv/` (`det_test_v2_{old,new}.json`,
+`e2e_v2_s1iso_dinov2_{formB,ft}.json`, `frame_v2.json`) và `runs/v2_csv/` (trừ `detections_v2.zip`) → đặt cùng tên dưới `runs/` trên máy.
 
 ## 6. Infer + eval (sau khi train xong)
 
