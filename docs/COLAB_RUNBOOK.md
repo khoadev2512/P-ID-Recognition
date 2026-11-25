@@ -384,6 +384,7 @@ phiên sau không chạy lại; khoá của `ft` gồm 8 ký tự đầu của s
 
 Thứ tự trong phiên: 1–4, 11a (v1, cho 12a), 12a (DET_CKPT, `restore`; detection v1 đã lưu), def đầu 9a, 16a–16b (biến; lượt τ / P2 /
 P1 đã có thì **chỉ cần chạy phần gán biến** — hoặc chạy lại, kết quả như cũ), 17a–17b (như vậy), 17d (biến `E2E17`), rồi 18a–18e.
+**Từ 2026-11-25:** thay cả chuỗi đó bằng cell **18·0** (chỉ gán biến + kiểm file trên Drive): 1–4 → 18·0 → 18a–18e.
 
 | Mục | Việc | Kiểm / gửi lại |
 |---|---|---|
@@ -423,7 +424,7 @@ mục 12a). **GPU: L4 khuyến nghị** (một phiên); T4 được (~20 phút /
 **Trước khi mở Colab**: `encoders/det_s1iso.pt` đã có trên Drive (mục 7 notebook S1-ISO). Commit + push: notebook,
 `scripts/frame_predictions.py`, test. Như §5m: zip v2 trên Drive. **GPU** (suy luận detector + DINOv2).
 
-Thứ tự trong phiên: như §5m (1–4, 11a, 12a, def đầu 9a, 16a–16b, 17a–17b, 17d), **18a–18e** (detector cũ trên v2: mốc của §19; đã lưu
+Thứ tự trong phiên: **1–4 → 18·0** (chỉ gán biến, sửa `DET_CKPT`; thay cho 11a, 12a, def 9a, 16a–16b, 17a–17b, 17d — không chạy lại τ / P2 / P1 / prototype / e2e v1), **18a–18e** (detector cũ trên v2: mốc của §19; đã lưu
 Drive thì không chạy lại), rồi **19a–19c**. Một phiên GPU đủ: mỗi detector chạy một lần trên 864 ảnh, đã lưu thì phiên sau bỏ qua.
 
 | Mục | Việc | Kiểm / gửi lại |

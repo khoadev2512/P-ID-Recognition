@@ -44,6 +44,11 @@ def _is_14(cell: str) -> bool:
     return "template_align" in code or "ROWS14" in code or "in F0:" in code
 
 
+def _is_vars(cell: str) -> bool:
+    """18·0: only assigns the variables §18 / §19 need in a fresh session (no command)."""
+    return "VARS18" in _active([cell])
+
+
 def _is_19(cell: str) -> bool:
     """§19 (PHASE C §2N rule 7): the new one-class Stage 1 on OPEN100-ISO v2, e2e formB / ft."""
     code = _active([cell])
@@ -59,13 +64,13 @@ def _is_18(cell: str) -> bool:
 def _is_17(cell: str) -> bool:
     """§17 (PHASE C §2L): the fine-tuned DINOv2 (FT-triển khai) against `formB`, plus e2e."""
     code = _active([cell])
-    return not _is_18(cell) and ("ENC_FT" in code or "ROWS17" in code)
+    return not (_is_18(cell) or _is_vars(cell)) and ("ENC_FT" in code or "ROWS17" in code)
 
 
 def _is_16(cell: str) -> bool:
     """§16 (PHASE C §2K.6): form B of the butterfly and aggregate=max, against §15's base."""
     code = _active([cell])
-    return not (_is_17(cell) or _is_18(cell)) and (
+    return not (_is_17(cell) or _is_18(cell) or _is_vars(cell)) and (
         "PROTO43" in code or "ROWS16" in code or "in K4:" in code
     )
 
@@ -73,9 +78,9 @@ def _is_16(cell: str) -> bool:
 def _is_15(cell: str) -> bool:
     """§15 (PHASE C §2G, Điểm 4): reruns §13's protocols with `pipeline` excluded."""
     code = _active([cell])
-    return not (_is_16(cell) or _is_17(cell) or _is_18(cell) or _is_19(cell)) and (
-        "NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code
-    )
+    return not (
+        _is_16(cell) or _is_17(cell) or _is_18(cell) or _is_19(cell) or _is_vars(cell)
+    ) and ("NOPIPE" in code or "ROWS15" in code or "dinov2_nopipe" in code)
 
 
 def test_never_reads_an_old_crop_zip(code_cells):
@@ -411,7 +416,8 @@ def test_section_13_runs_dinov2_with_a4_and_cl2n_through_every_protocol(code_cel
     s13 = [
         c
         for c in code_cells
-        if "__dinov2__" in _active([c]) and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c))
+        if "__dinov2__" in _active([c])
+        and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c) or _is_vars(c))
     ]
     assert len(s13) == 4  # 13a, 13b, 13c, 13e (13d only reads metrics)
     make, run, p4, e2e = (_active([c]) for c in s13)
@@ -477,7 +483,8 @@ def test_section_14_reruns_tau_p1_p4_with_each_template_align_and_keeps_the_csvs
     last_13 = max(
         i
         for i, c in enumerate(code_cells)
-        if "__dinov2__" in c and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c))
+        if "__dinov2__" in c
+        and not (_is_14(c) or _is_15(c) or _is_16(c) or _is_17(c) or _is_vars(c))
     )
     assert last_13 < idx[0] < idx[1] < idx[2]
 
@@ -674,3 +681,30 @@ def test_section_19_runs_the_new_stage1_once_on_open100_iso_v2(code_cells):
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s19]
     last_18 = max(i for i, c in enumerate(code_cells) if _is_18(c))
     assert last_18 < idx[0] < idx[1] < idx[2]
+
+
+def test_cell_18_0_only_assigns_what_18_and_19_read(code_cells):
+    """18·0 replaces 11a / 12a / 9a / 16a–b / 17a–b / 17d in a fresh session: no command at all
+    (nothing chosen or rebuilt), the same definitions as those cells, and checks that the saved
+    encoders / prototypes / tau runs are the ones the PLAN recorded; it sits before 18a."""
+    cells = [c for c in code_cells if _is_vars(c)]
+    assert len(cells) == 1
+    v = _active(cells)
+    assert "!" not in "".join(ln.lstrip()[:1] for ln in v.splitlines())  # no shell command
+    assert "src/run_pipeline.py" not in v and "protocol=" not in v
+    for line in (
+        "DET = f'detector.ckpt={DET_CKPT} detector.label_level=coarse'",
+        "OS_ARGS = f'oneshot.vocab_csv={REPO_DATA}/iso_symbols/vocab.csv oneshot.aggregate=mean'",
+        "NOPIPE = \"'++oneshot.exclude_prototypes=[pipeline]'\"",
+        "GROUPS = f'++eval.oneshot.groups_ckpt={ENC_DIR}/__global_lo__.pt'",
+        "PROTO_FT = f'{ENC_DIR}/iso_prototypes_dinov2_ft_a4_formB.pt'",
+        "CENTER_FT = f'{ENC_DIR}/center_dinov2_ft_a4.pt'",
+        "FT_SHA = '66c513fbb9e3f7af1b8ad04abb3802ba6a35604413168a1c57da1e0ddeacdb6a'",
+    ):
+        assert line in v, line
+    e2e17 = next(c for c in code_cells if _is_17(c) and "E2E17 = " in c)
+    start = e2e17.index("E2E17 = ")
+    assert e2e17[start : e2e17.index("\n", e2e17.index("('ft'", start))] in v  # same E2E17
+    assert "(('formB', 0.1979), ('ft', 0.1923))" in v and "h.hexdigest() == FT_SHA" in v
+    idx = next(i for i, c in enumerate(code_cells) if _is_vars(c))
+    assert idx < min(i for i, c in enumerate(code_cells) if _is_18(c))
