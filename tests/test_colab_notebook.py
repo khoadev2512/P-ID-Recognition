@@ -640,6 +640,10 @@ def test_section_18_reruns_form_b_and_ft_on_open100_iso_v2(code_cells):
     assert "eval_p4_dinov2_{t}" in table and "eval_p4v2_dinov2_{t}" in table
     for cell in (det, p4, e2e):
         assert "data_root=$LOCAL_ISO_ROOT " not in cell and "KEEP_ISO}" not in cell
+    # a rerun after a disconnect skips what already finished (Colab drops long sessions)
+    assert "glob.glob(f'{RUNS_DIR}/eval_det_iso2_agnostic_lo/*/metrics.json')" in det
+    assert "os.path.exists(f'{CSV2_DIR}/oneshot_p4v2_crops_dinov2_{tag}.csv')" in p4
+    assert "os.path.exists(f'{CSV2_DIR}/e2e_v2_dinov2_{tag}.json')" in e2e
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s18]
     last_17 = max(i for i, c in enumerate(code_cells) if _is_17(c))
     assert last_17 < idx[0] < idx[1] < idx[2] < idx[3] < idx[4]
@@ -678,6 +682,8 @@ def test_section_19_runs_the_new_stage1_once_on_open100_iso_v2(code_cells):
               "detections_oneshot_s1iso_dinov2_{k}"):  # fmt: skip
         assert d in table, d
     assert "e2e_v2_dinov2_{tag}.json" in table and "e2e_v2_s1iso_dinov2_{tag}.json" in table
+    assert "glob.glob(f'{RUNS_DIR}/eval_det_iso2_s1iso_lo/*/metrics.json')" in det
+    assert "os.path.exists(f'{CSV19}/e2e_v2_s1iso_dinov2_{tag}.json')" in e2e
     idx = [next(i for i, c in enumerate(code_cells) if c is x) for x in s19]
     last_18 = max(i for i, c in enumerate(code_cells) if _is_18(c))
     assert last_18 < idx[0] < idx[1] < idx[2]

@@ -385,6 +385,8 @@ phiên sau không chạy lại; khoá của `ft` gồm 8 ký tự đầu của s
 Thứ tự trong phiên: 1–4, 11a (v1, cho 12a), 12a (DET_CKPT, `restore`; detection v1 đã lưu), def đầu 9a, 16a–16b (biến; lượt τ / P2 /
 P1 đã có thì **chỉ cần chạy phần gán biến** — hoặc chạy lại, kết quả như cũ), 17a–17b (như vậy), 17d (biến `E2E17`), rồi 18a–18e.
 **Từ 2026-11-25:** thay cả chuỗi đó bằng cell **18·0** (chỉ gán biến + kiểm file trên Drive): 1–4 → 18·0 → 18a–18e.
+Bị ngắt → phiên mới chạy lại 1–4 → 18·0 → 18a… từ đầu: 18b–18d và 19a–19b **tự bỏ qua** phần đã xong (detection đã lưu, lượt chấm có
+`metrics.json`, CSV / JSON đã chép vào `runs/v2_csv/`, `runs/s1iso_test_csv/`), chỉ chạy phần còn thiếu.
 
 | Mục | Việc | Kiểm / gửi lại |
 |---|---|---|
